@@ -35,7 +35,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--full", action="store_true")
     args = parser.parse_args(argv)
 
-    ensure_coderag_installed()
+    configure_openai_compatible_env()
+    ensure_coderag_installed(args.provider)
     registry = CorpusRegistry.from_file(args.registry)
     corpus = registry.get_engine(args.version)
     prepare_indexed_root(corpus)
@@ -90,7 +91,20 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def ensure_coderag_installed() -> None:
+def configure_openai_compatible_env() -> None:
+    mappings = {
+        "API_KEY": "OPENAI_API_KEY",
+        "BASE_URL": "OPENAI_BASE_URL",
+        "MODEL": "CODERAG_OPENAI_MODEL",
+    }
+    for source, target in mappings.items():
+        if not os.getenv(target) and os.getenv(source):
+            os.environ[target] = os.environ[source]
+    if not os.getenv("CODERAG_CHAT_MODEL") and os.getenv("MODEL"):
+        os.environ["CODERAG_CHAT_MODEL"] = os.environ["MODEL"]
+
+
+def ensure_coderag_installed(provider: str) -> None:
     mirror = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/"
     os.environ.setdefault("UV_DEFAULT_INDEX", mirror)
     os.environ.setdefault("PIP_INDEX_URL", mirror)
@@ -110,20 +124,21 @@ def ensure_coderag_installed() -> None:
                 check=True,
             )
     uv = shutil.which("uv")
+    dependencies = minimal_coderag_dependencies(provider)
     if uv:
         subprocess.run([uv, "pip", "install", "--no-deps", str(source)], check=True)
-        subprocess.run([uv, "pip", "install", *minimal_coderag_dependencies()], check=True)
+        subprocess.run([uv, "pip", "install", *dependencies], check=True)
     else:
         subprocess.run([sys.executable, "-m", "pip", "install", "--no-deps", str(source)], check=True)
         subprocess.run(
-            [sys.executable, "-m", "pip", "install", *minimal_coderag_dependencies()],
+            [sys.executable, "-m", "pip", "install", *dependencies],
             check=True,
         )
     import coderag  # noqa: F401
 
 
-def minimal_coderag_dependencies() -> list[str]:
-    return [
+def minimal_coderag_dependencies(provider: str) -> list[str]:
+    dependencies = [
         "lancedb>=0.33,<1",
         "pylance>=0.10",
         "pyarrow>=16,<25",
@@ -139,6 +154,9 @@ def minimal_coderag_dependencies() -> list[str]:
         "tree-sitter-rust>=0.24.2,<0.26",
         "tree-sitter-java>=0.23.5,<0.26",
     ]
+    if provider.lower() == "openai":
+        dependencies.append("openai>=2.41.1,<3")
+    return dependencies
 
 
 def prepare_indexed_root(corpus: Corpus) -> None:
