@@ -11,7 +11,12 @@ TOPICS: tuple[tuple[str, str, str, str], ...] = (
     ("module-core", "module", "Core Module", "Engine/Source/Runtime/Core/Public/CoreMinimal.h"),
     ("module-coreuobject", "module", "CoreUObject Module", "Engine/Source/Runtime/CoreUObject/Public/UObject/Object.h"),
     ("module-engine", "module", "Engine Module", "Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h"),
-    ("module-renderer", "module", "Renderer Module", "Engine/Source/Runtime/Renderer/Private/RendererModule.cpp"),
+    (
+        "module-renderer",
+        "module",
+        "Renderer Module",
+        "Engine/Source/Runtime/Renderer/Private/DeferredShadingRenderer.cpp",
+    ),
     ("module-netcore", "module", "NetCore Module", "Engine/Source/Runtime/Net/Core/Public/Net/Core/NetHandle/NetHandle.h"),
     ("mechanism-uobject-gc", "mechanism", "UObject GC", "Engine/Source/Runtime/CoreUObject/Public/UObject/Object.h"),
     ("mechanism-uht-reflection", "mechanism", "UHT Reflection", "Engine/Source/Runtime/CoreUObject/Public/UObject/ObjectMacros.h"),

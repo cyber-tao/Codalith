@@ -35,4 +35,5 @@ services:
       sh -lc "uv sync --extra dev &&
       uv run ue-context-index-engine --version 5.7.4 --smoke &&
       uv run ue-context-extract-semantic --version 5.7.4 --min-modules 100 --min-reflection-entities 100 --min-guards 10 --stop-after-min &&
+      uv run ue-context-verify-cards --version 5.7.4 &&
       uv run pytest -m ue_acceptance"

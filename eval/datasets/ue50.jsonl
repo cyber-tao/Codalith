@@ -10,7 +10,7 @@
 {"id":"ue50-010","query":"Where is UPROPERTY metadata declared?","mode":"api_usage","expected_files":["ObjectMacros.h"],"expected_modules":["CoreUObject"]}
 {"id":"ue50-011","query":"Where can I inspect UClass declarations?","mode":"api_usage","expected_files":["Class.h"],"expected_modules":["CoreUObject"]}
 {"id":"ue50-012","query":"How does UWorld relate to gameplay runtime?","mode":"explain","expected_files":["World.h"],"expected_modules":["Engine"]}
-{"id":"ue50-013","query":"Which module contains Renderer module startup code?","mode":"trace","expected_files":["RendererModule.cpp"],"expected_modules":["Renderer"]}
+{"id":"ue50-013","query":"Which module contains Renderer module startup code?","mode":"trace","expected_files":["DeferredShadingRenderer.cpp"],"expected_modules":["Renderer"]}
 {"id":"ue50-014","query":"Where is NetCore represented in networking code?","mode":"explain","expected_files":["NetHandle.h"],"expected_modules":["NetCore"]}
 {"id":"ue50-015","query":"How should an AI read source safely through ue_read_source?","mode":"explain","expected_files":["CoreMinimal.h"],"expected_modules":["Core"]}
 {"id":"ue50-016","query":"Find Actor RPC dispatch related source.","mode":"trace","expected_files":["Actor.h"],"expected_modules":["Engine"]}
@@ -31,7 +31,7 @@
 {"id":"ue50-031","query":"Where is Class metadata represented?","mode":"explain","expected_files":["Class.h"],"expected_modules":["CoreUObject"]}
 {"id":"ue50-032","query":"Find Engine world source declarations.","mode":"api_usage","expected_files":["World.h"],"expected_modules":["Engine"]}
 {"id":"ue50-033","query":"UnrealEd module depends on which runtime modules?","mode":"explain","expected_files":["Engine.Build.cs"],"expected_modules":["Engine"]}
-{"id":"ue50-034","query":"Find rendering API implementation changes.","mode":"compare","expected_files":["RendererModule.cpp"],"expected_modules":["Renderer"]}
+{"id":"ue50-034","query":"Find rendering API implementation changes.","mode":"compare","expected_files":["DeferredShadingRenderer.cpp"],"expected_modules":["Renderer"]}
 {"id":"ue50-035","query":"Where are UE networking handles represented?","mode":"api_usage","expected_files":["NetHandle.h"],"expected_modules":["NetCore"]}
 {"id":"ue50-036","query":"Find source evidence for USTRUCT parsing.","mode":"api_usage","expected_files":["ObjectMacros.h"],"expected_modules":["CoreUObject"]}
 {"id":"ue50-037","query":"Find source evidence for UCLASS parsing.","mode":"api_usage","expected_files":["ObjectMacros.h"],"expected_modules":["CoreUObject"]}
@@ -41,7 +41,7 @@
 {"id":"ue50-041","query":"Find source for UObject object flags and metadata.","mode":"explain","expected_files":["Object.h"],"expected_modules":["CoreUObject"]}
 {"id":"ue50-042","query":"Find source for TArray API usage.","mode":"api_usage","expected_files":["Array.h"],"expected_modules":["Core"]}
 {"id":"ue50-043","query":"Find source for FName API usage.","mode":"api_usage","expected_files":["NameTypes.h"],"expected_modules":["Core"]}
-{"id":"ue50-044","query":"Did a rendering API change between versions?","mode":"compare","expected_files":["RendererModule.cpp"],"expected_modules":["Renderer"]}
+{"id":"ue50-044","query":"Did a rendering API change between versions?","mode":"compare","expected_files":["DeferredShadingRenderer.cpp"],"expected_modules":["Renderer"]}
 {"id":"ue50-045","query":"Find source for module dependency graph extraction.","mode":"explain","expected_files":["Engine.Build.cs"],"expected_modules":["Engine"]}
 {"id":"ue50-046","query":"Find source for reflection graph extraction.","mode":"explain","expected_files":["ObjectMacros.h"],"expected_modules":["CoreUObject"]}
 {"id":"ue50-047","query":"Find source for project overlay symbol resolution.","mode":"debug","expected_files":["Actor.h"],"expected_modules":["Engine"]}

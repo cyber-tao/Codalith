@@ -43,7 +43,7 @@ def fake_engine_root(tmp_path: Path) -> Path:
         ),
         "Engine/Source/Runtime/Engine/Classes/Engine/World.h": "class ENGINE_API UWorld : public UObject {};\n",
         "Engine/Source/Runtime/Engine/Private/ActorReplication.cpp": "void AActor::OnRep_Health() {}\n",
-        "Engine/Source/Runtime/Renderer/Private/RendererModule.cpp": "class FRendererModule { void StartupModule(); };\n",
+        "Engine/Source/Runtime/Renderer/Private/DeferredShadingRenderer.cpp": "class FRendererModule { void StartupModule(); };\n",
         "Engine/Source/Runtime/Net/Core/Public/Net/Core/NetHandle/NetHandle.h": "struct FNetHandle { int32 Value; };\n",
         "Engine/Source/Runtime/Engine/Engine.Build.cs": (
             "PublicDependencyModuleNames.AddRange(new string[] { \"Core\", \"CoreUObject\" });\n"
