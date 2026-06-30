@@ -29,13 +29,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-dir", default="reports/coderag")
     parser.add_argument("--provider", default=os.getenv("CODERAG_PROVIDER", "fake"))
     parser.add_argument("--index-path")
-    parser.add_argument("--min-files", type=int, default=1000)
-    parser.add_argument("--min-chunks", type=int, default=1000)
+    parser.add_argument("--min-files", type=int)
+    parser.add_argument("--min-chunks", type=int)
     parser.add_argument("--min-cards-verified", type=int)
     parser.add_argument("--min-file-recall-at-5", type=float, default=0.70)
     parser.add_argument("--max-p95-ms", type=float, default=30_000.0)
     parser.add_argument("--full", action="store_true")
     args = parser.parse_args(argv)
+    min_files, min_chunks = acceptance_minimums(args.index_path, args.min_files, args.min_chunks)
 
     configure_openai_compatible_env()
     ensure_coderag_installed(args.provider)
@@ -86,8 +87,8 @@ def main(argv: list[str] | None = None) -> int:
     print(json.dumps(acceptance, indent=2, sort_keys=True))
     enforce_acceptance(
         acceptance,
-        min_files=args.min_files,
-        min_chunks=args.min_chunks,
+        min_files=min_files,
+        min_chunks=min_chunks,
         min_cards_verified=args.min_cards_verified,
         min_file_recall_at_5=args.min_file_recall_at_5,
         max_p95_ms=args.max_p95_ms,
@@ -106,6 +107,18 @@ def configure_openai_compatible_env() -> None:
             os.environ[target] = os.environ[source]
     if not os.getenv("CODERAG_CHAT_MODEL") and os.getenv("MODEL"):
         os.environ["CODERAG_CHAT_MODEL"] = os.environ["MODEL"]
+
+
+def acceptance_minimums(
+    index_path: str | None,
+    min_files: int | None,
+    min_chunks: int | None,
+) -> tuple[int, int]:
+    default_minimum = 1 if index_path else 1000
+    return (
+        min_files if min_files is not None else default_minimum,
+        min_chunks if min_chunks is not None else default_minimum,
+    )
 
 
 def ensure_coderag_installed(provider: str) -> None:

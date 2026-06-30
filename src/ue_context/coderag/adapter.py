@@ -243,7 +243,7 @@ class CodeRAGAdapter:
         config = _dataclass_replace(
             config,
             watched_dir=self._root(corpus),
-            store_dir=corpus.coderag_store,
+            store_dir=_native_store_dir(corpus),
             index_all_text=True,
         )
         native = CodeRAG(config)
@@ -404,6 +404,10 @@ def _uri_for_hit(corpus: Corpus, path: str, start: int, end: int) -> str:
         return f"ue-project://{corpus.corpus_id}/source/{path}#L{start}-L{end}"
     version = corpus.ue_version or corpus.corpus_id.removeprefix("ue-")
     return f"ue://{version}/source/{path}#L{start}-L{end}"
+
+
+def _native_store_dir(corpus: Corpus) -> Path:
+    return Path(os.environ.get("CODERAG_STORE_DIR", str(corpus.coderag_store)))
 
 
 def _glob_match(pattern: str, path: str) -> bool:

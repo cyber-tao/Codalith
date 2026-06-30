@@ -67,3 +67,37 @@ services:
     command: >
       sh -lc "uv sync &&
       uv run ue-context-coderag-acceptance --version 5.7.4 --provider fake --full"
+
+  coderag-ollama-acceptance:
+    image: ghcr.io/astral-sh/uv:python3.12-bookworm
+    profiles: ["coderag"]
+    working_dir: /workspace
+    env_file:
+      - .env
+    environment:
+      PYTHONPATH: /workspace/src
+      UV_PROJECT_ENVIRONMENT: /tmp/ue-context-venv
+      UV_LINK_MODE: copy
+      UV_DEFAULT_INDEX: https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/
+      PIP_INDEX_URL: https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/
+      CODERAG_PROVIDER: openai
+      CODERAG_OPENAI_MODEL: qwen3-embedding:0.6b
+      CODERAG_OPENAI_BATCH: "256"
+      OPENAI_BASE_URL: http://host.docker.internal:11434/v1
+      OPENAI_API_KEY: ollama
+      CODERAG_INDEX_ALL_TEXT: "1"
+      CODERAG_GITIGNORE: "0"
+      CODERAG_STORE_DIR: /var/lib/ue-context/coderag/ue-5.7.4-ollama-qwen3-embedding-0.6b
+      UE_CONTEXT_NATIVE_CODERAG_PROGRESS: "1"
+    volumes:
+      - .:/workspace
+      - coderag-ollama-store:/var/lib/ue-context/coderag
+      - E:/UnrealEngine_5.7:/srv/ue/5.7.4:ro
+      - E:/UnrealEngine_5.7/Engine/Source:/srv/ue-context/corpora/ue-5.7.4/Engine/Source:ro
+      - E:/UnrealEngine_5.7/Engine/Plugins/Runtime/GameplayAbilities:/srv/ue-context/corpora/ue-5.7.4/Engine/Plugins/Runtime/GameplayAbilities:ro
+    command: >
+      sh -lc "uv sync &&
+      uv run ue-context-coderag-acceptance --version 5.7.4 --provider openai --full --output-dir reports/coderag-ollama"
+
+volumes:
+  coderag-ollama-store:
