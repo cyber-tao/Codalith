@@ -1,0 +1,23 @@
+{
+  "limits": {
+    "default_max_lines": 200,
+    "hard_max_lines": 500,
+    "max_source_reads_per_10min": 100,
+    "max_total_lines_per_10min": 10000
+  },
+  "deny_patterns": [
+    "Engine/Source/ThirdParty/ConsoleSDK/**",
+    "Engine/Platforms/PS5/**",
+    "Engine/Platforms/XSX/**"
+  ],
+  "sensitive_patterns": [
+    {
+      "pattern": "Engine/Source/ThirdParty/**",
+      "required_scope": "thirdparty:read"
+    },
+    {
+      "pattern": "Engine/Platforms/**",
+      "required_scope": "platform:read"
+    }
+  ]
+}

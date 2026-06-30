@@ -1,0 +1,37 @@
+services:
+  test:
+    image: ghcr.io/astral-sh/uv:python3.12-bookworm
+    working_dir: /workspace
+    env_file:
+      - .env
+    environment:
+      PYTHONPATH: /workspace/src
+      UE_CONTEXT_AUDIT_LOG: /workspace/data/audit/source_reads.jsonl
+      UV_PROJECT_ENVIRONMENT: /tmp/ue-context-venv
+      UV_LINK_MODE: copy
+    volumes:
+      - .:/workspace
+    command: >
+      sh -lc "uv sync --extra dev &&
+      uv run pytest &&
+      uv run ruff check src tests jobs &&
+      uv run mypy src"
+
+  ue-acceptance:
+    image: ghcr.io/astral-sh/uv:python3.12-bookworm
+    profiles: ["ue"]
+    working_dir: /workspace
+    env_file:
+      - .env
+    environment:
+      PYTHONPATH: /workspace/src
+      UE_CONTEXT_AUDIT_LOG: /workspace/data/audit/source_reads.jsonl
+      UV_PROJECT_ENVIRONMENT: /tmp/ue-context-venv
+      UV_LINK_MODE: copy
+    volumes:
+      - .:/workspace
+      - E:/UnrealEngine_5.7:/srv/ue/5.7.4:ro
+    command: >
+      sh -lc "uv sync --extra dev &&
+      uv run ue-context-index-engine --version 5.7.4 --smoke &&
+      uv run pytest -m ue_acceptance"

@@ -1,0 +1,5 @@
+{
+  "transport": "stdio",
+  "default_version": "5.7.4",
+  "audit_log": "/workspace/data/audit/source_reads.jsonl"
+}

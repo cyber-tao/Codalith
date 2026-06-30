@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ue-context-engine"
+version = "0.1.0"
+description = "UE-aware source context MCP gateway powered by a CodeRAG adapter."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2,<9",
+    "ruff>=0.5,<1",
+    "mypy>=1.10,<2",
+]
+
+[project.scripts]
+ue-context-mcp = "ue_context.gateway.mcp_server:main"
+ue-context-eval = "ue_context.eval.runner:main"
+ue-context-generate-cards = "jobs.generate_cards:main"
+ue-context-verify-cards = "jobs.verify_cards:main"
+ue-context-index-engine = "jobs.index_engine:main"
+ue-context-run-eval = "jobs.run_eval:main"
+
+[tool.setuptools.packages.find]
+where = ["src", "."]
+include = ["ue_context*", "jobs*"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+pythonpath = ["src", "."]
+testpaths = ["tests"]
+norecursedirs = ["external", ".venv", "build", "dist"]
+markers = [
+    "ue_acceptance: optional tests that require a mounted Unreal Engine source tree",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests", "jobs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+mypy_path = "src"
+exclude = ["external/", ".venv/", "build/"]
+
+[[tool.mypy.overrides]]
+module = ["tests.*", "jobs.*"]
+disallow_untyped_defs = false

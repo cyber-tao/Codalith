@@ -1,0 +1,17 @@
+{
+  "engines": {
+    "ue-5.7.4": {
+      "kind": "engine",
+      "ue_version": "5.7.4",
+      "source_commit": "UNKNOWN",
+      "source_root": "/srv/ue/5.7.4",
+      "indexed_root": "/srv/ue-context/corpora/ue-5.7.4",
+      "coderag_store": "/var/lib/ue-context/coderag/ue-5.7.4",
+      "semantic_schema": "ue_5_7_4",
+      "card_root": "/srv/ue-context/cards/ue-5.7.4",
+      "default": true,
+      "access_scopes": ["ue:5.7", "source:read"]
+    }
+  },
+  "projects": {}
+}
