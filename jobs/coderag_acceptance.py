@@ -28,8 +28,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", default="5.7.4")
     parser.add_argument("--output-dir", default="reports/coderag")
     parser.add_argument("--provider", default=os.getenv("CODERAG_PROVIDER", "fake"))
+    parser.add_argument("--index-path")
     parser.add_argument("--min-files", type=int, default=1000)
     parser.add_argument("--min-chunks", type=int, default=1000)
+    parser.add_argument("--min-cards-verified", type=int)
     parser.add_argument("--min-file-recall-at-5", type=float, default=0.70)
     parser.add_argument("--max-p95-ms", type=float, default=30_000.0)
     parser.add_argument("--full", action="store_true")
@@ -37,6 +39,7 @@ def main(argv: list[str] | None = None) -> int:
 
     configure_openai_compatible_env()
     ensure_coderag_installed(args.provider)
+    configure_openai_batch_limit(args.provider)
     registry = CorpusRegistry.from_file(args.registry)
     corpus = registry.get_engine(args.version)
     prepare_indexed_root(corpus)
@@ -53,7 +56,7 @@ def main(argv: list[str] | None = None) -> int:
 
     adapter = CodeRAGAdapter(registry, prefer_native=True)
     started = time.perf_counter()
-    index_stats = adapter.reindex(corpus.corpus_id, full=args.full)
+    index_stats = adapter.reindex(corpus.corpus_id, path=args.index_path, full=args.full)
     index_seconds = time.perf_counter() - started
     status = adapter.status(corpus.corpus_id)
 
@@ -85,6 +88,7 @@ def main(argv: list[str] | None = None) -> int:
         acceptance,
         min_files=args.min_files,
         min_chunks=args.min_chunks,
+        min_cards_verified=args.min_cards_verified,
         min_file_recall_at_5=args.min_file_recall_at_5,
         max_p95_ms=args.max_p95_ms,
     )
@@ -159,6 +163,14 @@ def minimal_coderag_dependencies(provider: str) -> list[str]:
     return dependencies
 
 
+def configure_openai_batch_limit(provider: str) -> None:
+    if provider.lower() != "openai":
+        return
+    import coderag.embeddings.openai_provider as openai_provider  # type: ignore[import-untyped]
+
+    openai_provider._BATCH = int(os.getenv("CODERAG_OPENAI_BATCH", "10"))
+
+
 def prepare_indexed_root(corpus: Corpus) -> None:
     corpus.indexed_root.mkdir(parents=True, exist_ok=True)
     engine_dir = corpus.indexed_root / "Engine"
@@ -185,6 +197,7 @@ def enforce_acceptance(
     *,
     min_files: int,
     min_chunks: int,
+    min_cards_verified: int | None,
     min_file_recall_at_5: float,
     max_p95_ms: float,
 ) -> None:
@@ -195,8 +208,9 @@ def enforce_acceptance(
         failures.append(f"total_files {status['total_files']} < {min_files}")
     if int(status["total_chunks"]) < min_chunks:
         failures.append(f"total_chunks {status['total_chunks']} < {min_chunks}")
-    if acceptance["cards_verified"] != acceptance["cards_total"]:
-        failures.append(f"cards_verified {acceptance['cards_verified']} != {acceptance['cards_total']}")
+    required_cards = min_cards_verified if min_cards_verified is not None else acceptance["cards_total"]
+    if int(acceptance["cards_verified"]) < int(required_cards):
+        failures.append(f"cards_verified {acceptance['cards_verified']} < {required_cards}")
     if float(eval_report["file_recall@5"]) < min_file_recall_at_5:
         failures.append(
             f"file_recall@5 {eval_report['file_recall@5']:.3f} < {min_file_recall_at_5:.3f}"
