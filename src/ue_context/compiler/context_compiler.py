@@ -9,6 +9,7 @@ from ue_context.compiler.evidence_selector import select_source_spans
 from ue_context.compiler.intent_detector import detect_intent
 from ue_context.compiler.reranker import rerank
 from ue_context.compiler.retrieval_planner import plan_queries
+from ue_context.compiler.source_locator import locate_source_priors
 from ue_context.corpus.registry import CorpusRegistry
 
 
@@ -33,6 +34,14 @@ class ContextCompiler:
         modules = detect_modules(query)
         raw_hits: list[RetrievalHit] = []
         for corpus in resolution.ordered:
+            raw_hits.extend(
+                locate_source_priors(
+                    corpus,
+                    query=query,
+                    identifiers=identifiers,
+                    max_hits=max_source_spans,
+                )
+            )
             for planned_query in plan_queries(query, identifiers):
                 raw_hits.extend(
                     self.adapter.search_code(
@@ -44,6 +53,7 @@ class ContextCompiler:
         hits = rerank(_unique_hits(raw_hits), identifiers=identifiers, max_hits=max_source_spans)
         inferred_modules = _module_entries(version, modules, hits)
         source_spans = select_source_spans(hits)
+        source_spans.extend(_card_evidence_spans(hits))
         cards = [
             {
                 "uri": hit.uri,
@@ -115,3 +125,41 @@ def _module_entries(
         }
         for name in names
     ]
+
+
+def _card_evidence_spans(hits: list[RetrievalHit]) -> list[dict[str, object]]:
+    spans: list[dict[str, object]] = []
+    for hit in hits:
+        if "UE_KNOWLEDGE" not in hit.path:
+            continue
+        for uri in _extract_evidence_uris(hit.snippet):
+            parsed = _parse_source_uri(uri)
+            if parsed is not None:
+                path, start, end = parsed
+                spans.append(
+                    {
+                        "uri": uri,
+                        "path": path,
+                        "start_line": start,
+                        "end_line": end,
+                        "reason": f"Evidence linked from verified card {hit.title}.",
+                        "source": "card-evidence",
+                        "guard": None,
+                    }
+                )
+    return spans
+
+
+def _extract_evidence_uris(text: str) -> list[str]:
+    import re
+
+    return re.findall(r"ue://[^\s)]+", text)
+
+
+def _parse_source_uri(uri: str) -> tuple[str, int, int] | None:
+    import re
+
+    match = re.match(r"ue://[^/]+/source/(?P<path>[^#]+)#L(?P<start>\d+)-L(?P<end>\d+)", uri)
+    if not match:
+        return None
+    return match.group("path"), int(match.group("start")), int(match.group("end"))

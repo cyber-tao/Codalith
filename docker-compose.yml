@@ -9,6 +9,8 @@ services:
       UE_CONTEXT_AUDIT_LOG: /workspace/data/audit/source_reads.jsonl
       UV_PROJECT_ENVIRONMENT: /tmp/ue-context-venv
       UV_LINK_MODE: copy
+      UV_DEFAULT_INDEX: https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/
+      PIP_INDEX_URL: https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/
     volumes:
       - .:/workspace
     command: >
@@ -28,6 +30,8 @@ services:
       UE_CONTEXT_AUDIT_LOG: /workspace/data/audit/source_reads.jsonl
       UV_PROJECT_ENVIRONMENT: /tmp/ue-context-venv
       UV_LINK_MODE: copy
+      UV_DEFAULT_INDEX: https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/
+      PIP_INDEX_URL: https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/
     volumes:
       - .:/workspace
       - E:/UnrealEngine_5.7:/srv/ue/5.7.4:ro
@@ -37,3 +41,29 @@ services:
       uv run ue-context-extract-semantic --version 5.7.4 --min-modules 100 --min-reflection-entities 100 --min-guards 10 --stop-after-min &&
       uv run ue-context-verify-cards --version 5.7.4 &&
       uv run pytest -m ue_acceptance"
+
+  coderag-acceptance:
+    image: ghcr.io/astral-sh/uv:python3.12-bookworm
+    profiles: ["coderag"]
+    working_dir: /workspace
+    env_file:
+      - .env
+    environment:
+      PYTHONPATH: /workspace/src
+      UV_PROJECT_ENVIRONMENT: /tmp/ue-context-venv
+      UV_LINK_MODE: copy
+      UV_DEFAULT_INDEX: https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/
+      PIP_INDEX_URL: https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/
+      CODERAG_PROVIDER: fake
+      CODERAG_INDEX_ALL_TEXT: "1"
+      CODERAG_GITIGNORE: "0"
+      CODERAG_STORE_DIR: /var/lib/ue-context/coderag/ue-5.7.4
+      UE_CONTEXT_NATIVE_CODERAG_PROGRESS: "1"
+    volumes:
+      - .:/workspace
+      - E:/UnrealEngine_5.7:/srv/ue/5.7.4:ro
+      - E:/UnrealEngine_5.7/Engine/Source:/srv/ue-context/corpora/ue-5.7.4/Engine/Source:ro
+      - E:/UnrealEngine_5.7/Engine/Plugins/Runtime/GameplayAbilities:/srv/ue-context/corpora/ue-5.7.4/Engine/Plugins/Runtime/GameplayAbilities:ro
+    command: >
+      sh -lc "uv sync &&
+      uv run ue-context-coderag-acceptance --version 5.7.4 --provider fake --full"

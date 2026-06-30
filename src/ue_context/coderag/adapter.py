@@ -176,7 +176,16 @@ class CodeRAGAdapter:
         corpus = self._corpus(corpus_id)
         if self.prefer_native:
             try:
-                stats = self._native_instance(corpus).index(path, full=full)
+                native = self._native_instance(corpus)
+                if os.getenv("UE_CONTEXT_NATIVE_CODERAG_PROGRESS", "").lower() in {
+                    "1",
+                    "true",
+                    "yes",
+                }:
+                    target = Path(path).expanduser() if path else None
+                    stats = native.indexer.index(target, full=full, progress=True)
+                else:
+                    stats = native.index(path, full=full)
                 if hasattr(stats, "as_dict"):
                     return dict(stats.as_dict())
                 return dict(stats)

@@ -66,3 +66,10 @@ def test_eval_runner_generates_json_and_markdown(registry, adapter, tmp_path):
     json_path, md_path = write_reports(report, tmp_path / "reports")
     assert json.loads(json_path.read_text(encoding="utf-8"))["count"] == 1
     assert Path(md_path).read_text(encoding="utf-8").startswith("# UE Context Eval Report")
+
+
+def test_source_locator_covers_seed_eval_dataset(registry, adapter):
+    compiler = ContextCompiler(registry, adapter)
+    dataset = Path(__file__).parents[1] / "eval" / "datasets" / "ue50.jsonl"
+    report = EvalRunner(compiler).run(dataset)
+    assert report.file_recall_at_5 >= 0.70

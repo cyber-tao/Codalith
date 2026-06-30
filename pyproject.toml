@@ -24,6 +24,7 @@ ue-context-generate-cards = "jobs.generate_cards:main"
 ue-context-verify-cards = "jobs.verify_cards:main"
 ue-context-index-engine = "jobs.index_engine:main"
 ue-context-extract-semantic = "jobs.extract_semantic:main"
+ue-context-coderag-acceptance = "jobs.coderag_acceptance:main"
 ue-context-run-eval = "jobs.run_eval:main"
 
 [tool.setuptools.packages.find]
