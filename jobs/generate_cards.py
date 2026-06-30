@@ -17,7 +17,10 @@ def main(argv: list[str] | None = None) -> int:
     registry = CorpusRegistry.from_file(args.registry)
     corpus = registry.get_engine(args.version)
     cards = built_in_cards(corpus_id=corpus.corpus_id, version=corpus.ue_version or args.version)
-    written = write_cards([card.verified() for card in cards], corpus.card_root)
+    verified = [card.verified() for card in cards]
+    written = write_cards(verified, corpus.card_root)
+    if corpus.indexed_root != corpus.card_root:
+        written.extend(write_cards(verified, corpus.indexed_root))
     print(json.dumps({"count": len(written), "paths": [str(path) for path in written]}, indent=2))
     return 0
 

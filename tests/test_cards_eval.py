@@ -22,6 +22,14 @@ def test_built_in_cards_verify_against_fixture(registry, adapter, tmp_path):
     assert all(path.exists() for path in written)
 
 
+def test_written_cards_are_searchable_from_indexed_root(registry, adapter, fake_engine_root):
+    cards = [card.verified() for card in built_in_cards()]
+    write_cards(cards, fake_engine_root)
+    adapter.reindex("ue-5.7.4")
+    hits = adapter.search_code("ue-5.7.4", "UPROPERTY Replication seed knowledge card", top_k=5)
+    assert any("UE_KNOWLEDGE" in hit.path for hit in hits)
+
+
 def test_card_without_evidence_fails(registry, adapter):
     card = KnowledgeCard(
         corpus_id="ue-5.7.4",
