@@ -12,6 +12,7 @@ import re
 import time
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -156,11 +157,13 @@ class CodeRAGAdapter:
             try:
                 status = dict(self._native_instance(corpus).status())
                 status["corpus_id"] = corpus_id
+                self._add_index_timestamps(corpus, status)
                 return status
             except Exception as exc:
                 if os.getenv("UE_CONTEXT_NATIVE_CODERAG_STRICT"):
                     raise CodeRAGAdapterError(str(exc)) from exc
         files = self._ensure_local_index(corpus)
+        indexed_at = self._indexed_at.get(corpus_id)
         return {
             "corpus_id": corpus_id,
             "provider": "local",
@@ -169,7 +172,8 @@ class CodeRAGAdapter:
             "store_dir": str(corpus.coderag_store),
             "total_files": len(files),
             "total_chunks": sum(max(1, (len(item.lines) + 79) // 80) for item in files),
-            "indexed_at": self._indexed_at.get(corpus_id),
+            "indexed_at": indexed_at,
+            "updated_at": _iso_timestamp(indexed_at),
         }
 
     def reindex(self, corpus_id: str, path: str | None = None, full: bool = False) -> dict[str, Any]:
@@ -187,8 +191,11 @@ class CodeRAGAdapter:
                 else:
                     stats = native.index(path, full=full)
                 if hasattr(stats, "as_dict"):
-                    return dict(stats.as_dict())
-                return dict(stats)
+                    result = dict(stats.as_dict())
+                else:
+                    result = dict(stats)
+                self._indexed_at[corpus_id] = time.time()
+                return result
             except Exception as exc:
                 if os.getenv("UE_CONTEXT_NATIVE_CODERAG_STRICT"):
                     raise CodeRAGAdapterError(str(exc)) from exc
@@ -335,6 +342,14 @@ class CodeRAGAdapter:
     def _root(corpus: Corpus) -> Path:
         return corpus.indexed_root if corpus.indexed_root.exists() else corpus.source_root
 
+    def _add_index_timestamps(self, corpus: Corpus, status: dict[str, Any]) -> None:
+        indexed_at = status.get("indexed_at")
+        if not isinstance(indexed_at, int | float):
+            indexed_at = self._indexed_at.get(corpus.corpus_id) or _latest_mtime(_native_store_dir(corpus))
+            status["indexed_at"] = indexed_at
+        if "updated_at" not in status:
+            status["updated_at"] = _iso_timestamp(indexed_at)
+
 
 _IGNORED_DIRS = {".git", ".coderag", "Binaries", "Intermediate", "Saved", "DerivedDataCache"}
 _TEXT_SUFFIXES = {
@@ -453,3 +468,21 @@ def _dataclass_replace(obj: Any, **changes: Any) -> Any:
     from dataclasses import replace
 
     return replace(obj, **changes)
+
+
+def _latest_mtime(path: Path) -> float | None:
+    if not path.exists():
+        return None
+    latest = path.stat().st_mtime
+    for child in path.rglob("*"):
+        try:
+            latest = max(latest, child.stat().st_mtime)
+        except OSError:
+            continue
+    return latest
+
+
+def _iso_timestamp(timestamp: object) -> str | None:
+    if not isinstance(timestamp, int | float):
+        return None
+    return datetime.fromtimestamp(float(timestamp), UTC).isoformat()

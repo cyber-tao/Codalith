@@ -24,6 +24,7 @@ class AuditRecord:
     client: str
     decision: str
     reason: str | None = None
+    source_hash: str | None = None
 
     @classmethod
     def create(
@@ -38,6 +39,7 @@ class AuditRecord:
         line_count: int,
         decision: str,
         reason: str | None = None,
+        source_hash: str | None = None,
         user_id: str = "local-user",
         session_id: str = "local-session",
         client: str = "codex",
@@ -56,6 +58,7 @@ class AuditRecord:
             client=client,
             decision=decision,
             reason=reason,
+            source_hash=source_hash,
         )
 
     def as_dict(self) -> dict[str, Any]:

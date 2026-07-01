@@ -13,5 +13,16 @@
       "access_scopes": ["ue:5.7", "source:read"]
     }
   },
-  "projects": {}
+  "projects": {
+    "ProjectA": {
+      "kind": "project",
+      "engine_corpus": "ue-5.7.4",
+      "source_root": "fixtures/project_overlay/ProjectA",
+      "indexed_root": "fixtures/project_overlay/ProjectA",
+      "coderag_store": "data/coderag/project-a",
+      "semantic_schema": "project_a",
+      "card_root": "data/cards/project-a",
+      "access_scopes": ["project:ProjectA", "source:read"]
+    }
+  }
 }

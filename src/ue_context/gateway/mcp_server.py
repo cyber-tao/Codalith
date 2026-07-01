@@ -26,7 +26,7 @@ def handle_request(request: dict[str, Any], tools: UETools) -> dict[str, Any] | 
         result: dict[str, Any]
         if method == "initialize":
             result = {
-                "protocolVersion": "2024-11-05",
+                "protocolVersion": "2025-11-25",
                 "capabilities": {"tools": {}, "resources": {}},
                 "serverInfo": {"name": "ue-context-engine", "version": "0.1.0"},
                 "instructions": INSTRUCTIONS,

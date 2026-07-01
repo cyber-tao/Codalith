@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
+from ue_context.cards.hashing import source_sha256
 from ue_context.cards.renderer import render_markdown
 from ue_context.cards.schema import CardClaim, CardEvidence, KnowledgeCard
+from ue_context.coderag.adapter import CodeRAGAdapter
+from ue_context.corpus.uri_resolver import URIResolver
 
 TOPICS: tuple[tuple[str, str, str, str], ...] = (
     ("module-core", "module", "Core Module", "Engine/Source/Runtime/Core/Public/CoreMinimal.h"),
@@ -72,3 +76,27 @@ def write_cards(cards: list[KnowledgeCard], root: str | Path) -> list[Path]:
         target.write_text(render_markdown(card), encoding="utf-8")
         written.append(target)
     return written
+
+
+def attach_source_hashes(
+    cards: list[KnowledgeCard],
+    resolver: URIResolver,
+    adapter: CodeRAGAdapter,
+) -> list[KnowledgeCard]:
+    hashed_cards: list[KnowledgeCard] = []
+    for card in cards:
+        source_hashes: dict[str, str] = {}
+        for claim in card.claims:
+            for evidence in claim.evidence:
+                resolved = resolver.resolve_source(evidence.uri)
+                if resolved.start_line is None or resolved.end_line is None:
+                    continue
+                content = adapter.get_file(
+                    resolved.corpus_id,
+                    resolved.relative_path,
+                    resolved.start_line,
+                    resolved.end_line,
+                )
+                source_hashes[evidence.uri] = source_sha256(content)
+        hashed_cards.append(replace(card, source_hashes=source_hashes))
+    return hashed_cards

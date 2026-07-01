@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ue_context.cards.generator import built_in_cards, write_cards
+from ue_context.cards.generator import attach_source_hashes, built_in_cards, write_cards
 from ue_context.cards.schema import CardClaim, KnowledgeCard
 from ue_context.cards.verifier import KnowledgeCardVerifier
 from ue_context.compiler.context_compiler import ContextCompiler
@@ -13,8 +13,9 @@ from ue_context.eval.runner import EvalRunner, write_reports
 
 def test_built_in_cards_verify_against_fixture(registry, adapter, tmp_path):
     verifier = KnowledgeCardVerifier(URIResolver(registry), adapter)
-    cards = built_in_cards()
+    cards = attach_source_hashes(built_in_cards(), URIResolver(registry), adapter)
     assert len(cards) == 20
+    assert all(card.source_hashes for card in cards)
     results = [verifier.verify(card) for card in cards]
     assert all(result.ok for result in results), [result.errors for result in results if not result.ok]
     written = write_cards([card.verified() for card in cards], tmp_path)
@@ -43,6 +44,22 @@ def test_card_without_evidence_fails(registry, adapter):
     result = KnowledgeCardVerifier(URIResolver(registry), adapter).verify(card)
     assert not result.ok
     assert result.errors
+
+
+def test_card_hash_mismatch_fails(registry, adapter):
+    resolver = URIResolver(registry)
+    card = attach_source_hashes(built_in_cards()[:1], resolver, adapter)[0]
+    bad_card = KnowledgeCard.from_dict(
+        {
+            **card.as_dict(),
+            "source_hashes": {uri: "0" * 64 for uri in card.source_hashes},
+        }
+    )
+
+    result = KnowledgeCardVerifier(resolver, adapter).verify(bad_card)
+
+    assert not result.ok
+    assert any("hash mismatch" in error for error in result.errors)
 
 
 def test_eval_runner_generates_json_and_markdown(registry, adapter, tmp_path):

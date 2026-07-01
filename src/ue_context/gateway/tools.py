@@ -7,10 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ue_context.cards.hashing import source_sha256
 from ue_context.coderag.adapter import CodeRAGAdapter
 from ue_context.compiler.context_compiler import ContextCompiler
 from ue_context.corpus.registry import CorpusRegistry
-from ue_context.corpus.source_policy import SourcePolicy
+from ue_context.corpus.source_policy import SourcePolicy, SourceReadRateLimiter
 from ue_context.corpus.uri_resolver import URIResolver
 from ue_context.gateway.audit import AuditLogger, AuditRecord
 from ue_context.gateway.auth import scopes_from_env
@@ -28,6 +29,7 @@ class ToolRuntime:
     audit: AuditLogger
     scopes: set[str]
     semantic_store: SemanticStore | None = None
+    rate_limiter: SourceReadRateLimiter | None = None
 
 
 def create_runtime(
@@ -59,6 +61,7 @@ def create_runtime(
         audit=audit,
         scopes=scopes_from_env(),
         semantic_store=semantic_store,
+        rate_limiter=SourceReadRateLimiter(policy),
     )
 
 
@@ -115,12 +118,15 @@ class UETools:
                 resolved.start_line,
                 resolved.end_line,
             )
+            line_count = resolved.line_count or 0
+            if self.runtime.rate_limiter is not None:
+                self.runtime.rate_limiter.check_and_record(line_count)
+            source_hash = source_sha256(content)
             if with_line_numbers:
                 content = "\n".join(
                     f"{resolved.start_line + index}|{line}"
                     for index, line in enumerate(content.splitlines())
                 )
-            line_count = resolved.line_count or 0
             self.runtime.audit.write(
                 AuditRecord.create(
                     tool="ue_read_source",
@@ -131,6 +137,7 @@ class UETools:
                     end_line=resolved.end_line,
                     line_count=line_count,
                     decision="allowed",
+                    source_hash=source_hash,
                 )
             )
             return {
@@ -139,6 +146,7 @@ class UETools:
                 "path": resolved.relative_path,
                 "start_line": resolved.start_line,
                 "end_line": resolved.end_line,
+                "source_hash": source_hash,
                 "content": content,
             }
         except Exception as exc:

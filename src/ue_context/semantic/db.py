@@ -297,12 +297,30 @@ class SemanticStore:
             "SELECT COUNT(*) AS count FROM ue_reflection_entities WHERE corpus_id = ?",
             (corpus_id,),
         ).fetchone()
+        cpp_symbols = self.connection.execute(
+            """
+            SELECT COUNT(DISTINCT to_node) AS count
+            FROM ue_graph_edges
+            WHERE corpus_id = ? AND extractor = 'cpp_symbols'
+            """,
+            (corpus_id,),
+        ).fetchone()
+        compile_guards = self.connection.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM ue_graph_edges
+            WHERE corpus_id = ? AND edge_type = 'compile_guard'
+            """,
+            (corpus_id,),
+        ).fetchone()
         return {
             "corpus_id": corpus_id,
             "module_dependencies": int(module_deps["count"]),
             "reflection_entities": int(reflection["count"]),
             "graph_edges": int(graph["edge_count"]),
             "graph_node_observations": int(graph["node_observations"] or 0),
+            "cpp_symbols": int(cpp_symbols["count"]),
+            "compile_guards": int(compile_guards["count"]),
         }
 
     def close(self) -> None:

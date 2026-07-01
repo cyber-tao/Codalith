@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from ue_context.corpus.source_policy import SourcePolicy
+from ue_context.corpus.source_policy import SourcePolicy, SourceReadRateLimiter
 from ue_context.corpus.uri_resolver import URIResolver
 from ue_context.errors import SourcePolicyError, URIResolutionError
 
@@ -42,3 +42,33 @@ def test_source_policy_enforces_limits_and_scope(registry, policy_path):
     )
     with pytest.raises(SourcePolicyError):
         policy.check(too_large, {"source:read"})
+
+
+def test_source_read_rate_limiter_enforces_read_and_line_budgets():
+    policy = SourcePolicy(
+        default_max_lines=20,
+        hard_max_lines=25,
+        max_source_reads_per_10min=2,
+        max_total_lines_per_10min=8,
+    )
+    limiter = SourceReadRateLimiter(policy, time_func=lambda: 100.0)
+
+    limiter.check_and_record(3)
+    limiter.check_and_record(4)
+    with pytest.raises(SourcePolicyError):
+        limiter.check_and_record(1)
+
+    line_limiter = SourceReadRateLimiter(policy, time_func=lambda: 100.0)
+    line_limiter.check_and_record(5)
+    with pytest.raises(SourcePolicyError):
+        line_limiter.check_and_record(4)
+
+
+def test_source_read_rate_limiter_expires_old_events():
+    now = 100.0
+    policy = SourcePolicy(max_source_reads_per_10min=1)
+    limiter = SourceReadRateLimiter(policy, window_seconds=10.0, time_func=lambda: now)
+
+    limiter.check_and_record(1)
+    now = 111.0
+    limiter.check_and_record(1)

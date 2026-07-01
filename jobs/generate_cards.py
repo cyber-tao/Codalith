@@ -5,8 +5,10 @@ from __future__ import annotations
 import argparse
 import json
 
-from ue_context.cards.generator import built_in_cards, write_cards
+from ue_context.cards.generator import attach_source_hashes, built_in_cards, write_cards
+from ue_context.coderag.adapter import CodeRAGAdapter
 from ue_context.corpus.registry import CorpusRegistry
+from ue_context.corpus.uri_resolver import URIResolver
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -16,7 +18,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     registry = CorpusRegistry.from_file(args.registry)
     corpus = registry.get_engine(args.version)
-    cards = built_in_cards(corpus_id=corpus.corpus_id, version=corpus.ue_version or args.version)
+    resolver = URIResolver(registry)
+    adapter = CodeRAGAdapter(registry)
+    cards = attach_source_hashes(
+        built_in_cards(corpus_id=corpus.corpus_id, version=corpus.ue_version or args.version),
+        resolver,
+        adapter,
+    )
     verified = [card.verified() for card in cards]
     written = write_cards(verified, corpus.card_root)
     if corpus.indexed_root != corpus.card_root:

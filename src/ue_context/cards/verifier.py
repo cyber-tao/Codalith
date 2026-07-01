@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass, field
 
+from ue_context.cards.hashing import source_sha256
 from ue_context.cards.schema import KnowledgeCard
 from ue_context.coderag.adapter import CodeRAGAdapter
 from ue_context.corpus.uri_resolver import URIResolver
@@ -47,7 +47,7 @@ class KnowledgeCardVerifier:
                         errors.append(f"Evidence URI has empty content: {evidence.uri}")
                     expected_hash = card.source_hashes.get(evidence.uri)
                     if expected_hash:
-                        actual_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+                        actual_hash = source_sha256(content)
                         if actual_hash != expected_hash:
                             errors.append(f"Evidence hash mismatch: {evidence.uri}")
                 except Exception as exc:  # noqa: BLE001 - verifier reports all failures.

@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from ue_context.cards.generator import built_in_cards, write_cards
+from ue_context.cards.generator import attach_source_hashes, built_in_cards, write_cards
 from ue_context.cards.verifier import KnowledgeCardVerifier
 from ue_context.coderag.adapter import CodeRAGAdapter
 from ue_context.compiler.context_compiler import ContextCompiler
@@ -44,7 +44,16 @@ def main(argv: list[str] | None = None) -> int:
     registry = CorpusRegistry.from_file(args.registry)
     corpus = registry.get_engine(args.version)
     prepare_indexed_root(corpus)
-    cards = [card.verified() for card in built_in_cards(corpus_id=corpus.corpus_id, version=corpus.ue_version or args.version)]
+    resolver = URIResolver(registry)
+    card_adapter = CodeRAGAdapter(registry)
+    cards = [
+        card.verified()
+        for card in attach_source_hashes(
+            built_in_cards(corpus_id=corpus.corpus_id, version=corpus.ue_version or args.version),
+            resolver,
+            card_adapter,
+        )
+    ]
     write_cards(cards, corpus.card_root)
     write_cards(cards, corpus.indexed_root)
 
@@ -61,7 +70,7 @@ def main(argv: list[str] | None = None) -> int:
     index_seconds = time.perf_counter() - started
     status = adapter.status(corpus.corpus_id)
 
-    verifier = KnowledgeCardVerifier(URIResolver(registry), adapter)
+    verifier = KnowledgeCardVerifier(resolver, adapter)
     card_results = [verifier.verify(card).as_dict() | {"card_id": card.card_id} for card in cards]
 
     compiler = ContextCompiler(registry, adapter)
@@ -78,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
         "status": status,
         "cards_verified": sum(1 for item in card_results if item["ok"]),
         "cards_total": len(card_results),
+        "card_results": card_results,
         "eval": report.as_dict(),
     }
     (output_dir / "coderag_acceptance.json").write_text(

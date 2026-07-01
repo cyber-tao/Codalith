@@ -39,6 +39,12 @@ def fake_engine_root(tmp_path: Path) -> Path:
             "int32 Health;\n"
             "UFUNCTION(BlueprintCallable)\n"
             "void OnRep_Health();\n"
+            "#if WITH_EDITOR\n"
+            "void EditorOnlyPreview();\n"
+            "#endif\n"
+            "#if !UE_BUILD_SHIPPING\n"
+            "void DebugOnlyReplicationTrace();\n"
+            "#endif\n"
             "bool bReplicates;\n"
             "void BeginPlay();\n"
             "};\n"
@@ -56,6 +62,22 @@ def fake_engine_root(tmp_path: Path) -> Path:
         "Engine/Source/Runtime/GameplayAbilities/GameplayAbilities.Build.cs": (
             "PublicDependencyModuleNames.AddRange(new string[] { \"Core\", \"Engine\" });\n"
         ),
+        "Source/ProjectA/ProjectA.Build.cs": (
+            "PublicDependencyModuleNames.AddRange(new string[] { \"Core\", \"CoreUObject\", \"Engine\" });\n"
+            "PrivateDependencyModuleNames.AddRange(new string[] { \"GameplayAbilities\" });\n"
+        ),
+        "Source/ProjectA/Public/InventoryComponent.h": (
+            "#pragma once\n"
+            "UCLASS()\n"
+            "class PROJECTA_API UInventoryComponent : public UActorComponent {\n"
+            "GENERATED_BODY()\n"
+            "UPROPERTY(ReplicatedUsing=OnRep_Items)\n"
+            "int32 ItemCount;\n"
+            "UFUNCTION()\n"
+            "void OnRep_Items();\n"
+            "};\n"
+        ),
+        "Source/ProjectA/Private/InventoryComponent.cpp": "void UInventoryComponent::OnRep_Items() {}\n",
     }
     for relative, content in files.items():
         path = root / relative
@@ -80,6 +102,18 @@ def registry_path(tmp_path: Path, fake_engine_root: Path) -> Path:
                 "semantic_schema": "ue_5_7_4",
                 "card_root": str(tmp_path / "cards"),
                 "default": True,
+                "access_scopes": ["ue:5.7", "source:read"],
+            },
+            "ue-5.7.5": {
+                "kind": "engine",
+                "ue_version": "5.7.5",
+                "source_commit": "TEST-NEXT",
+                "source_root": str(fake_engine_root),
+                "indexed_root": str(fake_engine_root),
+                "coderag_store": str(tmp_path / "store-next"),
+                "semantic_schema": "ue_5_7_5",
+                "card_root": str(tmp_path / "cards-next"),
+                "default": False,
                 "access_scopes": ["ue:5.7", "source:read"],
             }
         },

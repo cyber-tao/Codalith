@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import fnmatch
-from collections.abc import Iterable
+import time
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any
@@ -86,6 +87,38 @@ class SourcePolicy:
                 for item in self.sensitive_patterns
             ],
         }
+
+
+class SourceReadRateLimiter:
+    def __init__(
+        self,
+        policy: SourcePolicy,
+        *,
+        window_seconds: float = 600.0,
+        time_func: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self.policy = policy
+        self.window_seconds = window_seconds
+        self.time_func = time_func
+        self._events: list[tuple[float, int]] = []
+
+    def check_and_record(self, line_count: int) -> None:
+        now = float(self.time_func())
+        cutoff = now - self.window_seconds
+        self._events = [(timestamp, lines) for timestamp, lines in self._events if timestamp >= cutoff]
+        read_count = len(self._events)
+        total_lines = sum(lines for _, lines in self._events)
+        if read_count + 1 > self.policy.max_source_reads_per_10min:
+            raise SourcePolicyError(
+                f"Source read rate limit exceeded: {read_count + 1} > "
+                f"{self.policy.max_source_reads_per_10min} per 10 minutes"
+            )
+        if total_lines + line_count > self.policy.max_total_lines_per_10min:
+            raise SourcePolicyError(
+                f"Source read line budget exceeded: {total_lines + line_count} > "
+                f"{self.policy.max_total_lines_per_10min} per 10 minutes"
+            )
+        self._events.append((now, line_count))
 
 
 def _match(pattern: str, path: str) -> bool:

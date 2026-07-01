@@ -19,6 +19,7 @@ dev = [
 
 [project.scripts]
 ue-context-mcp = "ue_context.gateway.mcp_server:main"
+ue-context-mcp-http = "ue_context.gateway.http_server:main"
 ue-context-eval = "ue_context.eval.runner:main"
 ue-context-generate-cards = "jobs.generate_cards:main"
 ue-context-verify-cards = "jobs.verify_cards:main"
