@@ -144,6 +144,12 @@ def ensure_coderag_installed(provider: str) -> None:
 
     source = Path("external/CodeRAG")
     if not source.exists():
+        if os.getenv("CODALITH_CODERAG_ALLOW_AUTO_CLONE", "").lower() not in {"1", "true", "yes"}:
+            raise RuntimeError(
+                "CodeRAG submodule is missing. Run "
+                "`git submodule update --init --recursive external/CodeRAG` "
+                "or set CODALITH_CODERAG_ALLOW_AUTO_CLONE=1 for a temporary /tmp clone."
+            )
         source = Path("/tmp/CodeRAG")
         if not source.exists():
             subprocess.run(

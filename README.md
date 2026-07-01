@@ -18,8 +18,25 @@ Codalith is a Python MCP gateway for Unreal Engine source context. It wraps Code
 - Python 3.11 or newer.
 - [uv](https://docs.astral.sh/uv/) for local Python workflows.
 - Docker Compose for containerized validation.
+- Git submodules for the pinned CodeRAG checkout.
 - Optional: a local or remote Unreal Engine source checkout.
 - Optional: Claude Code CLI, Codex, VS Code, or Cursor for MCP client setup.
+
+## Clone With Submodules
+
+CodeRAG is pinned as a Git submodule at `external/CodeRAG`.
+
+Fresh clone:
+
+```bash
+git clone --recurse-submodules <repo-url>
+```
+
+Existing checkout:
+
+```bash
+git submodule update --init --recursive external/CodeRAG
+```
 
 ## Quick Start
 
@@ -107,6 +124,8 @@ Run the fake-provider CodeRAG acceptance path:
 ```bash
 docker compose --profile coderag run --rm coderag-acceptance
 ```
+
+This profile expects `external/CodeRAG` to be initialized. For temporary local experiments without the submodule, set `CODALITH_CODERAG_ALLOW_AUTO_CLONE=1` to allow a shallow clone into `/tmp/CodeRAG`.
 
 Run the Ollama/OpenAI-compatible CodeRAG acceptance path:
 
