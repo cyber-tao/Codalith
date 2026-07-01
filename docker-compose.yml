@@ -1,26 +1,26 @@
-x-ue-context-env: &ue-context-env
-  PYTHONPATH: ${UE_CONTEXT_WORKSPACE_DIR:-/workspace}/src
-  UE_CONTEXT_AUDIT_LOG: ${UE_CONTEXT_AUDIT_LOG:-/workspace/data/audit/source_reads.jsonl}
-  UE_CONTEXT_ENGINE_VERSION: ${UE_CONTEXT_ENGINE_VERSION:-5.7.4}
-  UE_CONTEXT_ENGINE_SOURCE_ROOT: ${UE_CONTEXT_ENGINE_SOURCE_ROOT:-/srv/ue/5.7.4}
-  UE_CONTEXT_ENGINE_INDEXED_ROOT: ${UE_CONTEXT_ENGINE_INDEXED_ROOT:-/srv/ue-context/corpora/ue-5.7.4}
-  UE_CONTEXT_ENGINE_CARD_ROOT: ${UE_CONTEXT_ENGINE_CARD_ROOT:-/srv/ue-context/cards/ue-5.7.4}
-  UE_CONTEXT_ENGINE_ACCESS_SCOPE: ${UE_CONTEXT_ENGINE_ACCESS_SCOPE:-ue:5.7}
-  UV_PROJECT_ENVIRONMENT: ${UE_CONTEXT_UV_ENV:-/tmp/ue-context-venv}
+x-codalith-env: &codalith-env
+  PYTHONPATH: ${CODALITH_WORKSPACE_DIR:-/workspace}/src
+  CODALITH_AUDIT_LOG: ${CODALITH_AUDIT_LOG:-/workspace/data/audit/source_reads.jsonl}
+  CODALITH_ENGINE_VERSION: ${CODALITH_ENGINE_VERSION:-5.7.4}
+  CODALITH_ENGINE_SOURCE_ROOT: ${CODALITH_ENGINE_SOURCE_ROOT:-/srv/ue/5.7.4}
+  CODALITH_ENGINE_INDEXED_ROOT: ${CODALITH_ENGINE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}
+  CODALITH_ENGINE_CARD_ROOT: ${CODALITH_ENGINE_CARD_ROOT:-/srv/codalith/cards/ue-5.7.4}
+  CODALITH_ENGINE_ACCESS_SCOPE: ${CODALITH_ENGINE_ACCESS_SCOPE:-ue:5.7}
+  UV_PROJECT_ENVIRONMENT: ${CODALITH_UV_ENV:-/tmp/codalith-venv}
   UV_LINK_MODE: copy
-  UV_DEFAULT_INDEX: ${UE_CONTEXT_PYPI_INDEX:-https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/}
-  PIP_INDEX_URL: ${UE_CONTEXT_PYPI_INDEX:-https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/}
+  UV_DEFAULT_INDEX: ${CODALITH_PYPI_INDEX:-https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/}
+  PIP_INDEX_URL: ${CODALITH_PYPI_INDEX:-https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/}
 
 services:
   test:
     image: ghcr.io/astral-sh/uv:python3.12-bookworm
-    working_dir: ${UE_CONTEXT_WORKSPACE_DIR:-/workspace}
+    working_dir: ${CODALITH_WORKSPACE_DIR:-/workspace}
     env_file:
       - .env
     environment:
-      <<: *ue-context-env
+      <<: *codalith-env
     volumes:
-      - ${UE_CONTEXT_REPO_ROOT:-.}:${UE_CONTEXT_WORKSPACE_DIR:-/workspace}
+      - ${CODALITH_REPO_ROOT:-.}:${CODALITH_WORKSPACE_DIR:-/workspace}
     command: >
       sh -lc "uv sync --extra dev &&
       uv run pytest &&
@@ -30,53 +30,53 @@ services:
   ue-acceptance:
     image: ghcr.io/astral-sh/uv:python3.12-bookworm
     profiles: ["ue"]
-    working_dir: ${UE_CONTEXT_WORKSPACE_DIR:-/workspace}
+    working_dir: ${CODALITH_WORKSPACE_DIR:-/workspace}
     env_file:
       - .env
     environment:
-      <<: *ue-context-env
-      UE_CONTEXT_SEMANTIC_DB: ${UE_CONTEXT_SEMANTIC_DB:-/tmp/ue-context-semantic.sqlite}
+      <<: *codalith-env
+      CODALITH_SEMANTIC_DB: ${CODALITH_SEMANTIC_DB:-/tmp/codalith-semantic.sqlite}
     volumes:
-      - ${UE_CONTEXT_REPO_ROOT:-.}:${UE_CONTEXT_WORKSPACE_DIR:-/workspace}
-      - ${UE_CONTEXT_ENGINE_HOST_ROOT:-E:/UnrealEngine_5.7}:${UE_CONTEXT_ENGINE_SOURCE_ROOT:-/srv/ue/5.7.4}:ro
+      - ${CODALITH_REPO_ROOT:-.}:${CODALITH_WORKSPACE_DIR:-/workspace}
+      - ${CODALITH_ENGINE_HOST_ROOT:-E:/UnrealEngine_5.7}:${CODALITH_ENGINE_SOURCE_ROOT:-/srv/ue/5.7.4}:ro
     command: >
       sh -lc "uv sync --extra dev &&
-      uv run ue-context-index-engine --version \"$${UE_CONTEXT_ENGINE_VERSION}\" --smoke &&
-      uv run ue-context-extract-semantic --version \"$${UE_CONTEXT_ENGINE_VERSION}\" --semantic-db \"$${UE_CONTEXT_SEMANTIC_DB}\" --min-modules 100 --min-reflection-entities 100 --min-guards 10 --stop-after-min &&
-      uv run ue-context-verify-cards --version \"$${UE_CONTEXT_ENGINE_VERSION}\" &&
+      uv run codalith-index-engine --version \"$${CODALITH_ENGINE_VERSION}\" --smoke &&
+      uv run codalith-extract-semantic --version \"$${CODALITH_ENGINE_VERSION}\" --semantic-db \"$${CODALITH_SEMANTIC_DB}\" --min-modules 100 --min-reflection-entities 100 --min-guards 10 --stop-after-min &&
+      uv run codalith-verify-cards --version \"$${CODALITH_ENGINE_VERSION}\" &&
       uv run pytest -m ue_acceptance"
 
   coderag-acceptance:
     image: ghcr.io/astral-sh/uv:python3.12-bookworm
     profiles: ["coderag"]
-    working_dir: ${UE_CONTEXT_WORKSPACE_DIR:-/workspace}
+    working_dir: ${CODALITH_WORKSPACE_DIR:-/workspace}
     env_file:
       - .env
     environment:
-      <<: *ue-context-env
+      <<: *codalith-env
       CODERAG_PROVIDER: fake
       CODERAG_INDEX_ALL_TEXT: "1"
       CODERAG_GITIGNORE: "0"
-      CODERAG_STORE_DIR: ${UE_CONTEXT_CODERAG_STORE_DIR:-/var/lib/ue-context/coderag/ue-5.7.4}
-      UE_CONTEXT_CODERAG_STORE_DIR: ${UE_CONTEXT_CODERAG_STORE_DIR:-/var/lib/ue-context/coderag/ue-5.7.4}
-      UE_CONTEXT_NATIVE_CODERAG_PROGRESS: "1"
+      CODERAG_STORE_DIR: ${CODALITH_CODERAG_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4}
+      CODALITH_CODERAG_STORE_DIR: ${CODALITH_CODERAG_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4}
+      CODALITH_NATIVE_CODERAG_PROGRESS: "1"
     volumes:
-      - ${UE_CONTEXT_REPO_ROOT:-.}:${UE_CONTEXT_WORKSPACE_DIR:-/workspace}
-      - ${UE_CONTEXT_ENGINE_HOST_ROOT:-E:/UnrealEngine_5.7}:${UE_CONTEXT_ENGINE_SOURCE_ROOT:-/srv/ue/5.7.4}:ro
-      - ${UE_CONTEXT_ENGINE_SOURCE_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Source}:${UE_CONTEXT_ENGINE_INDEXED_ROOT:-/srv/ue-context/corpora/ue-5.7.4}/Engine/Source:ro
-      - ${UE_CONTEXT_GAMEPLAY_ABILITIES_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Plugins/Runtime/GameplayAbilities}:${UE_CONTEXT_ENGINE_INDEXED_ROOT:-/srv/ue-context/corpora/ue-5.7.4}/Engine/Plugins/Runtime/GameplayAbilities:ro
+      - ${CODALITH_REPO_ROOT:-.}:${CODALITH_WORKSPACE_DIR:-/workspace}
+      - ${CODALITH_ENGINE_HOST_ROOT:-E:/UnrealEngine_5.7}:${CODALITH_ENGINE_SOURCE_ROOT:-/srv/ue/5.7.4}:ro
+      - ${CODALITH_ENGINE_SOURCE_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Source}:${CODALITH_ENGINE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Source:ro
+      - ${CODALITH_GAMEPLAY_ABILITIES_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Plugins/Runtime/GameplayAbilities}:${CODALITH_ENGINE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Plugins/Runtime/GameplayAbilities:ro
     command: >
       sh -lc "uv sync &&
-      uv run ue-context-coderag-acceptance --version \"$${UE_CONTEXT_ENGINE_VERSION}\" --provider fake --full"
+      uv run codalith-coderag-acceptance --version \"$${CODALITH_ENGINE_VERSION}\" --provider fake --full"
 
   coderag-ollama-acceptance:
     image: ghcr.io/astral-sh/uv:python3.12-bookworm
     profiles: ["coderag"]
-    working_dir: ${UE_CONTEXT_WORKSPACE_DIR:-/workspace}
+    working_dir: ${CODALITH_WORKSPACE_DIR:-/workspace}
     env_file:
       - .env
     environment:
-      <<: *ue-context-env
+      <<: *codalith-env
       CODERAG_PROVIDER: openai
       CODERAG_OPENAI_MODEL: ${CODERAG_OPENAI_MODEL:-qwen3-embedding:0.6b}
       CODERAG_OPENAI_BATCH: ${CODERAG_OPENAI_BATCH:-32}
@@ -85,20 +85,20 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-ollama}
       CODERAG_INDEX_ALL_TEXT: "1"
       CODERAG_GITIGNORE: "0"
-      CODERAG_STORE_DIR: ${UE_CONTEXT_CODERAG_OLLAMA_STORE_DIR:-/var/lib/ue-context/coderag/ue-5.7.4-ollama-qwen3-embedding-0.6b}
-      UE_CONTEXT_CODERAG_STORE_DIR: ${UE_CONTEXT_CODERAG_OLLAMA_STORE_DIR:-/var/lib/ue-context/coderag/ue-5.7.4-ollama-qwen3-embedding-0.6b}
-      UE_CONTEXT_CODERAG_MAX_CHUNK_CHARS: ${UE_CONTEXT_CODERAG_MAX_CHUNK_CHARS:-2048}
-      UE_CONTEXT_NATIVE_CODERAG_PROGRESS: "1"
+      CODERAG_STORE_DIR: ${CODALITH_CODERAG_OLLAMA_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4-ollama-qwen3-embedding-0.6b}
+      CODALITH_CODERAG_STORE_DIR: ${CODALITH_CODERAG_OLLAMA_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4-ollama-qwen3-embedding-0.6b}
+      CODALITH_CODERAG_MAX_CHUNK_CHARS: ${CODALITH_CODERAG_MAX_CHUNK_CHARS:-2048}
+      CODALITH_NATIVE_CODERAG_PROGRESS: "1"
       PYTHONWARNINGS: ignore::SyntaxWarning
     volumes:
-      - ${UE_CONTEXT_REPO_ROOT:-.}:${UE_CONTEXT_WORKSPACE_DIR:-/workspace}
-      - coderag-ollama-store:${UE_CONTEXT_CODERAG_VOLUME_ROOT:-/var/lib/ue-context/coderag}
-      - ${UE_CONTEXT_ENGINE_HOST_ROOT:-E:/UnrealEngine_5.7}:${UE_CONTEXT_ENGINE_SOURCE_ROOT:-/srv/ue/5.7.4}:ro
-      - ${UE_CONTEXT_ENGINE_SOURCE_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Source}:${UE_CONTEXT_ENGINE_INDEXED_ROOT:-/srv/ue-context/corpora/ue-5.7.4}/Engine/Source:ro
-      - ${UE_CONTEXT_GAMEPLAY_ABILITIES_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Plugins/Runtime/GameplayAbilities}:${UE_CONTEXT_ENGINE_INDEXED_ROOT:-/srv/ue-context/corpora/ue-5.7.4}/Engine/Plugins/Runtime/GameplayAbilities:ro
+      - ${CODALITH_REPO_ROOT:-.}:${CODALITH_WORKSPACE_DIR:-/workspace}
+      - coderag-ollama-store:${CODALITH_CODERAG_VOLUME_ROOT:-/var/lib/codalith/coderag}
+      - ${CODALITH_ENGINE_HOST_ROOT:-E:/UnrealEngine_5.7}:${CODALITH_ENGINE_SOURCE_ROOT:-/srv/ue/5.7.4}:ro
+      - ${CODALITH_ENGINE_SOURCE_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Source}:${CODALITH_ENGINE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Source:ro
+      - ${CODALITH_GAMEPLAY_ABILITIES_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Plugins/Runtime/GameplayAbilities}:${CODALITH_ENGINE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Plugins/Runtime/GameplayAbilities:ro
     command: >
       sh -lc "uv sync &&
-      uv run ue-context-coderag-acceptance --version \"$${UE_CONTEXT_ENGINE_VERSION}\" --provider openai --output-dir reports/coderag-ollama"
+      uv run codalith-coderag-acceptance --version \"$${CODALITH_ENGINE_VERSION}\" --provider openai --output-dir reports/coderag-ollama"
 
 volumes:
   coderag-ollama-store:

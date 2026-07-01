@@ -1,8 +1,8 @@
-# UE Context Engine
+# Codalith
 
 [中文文档](README.zh-CN.md)
 
-UE Context Engine is a Python MCP gateway for Unreal Engine source context. It wraps CodeRAG-style retrieval with UE-aware corpus resolution, source-read policy, audit logging, semantic extraction, knowledge-card verification, and evaluation tooling.
+Codalith is a Python MCP gateway for Unreal Engine source context. It wraps CodeRAG-style retrieval with UE-aware corpus resolution, source-read policy, audit logging, semantic extraction, knowledge-card verification, and evaluation tooling.
 
 ## Features
 
@@ -19,7 +19,7 @@ UE Context Engine is a Python MCP gateway for Unreal Engine source context. It w
 - [uv](https://docs.astral.sh/uv/) for local Python workflows.
 - Docker Compose for containerized validation.
 - Optional: a local or remote Unreal Engine source checkout.
-- Optional: Claude Code CLI for MCP client setup.
+- Optional: Claude Code CLI, Codex, VS Code, or Cursor for MCP client setup.
 
 ## Quick Start
 
@@ -32,14 +32,14 @@ Run the stdio MCP server locally:
 
 ```bash
 uv sync
-uv run ue-context-mcp
+uv run codalith-mcp
 ```
 
 Run the HTTP MCP server locally:
 
 ```bash
 uv sync
-uv run ue-context-mcp-http --host 127.0.0.1 --port 8765 --endpoint /mcp
+uv run codalith-mcp-http --host 127.0.0.1 --port 8765 --endpoint /mcp
 ```
 
 The HTTP endpoint is then available at:
@@ -62,28 +62,28 @@ Set these variables for each machine:
 
 | Variable | Purpose |
 | --- | --- |
-| `UE_CONTEXT_ENGINE_HOST_ROOT` | Host path to the UE checkout mounted as the engine source root. |
-| `UE_CONTEXT_ENGINE_SOURCE_HOST_ROOT` | Host path to `Engine/Source` for CodeRAG indexed mounts. |
-| `UE_CONTEXT_GAMEPLAY_ABILITIES_HOST_ROOT` | Host path to the GameplayAbilities plugin used by the acceptance profile. |
-| `UE_CONTEXT_ENGINE_SOURCE_ROOT` | Container path for the UE source root. |
-| `UE_CONTEXT_ENGINE_INDEXED_ROOT` | Container path for the indexed corpus root. |
-| `UE_CONTEXT_CODERAG_STORE_DIR` | Container path for the default CodeRAG store. |
-| `UE_CONTEXT_CODERAG_OLLAMA_STORE_DIR` | Container path for the Ollama/OpenAI-compatible CodeRAG store. |
+| `CODALITH_ENGINE_HOST_ROOT` | Host path to the UE checkout mounted as the engine source root. |
+| `CODALITH_ENGINE_SOURCE_HOST_ROOT` | Host path to `Engine/Source` for CodeRAG indexed mounts. |
+| `CODALITH_GAMEPLAY_ABILITIES_HOST_ROOT` | Host path to the GameplayAbilities plugin used by the acceptance profile. |
+| `CODALITH_ENGINE_SOURCE_ROOT` | Container path for the UE source root. |
+| `CODALITH_ENGINE_INDEXED_ROOT` | Container path for the indexed corpus root. |
+| `CODALITH_CODERAG_STORE_DIR` | Container path for the default CodeRAG store. |
+| `CODALITH_CODERAG_OLLAMA_STORE_DIR` | Container path for the Ollama/OpenAI-compatible CodeRAG store. |
 
 Linux server example:
 
 ```dotenv
-UE_CONTEXT_ENGINE_HOST_ROOT=/opt/unreal/UE_5.7
-UE_CONTEXT_ENGINE_SOURCE_HOST_ROOT=/opt/unreal/UE_5.7/Engine/Source
-UE_CONTEXT_GAMEPLAY_ABILITIES_HOST_ROOT=/opt/unreal/UE_5.7/Engine/Plugins/Runtime/GameplayAbilities
+CODALITH_ENGINE_HOST_ROOT=/opt/unreal/UE_5.7
+CODALITH_ENGINE_SOURCE_HOST_ROOT=/opt/unreal/UE_5.7/Engine/Source
+CODALITH_GAMEPLAY_ABILITIES_HOST_ROOT=/opt/unreal/UE_5.7/Engine/Plugins/Runtime/GameplayAbilities
 ```
 
 Windows workstation example:
 
 ```dotenv
-UE_CONTEXT_ENGINE_HOST_ROOT=E:/UnrealEngine_5.7
-UE_CONTEXT_ENGINE_SOURCE_HOST_ROOT=E:/UnrealEngine_5.7/Engine/Source
-UE_CONTEXT_GAMEPLAY_ABILITIES_HOST_ROOT=E:/UnrealEngine_5.7/Engine/Plugins/Runtime/GameplayAbilities
+CODALITH_ENGINE_HOST_ROOT=E:/UnrealEngine_5.7
+CODALITH_ENGINE_SOURCE_HOST_ROOT=E:/UnrealEngine_5.7/Engine/Source
+CODALITH_GAMEPLAY_ABILITIES_HOST_ROOT=E:/UnrealEngine_5.7/Engine/Plugins/Runtime/GameplayAbilities
 ```
 
 `configs/corpus_registry.yaml` and `configs/mcp_server.yaml` also support `${VAR:-default}` placeholders, so the same repository can run on different machines without rewriting committed config files.
@@ -114,75 +114,109 @@ Run the Ollama/OpenAI-compatible CodeRAG acceptance path:
 docker compose --profile coderag run --rm coderag-ollama-acceptance
 ```
 
-## Configure Claude Code MCP on Another Machine
+## MCP Client Configuration
 
-Claude Code supports HTTP MCP servers with:
+Codalith exposes a Streamable HTTP MCP endpoint. Use the server name `codalith` and the primary tool `codalith_context`.
+
+Supported client targets:
+
+| Client | Script value | Configuration target |
+| --- | --- | --- |
+| Claude Code | `claude` | `claude mcp add --transport http ...` |
+| Codex | `codex` | `~/.codex/config.toml` or `.codex/config.toml` |
+| VS Code / GitHub Copilot | `vscode` or `copilot` | `code --add-mcp` or `.vscode/mcp.json` |
+| Cursor | `cursor` | `~/.cursor/mcp.json` or `.cursor/mcp.json` |
+| All supported clients | `all` | Best-effort setup for every client above |
+
+Manual examples:
 
 ```bash
-claude mcp add --scope user --transport http ue-context https://mcp.example.com/mcp
+claude mcp add --scope user --transport http codalith https://mcp.example.com/mcp
 ```
 
-For a bearer token:
-
-```bash
-claude mcp add --scope user --transport http ue-context https://mcp.example.com/mcp \
-  --header "Authorization: Bearer $UE_CONTEXT_MCP_TOKEN"
+```toml
+# ~/.codex/config.toml
+[mcp_servers.codalith]
+url = "https://mcp.example.com/mcp"
 ```
 
-Check the connection:
-
-```bash
-claude mcp list
+```json
+// .vscode/mcp.json
+{
+  "servers": {
+    "codalith": {
+      "type": "http",
+      "url": "https://mcp.example.com/mcp"
+    }
+  }
+}
 ```
 
-Claude Code scopes:
+```json
+// ~/.cursor/mcp.json or .cursor/mcp.json
+{
+  "mcpServers": {
+    "codalith": {
+      "type": "http",
+      "url": "https://mcp.example.com/mcp"
+    }
+  }
+}
+```
 
-| Scope | Use when |
-| --- | --- |
-| `user` | You want the MCP server available in every project on this computer. |
-| `local` | You want the server private to one local project checkout. |
-| `project` | You want a `.mcp.json` entry that can be shared with the repository. |
-
-Reference: [Claude Code MCP documentation](https://code.claude.com/docs/en/mcp).
+References: [Claude Code MCP](https://code.claude.com/docs/en/mcp), [Codex MCP](https://developers.openai.com/codex/mcp), [VS Code MCP servers](https://code.visualstudio.com/docs/copilot/customization/mcp-servers), and [Cursor MCP](https://cursor.com/docs/mcp).
 
 ## One-Line Client Install
 
 Host the scripts in `scripts/` from your own domain or GitHub raw URL, then use one of these commands.
 
-Linux/macOS:
+Install all supported clients that are available on the machine:
 
 ```bash
-curl -fsSL https://example.com/install-mcp-client.sh | bash -s -- https://mcp.example.com/mcp
+curl -fsSL https://example.com/install-mcp-client.sh | bash -s -- --url https://mcp.example.com/mcp
+```
+
+Install a specific client:
+
+```bash
+curl -fsSL https://example.com/install-mcp-client.sh | \
+  bash -s -- --client codex --scope user --url https://mcp.example.com/mcp
 ```
 
 Linux/macOS with token:
 
 ```bash
 curl -fsSL https://example.com/install-mcp-client.sh | \
-  UE_CONTEXT_MCP_TOKEN="$UE_CONTEXT_MCP_TOKEN" bash -s -- https://mcp.example.com/mcp
+  CODALITH_MCP_TOKEN="$CODALITH_MCP_TOKEN" bash -s -- --client all --url https://mcp.example.com/mcp
 ```
 
-Windows PowerShell:
+Windows PowerShell all clients:
 
 ```powershell
-$env:UE_CONTEXT_MCP_URL = "https://mcp.example.com/mcp"
+$env:CODALITH_MCP_CLIENT = "all"
+$env:CODALITH_MCP_URL = "https://mcp.example.com/mcp"
 irm https://example.com/install-mcp-client.ps1 | iex
 ```
 
-Windows PowerShell with token:
+Windows PowerShell specific client with token:
 
 ```powershell
-$env:UE_CONTEXT_MCP_URL = "https://mcp.example.com/mcp"
-$env:UE_CONTEXT_MCP_TOKEN = "<token>"
+$env:CODALITH_MCP_CLIENT = "cursor"
+$env:CODALITH_MCP_URL = "https://mcp.example.com/mcp"
+$env:CODALITH_MCP_TOKEN = "<token>"
 irm https://example.com/install-mcp-client.ps1 | iex
 ```
 
 Optional overrides:
 
 ```bash
-UE_CONTEXT_MCP_NAME=ue-context
-UE_CONTEXT_MCP_SCOPE=user
+CODALITH_MCP_NAME=codalith
+CODALITH_MCP_CLIENT=all
+CODALITH_MCP_SCOPE=user
+CODALITH_MCP_CONFIG_PATH=/custom/path/to/config
 ```
+
+Scopes map to each client as closely as possible. `user` configures machine-wide settings. `project`, `workspace`, and `local` write project-local files for Codex, VS Code/Copilot, and Cursor; Claude Code maps `workspace` to its `local` scope.
 
 ## Server Deployment Notes
 
@@ -191,10 +225,10 @@ The built-in HTTP server is intended to be placed behind your deployment boundar
 Example server command:
 
 ```bash
-UE_CONTEXT_HTTP_HOST=0.0.0.0 \
-UE_CONTEXT_HTTP_PORT=8765 \
-UE_CONTEXT_HTTP_ENDPOINT=/mcp \
-uv run ue-context-mcp-http
+CODALITH_HTTP_HOST=0.0.0.0 \
+CODALITH_HTTP_PORT=8765 \
+CODALITH_HTTP_ENDPOINT=/mcp \
+uv run codalith-mcp-http
 ```
 
 Client URL:

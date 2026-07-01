@@ -4,7 +4,7 @@ import http.client
 import json
 import threading
 
-from ue_context.gateway.http_server import StreamableHTTPConfig, create_http_server
+from codalith.gateway.http_server import StreamableHTTPConfig, create_http_server
 
 
 def test_streamable_http_post_get_session_and_origin(tools):

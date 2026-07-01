@@ -5,10 +5,10 @@ from __future__ import annotations
 import argparse
 import json
 
-from ue_context.cards.generator import attach_source_hashes, built_in_cards, write_cards
-from ue_context.coderag.adapter import CodeRAGAdapter
-from ue_context.corpus.registry import CorpusRegistry
-from ue_context.corpus.uri_resolver import URIResolver
+from codalith.cards.generator import attach_source_hashes, built_in_cards, write_cards
+from codalith.coderag.adapter import CodeRAGAdapter
+from codalith.corpus.registry import CorpusRegistry
+from codalith.corpus.uri_resolver import URIResolver
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -5,8 +5,8 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from ue_context.coderag.adapter import _limit_chunk_texts, _native_store_dir
-from ue_context.gateway.mcp_server import handle_request
+from codalith.coderag.adapter import _limit_chunk_texts, _native_store_dir
+from codalith.gateway.mcp_server import handle_request
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,8 +44,8 @@ def test_limit_chunk_texts_truncates_oversized_chunks():
     assert chunks[1].text == "abcdef"
 
 
-def test_ue_read_source_adds_line_numbers_and_audit(tools, tmp_path):
-    result = tools.ue_read_source(
+def test_codalith_read_source_adds_line_numbers_and_audit(tools, tmp_path):
+    result = tools.codalith_read_source(
         uri="ue://5.7.4/source/Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h#L1-L4"
     )
     assert result["content"].startswith("1|")
@@ -64,8 +64,8 @@ def test_ue_read_source_adds_line_numbers_and_audit(tools, tmp_path):
     assert audit["source_hash"] == expected_hash
 
 
-def test_ue_context_returns_context_pack(tools):
-    pack = tools.ue_context(query="UPROPERTY ReplicatedUsing OnRep", version="5.7.4")
+def test_codalith_context_returns_context_pack(tools):
+    pack = tools.codalith_context(query="UPROPERTY ReplicatedUsing OnRep", version="5.7.4")
     assert pack["schema_version"] == "0.1"
     assert pack["version"] == "5.7.4"
     assert pack["source_spans"]
@@ -74,14 +74,14 @@ def test_ue_context_returns_context_pack(tools):
 
 
 def test_ue_graph_returns_semantic_edges(tools):
-    graph = tools.ue_graph(node="AActor", version="5.7.4", depth=2)
+    graph = tools.codalith_graph(node="AActor", version="5.7.4", depth=2)
 
     assert any(edge["edge_type"] == "owns_reflection" for edge in graph["edges"])
     assert any(edge["edge_type"] == "replicated_using" for edge in graph["edges"])
 
 
 def test_ue_lookup_symbol_includes_graph_and_examples(tools):
-    result = tools.ue_lookup_symbol(symbol="AActor", version="5.7.4")
+    result = tools.codalith_lookup_symbol(symbol="AActor", version="5.7.4")
 
     assert result["context"]["source_spans"]
     assert result["graph"]["edges"]
@@ -89,7 +89,7 @@ def test_ue_lookup_symbol_includes_graph_and_examples(tools):
 
 
 def test_project_overlay_context_and_source_read(tools):
-    pack = tools.ue_context(
+    pack = tools.codalith_context(
         query="InventoryComponent OnRep_Items",
         version="5.7.4",
         project="ProjectA",
@@ -98,7 +98,7 @@ def test_project_overlay_context_and_source_read(tools):
     assert pack["project"] == "ProjectA"
     assert any(str(span["uri"]).startswith("ue-project://ProjectA/") for span in pack["source_spans"])
 
-    result = tools.ue_read_source(
+    result = tools.codalith_read_source(
         uri="ue-project://ProjectA/source/Source/ProjectA/Public/InventoryComponent.h#L1-L8"
     )
 
@@ -107,7 +107,7 @@ def test_project_overlay_context_and_source_read(tools):
 
 
 def test_compare_versions_compiles_both_context_packs(tools):
-    result = tools.ue_compare_versions(
+    result = tools.codalith_compare_versions(
         target="AActor",
         from_version="5.7.4",
         to_version="5.7.5",
@@ -120,7 +120,7 @@ def test_compare_versions_compiles_both_context_packs(tools):
 
 
 def test_ue_index_status_reports_semantic_store(tools):
-    status = tools.ue_index_status(version="5.7.4")
+    status = tools.codalith_index_status(version="5.7.4")
 
     assert status["semantic"]["engine"]["graph_edges"] > 0
     assert status["semantic"]["engine"]["cpp_symbols"] > 0
@@ -132,13 +132,13 @@ def test_mcp_tools_list_and_call(tools):
     assert listed is not None
     names = {item["name"] for item in listed["result"]["tools"]}
     assert {
-        "ue_context",
-        "ue_read_source",
-        "ue_index_status",
-        "ue_lookup_symbol",
-        "ue_graph",
-        "ue_examples",
-        "ue_compare_versions",
+        "codalith_context",
+        "codalith_read_source",
+        "codalith_index_status",
+        "codalith_lookup_symbol",
+        "codalith_graph",
+        "codalith_examples",
+        "codalith_compare_versions",
     } <= names
     called = handle_request(
         {
@@ -146,7 +146,7 @@ def test_mcp_tools_list_and_call(tools):
             "id": 2,
             "method": "tools/call",
             "params": {
-                "name": "ue_context",
+                "name": "codalith_context",
                 "arguments": {"query": "AActor BeginPlay", "version": "5.7.4"},
             },
         },

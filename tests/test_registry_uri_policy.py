@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from ue_context.corpus.source_policy import SourcePolicy, SourceReadRateLimiter
-from ue_context.corpus.uri_resolver import URIResolver
-from ue_context.errors import SourcePolicyError, URIResolutionError
+from codalith.corpus.source_policy import SourcePolicy, SourceReadRateLimiter
+from codalith.corpus.uri_resolver import URIResolver
+from codalith.errors import SourcePolicyError, URIResolutionError
 
 
 def test_registry_resolves_engine_and_project(registry):

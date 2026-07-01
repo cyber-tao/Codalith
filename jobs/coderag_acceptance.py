@@ -1,4 +1,4 @@
-"""Real CodeRAG acceptance job for UE Context Engine."""
+"""Real CodeRAG acceptance job for Codalith."""
 
 from __future__ import annotations
 
@@ -12,13 +12,13 @@ import time
 from pathlib import Path
 from typing import Any
 
-from ue_context.cards.generator import attach_source_hashes, built_in_cards, write_cards
-from ue_context.cards.verifier import KnowledgeCardVerifier
-from ue_context.coderag.adapter import CodeRAGAdapter
-from ue_context.compiler.context_compiler import ContextCompiler
-from ue_context.corpus.registry import Corpus, CorpusRegistry
-from ue_context.corpus.uri_resolver import URIResolver
-from ue_context.eval.runner import EvalRunner, write_reports
+from codalith.cards.generator import attach_source_hashes, built_in_cards, write_cards
+from codalith.cards.verifier import KnowledgeCardVerifier
+from codalith.coderag.adapter import CodeRAGAdapter
+from codalith.compiler.context_compiler import ContextCompiler
+from codalith.corpus.registry import Corpus, CorpusRegistry
+from codalith.corpus.uri_resolver import URIResolver
+from codalith.eval.runner import EvalRunner, write_reports
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -57,8 +57,8 @@ def main(argv: list[str] | None = None) -> int:
     write_cards(cards, corpus.card_root)
     write_cards(cards, corpus.indexed_root)
 
-    os.environ["UE_CONTEXT_USE_NATIVE_CODERAG"] = "1"
-    os.environ["UE_CONTEXT_NATIVE_CODERAG_STRICT"] = "1"
+    os.environ["CODALITH_USE_NATIVE_CODERAG"] = "1"
+    os.environ["CODALITH_NATIVE_CODERAG_STRICT"] = "1"
     os.environ["CODERAG_PROVIDER"] = args.provider
     os.environ["CODERAG_INDEX_ALL_TEXT"] = "1"
     os.environ.setdefault("CODERAG_GITIGNORE", "0")

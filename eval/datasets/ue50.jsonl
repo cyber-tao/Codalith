@@ -12,7 +12,7 @@
 {"id":"ue50-012","query":"How does UWorld relate to gameplay runtime?","mode":"explain","expected_files":["World.h"],"expected_modules":["Engine"]}
 {"id":"ue50-013","query":"Which module contains Renderer module startup code?","mode":"trace","expected_files":["DeferredShadingRenderer.cpp"],"expected_modules":["Renderer"]}
 {"id":"ue50-014","query":"Where is NetCore represented in networking code?","mode":"explain","expected_files":["NetHandle.h"],"expected_modules":["NetCore"]}
-{"id":"ue50-015","query":"How should an AI read source safely through ue_read_source?","mode":"explain","expected_files":["CoreMinimal.h"],"expected_modules":["Core"]}
+{"id":"ue50-015","query":"How should an AI read source safely through codalith_read_source?","mode":"explain","expected_files":["CoreMinimal.h"],"expected_modules":["Core"]}
 {"id":"ue50-016","query":"Find Actor RPC dispatch related source.","mode":"trace","expected_files":["Actor.h"],"expected_modules":["Engine"]}
 {"id":"ue50-017","query":"Find Actor BeginPlay declaration.","mode":"api_usage","expected_files":["Actor.h"],"expected_modules":["Engine"]}
 {"id":"ue50-018","query":"Explain UObject garbage collection evidence.","mode":"trace","expected_files":["Object.h"],"expected_modules":["CoreUObject"]}

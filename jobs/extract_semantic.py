@@ -7,12 +7,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-from ue_context.corpus.registry import CorpusRegistry
-from ue_context.semantic.db import SemanticStore
-from ue_context.semantic.extractors.build_cs import BuildCsExtractor, write_module_deps
-from ue_context.semantic.extractors.compile_guards import extract_compile_guards
-from ue_context.semantic.extractors.cpp_symbols import extract_cpp_symbols
-from ue_context.semantic.extractors.uht_reflection import UHTReflectionExtractor
+from codalith.corpus.registry import CorpusRegistry
+from codalith.semantic.db import SemanticStore
+from codalith.semantic.extractors.build_cs import BuildCsExtractor, write_module_deps
+from codalith.semantic.extractors.compile_guards import extract_compile_guards
+from codalith.semantic.extractors.cpp_symbols import extract_cpp_symbols
+from codalith.semantic.extractors.uht_reflection import UHTReflectionExtractor
 
 
 def main(argv: list[str] | None = None) -> int:

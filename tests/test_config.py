@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from ue_context.config import load_config
-from ue_context.errors import ConfigurationError
+from codalith.config import load_config
+from codalith.errors import ConfigurationError
 
 
 def test_load_config_expands_environment_placeholders(tmp_path, monkeypatch):

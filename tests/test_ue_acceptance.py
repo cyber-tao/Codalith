@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from ue_context.coderag.adapter import CodeRAGAdapter
-from ue_context.corpus.registry import CorpusRegistry
-from ue_context.semantic.db import SemanticStore
+from codalith.coderag.adapter import CodeRAGAdapter
+from codalith.corpus.registry import CorpusRegistry
+from codalith.semantic.db import SemanticStore
 
 
 @pytest.mark.ue_acceptance
@@ -29,7 +29,7 @@ def test_ue57_source_mount_can_read_actor_header():
 
 @pytest.mark.ue_acceptance
 def test_ue57_semantic_status_meets_v0_floors():
-    semantic_db = Path(os.getenv("UE_CONTEXT_SEMANTIC_DB", "/tmp/ue-context-semantic.sqlite"))
+    semantic_db = Path(os.getenv("CODALITH_SEMANTIC_DB", "/tmp/codalith-semantic.sqlite"))
     if not semantic_db.exists():
         pytest.skip(f"Semantic DB is not available: {semantic_db}")
     store = SemanticStore(semantic_db)

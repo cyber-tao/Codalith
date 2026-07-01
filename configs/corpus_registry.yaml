@@ -1,28 +1,28 @@
 {
   "engines": {
-    "ue-${UE_CONTEXT_ENGINE_VERSION:-5.7.4}": {
+    "ue-${CODALITH_ENGINE_VERSION:-5.7.4}": {
       "kind": "engine",
-      "ue_version": "${UE_CONTEXT_ENGINE_VERSION:-5.7.4}",
-      "source_commit": "${UE_CONTEXT_ENGINE_SOURCE_COMMIT:-UNKNOWN}",
-      "source_root": "${UE_CONTEXT_ENGINE_SOURCE_ROOT:-/srv/ue/5.7.4}",
-      "indexed_root": "${UE_CONTEXT_ENGINE_INDEXED_ROOT:-/srv/ue-context/corpora/ue-5.7.4}",
-      "coderag_store": "${UE_CONTEXT_CODERAG_STORE_DIR:-/var/lib/ue-context/coderag/ue-5.7.4}",
-      "semantic_schema": "${UE_CONTEXT_ENGINE_SEMANTIC_SCHEMA:-ue_5_7_4}",
-      "card_root": "${UE_CONTEXT_ENGINE_CARD_ROOT:-/srv/ue-context/cards/ue-5.7.4}",
+      "ue_version": "${CODALITH_ENGINE_VERSION:-5.7.4}",
+      "source_commit": "${CODALITH_ENGINE_SOURCE_COMMIT:-UNKNOWN}",
+      "source_root": "${CODALITH_ENGINE_SOURCE_ROOT:-/srv/ue/5.7.4}",
+      "indexed_root": "${CODALITH_ENGINE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}",
+      "coderag_store": "${CODALITH_CODERAG_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4}",
+      "semantic_schema": "${CODALITH_ENGINE_SEMANTIC_SCHEMA:-ue_5_7_4}",
+      "card_root": "${CODALITH_ENGINE_CARD_ROOT:-/srv/codalith/cards/ue-5.7.4}",
       "default": true,
-      "access_scopes": ["${UE_CONTEXT_ENGINE_ACCESS_SCOPE:-ue:5.7}", "source:read"]
+      "access_scopes": ["${CODALITH_ENGINE_ACCESS_SCOPE:-ue:5.7}", "source:read"]
     }
   },
   "projects": {
-    "${UE_CONTEXT_PROJECT_ID:-ProjectA}": {
+    "${CODALITH_PROJECT_ID:-ProjectA}": {
       "kind": "project",
-      "engine_corpus": "ue-${UE_CONTEXT_ENGINE_VERSION:-5.7.4}",
-      "source_root": "${UE_CONTEXT_PROJECT_SOURCE_ROOT:-fixtures/project_overlay/ProjectA}",
-      "indexed_root": "${UE_CONTEXT_PROJECT_INDEXED_ROOT:-fixtures/project_overlay/ProjectA}",
-      "coderag_store": "${UE_CONTEXT_PROJECT_CODERAG_STORE_DIR:-data/coderag/project-a}",
-      "semantic_schema": "${UE_CONTEXT_PROJECT_SEMANTIC_SCHEMA:-project_a}",
-      "card_root": "${UE_CONTEXT_PROJECT_CARD_ROOT:-data/cards/project-a}",
-      "access_scopes": ["${UE_CONTEXT_PROJECT_ACCESS_SCOPE:-project:ProjectA}", "source:read"]
+      "engine_corpus": "ue-${CODALITH_ENGINE_VERSION:-5.7.4}",
+      "source_root": "${CODALITH_PROJECT_SOURCE_ROOT:-fixtures/project_overlay/ProjectA}",
+      "indexed_root": "${CODALITH_PROJECT_INDEXED_ROOT:-fixtures/project_overlay/ProjectA}",
+      "coderag_store": "${CODALITH_PROJECT_CODERAG_STORE_DIR:-data/coderag/project-a}",
+      "semantic_schema": "${CODALITH_PROJECT_SEMANTIC_SCHEMA:-project_a}",
+      "card_root": "${CODALITH_PROJECT_CARD_ROOT:-data/cards/project-a}",
+      "access_scopes": ["${CODALITH_PROJECT_ACCESS_SCOPE:-project:ProjectA}", "source:read"]
     }
   }
 }

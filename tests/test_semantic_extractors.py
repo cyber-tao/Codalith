@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from jobs.extract_semantic import extract_semantic_summary
 
-from ue_context.semantic.db import SemanticStore
-from ue_context.semantic.extractors.build_cs import BuildCsExtractor, write_module_deps
-from ue_context.semantic.extractors.compile_guards import extract_compile_guards
-from ue_context.semantic.extractors.uht_reflection import UHTReflectionExtractor
-from ue_context.semantic.graph import query_graph
+from codalith.semantic.db import SemanticStore
+from codalith.semantic.extractors.build_cs import BuildCsExtractor, write_module_deps
+from codalith.semantic.extractors.compile_guards import extract_compile_guards
+from codalith.semantic.extractors.uht_reflection import UHTReflectionExtractor
+from codalith.semantic.graph import query_graph
 
 
 def test_build_cs_extractor_outputs_dependencies():

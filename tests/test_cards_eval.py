@@ -3,12 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ue_context.cards.generator import attach_source_hashes, built_in_cards, write_cards
-from ue_context.cards.schema import CardClaim, KnowledgeCard
-from ue_context.cards.verifier import KnowledgeCardVerifier
-from ue_context.compiler.context_compiler import ContextCompiler
-from ue_context.corpus.uri_resolver import URIResolver
-from ue_context.eval.runner import EvalRunner, write_reports
+from codalith.cards.generator import attach_source_hashes, built_in_cards, write_cards
+from codalith.cards.schema import CardClaim, KnowledgeCard
+from codalith.cards.verifier import KnowledgeCardVerifier
+from codalith.compiler.context_compiler import ContextCompiler
+from codalith.corpus.uri_resolver import URIResolver
+from codalith.eval.runner import EvalRunner, write_reports
 
 
 def test_built_in_cards_verify_against_fixture(registry, adapter, tmp_path):
@@ -82,7 +82,7 @@ def test_eval_runner_generates_json_and_markdown(registry, adapter, tmp_path):
     assert report.file_recall_at_5 == 1.0
     json_path, md_path = write_reports(report, tmp_path / "reports")
     assert json.loads(json_path.read_text(encoding="utf-8"))["count"] == 1
-    assert Path(md_path).read_text(encoding="utf-8").startswith("# UE Context Eval Report")
+    assert Path(md_path).read_text(encoding="utf-8").startswith("# Codalith Eval Report")
 
 
 def test_source_locator_covers_seed_eval_dataset(registry, adapter):

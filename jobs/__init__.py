@@ -1,1 +1,1 @@
-"""CLI jobs for UE Context Engine."""
+"""CLI jobs for Codalith."""

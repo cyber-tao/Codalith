@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from ue_context.corpus.registry import CorpusRegistry
+from codalith.corpus.registry import CorpusRegistry
 
 
 def main(argv: list[str] | None = None) -> int:

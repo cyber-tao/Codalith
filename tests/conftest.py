@@ -7,14 +7,14 @@ from typing import Any
 import pytest
 from jobs.extract_semantic import extract_semantic_summary
 
-from ue_context.coderag.adapter import CodeRAGAdapter
-from ue_context.compiler.context_compiler import ContextCompiler
-from ue_context.corpus.registry import CorpusRegistry
-from ue_context.corpus.source_policy import SourcePolicy
-from ue_context.corpus.uri_resolver import URIResolver
-from ue_context.gateway.audit import AuditLogger
-from ue_context.gateway.tools import ToolRuntime, UETools
-from ue_context.semantic.db import SemanticStore
+from codalith.coderag.adapter import CodeRAGAdapter
+from codalith.compiler.context_compiler import ContextCompiler
+from codalith.corpus.registry import CorpusRegistry
+from codalith.corpus.source_policy import SourcePolicy
+from codalith.corpus.uri_resolver import URIResolver
+from codalith.gateway.audit import AuditLogger
+from codalith.gateway.tools import CodalithTools, ToolRuntime
+from codalith.semantic.db import SemanticStore
 
 
 @pytest.fixture()
@@ -177,7 +177,7 @@ def tools(
     registry: CorpusRegistry,
     policy_path: Path,
     adapter: CodeRAGAdapter,
-) -> UETools:
+) -> CodalithTools:
     resolver = URIResolver(registry)
     policy = SourcePolicy.from_file(str(policy_path))
     semantic_store = SemanticStore(tmp_path / "semantic.sqlite")
@@ -198,4 +198,4 @@ def tools(
         scopes={"source:read", "index:status", "cards:read", "graph:read", "ue:5.7"},
         semantic_store=semantic_store,
     )
-    return UETools(runtime)
+    return CodalithTools(runtime)
