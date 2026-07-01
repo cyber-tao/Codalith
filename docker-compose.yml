@@ -1,18 +1,26 @@
+x-ue-context-env: &ue-context-env
+  PYTHONPATH: ${UE_CONTEXT_WORKSPACE_DIR:-/workspace}/src
+  UE_CONTEXT_AUDIT_LOG: ${UE_CONTEXT_AUDIT_LOG:-/workspace/data/audit/source_reads.jsonl}
+  UE_CONTEXT_ENGINE_VERSION: ${UE_CONTEXT_ENGINE_VERSION:-5.7.4}
+  UE_CONTEXT_ENGINE_SOURCE_ROOT: ${UE_CONTEXT_ENGINE_SOURCE_ROOT:-/srv/ue/5.7.4}
+  UE_CONTEXT_ENGINE_INDEXED_ROOT: ${UE_CONTEXT_ENGINE_INDEXED_ROOT:-/srv/ue-context/corpora/ue-5.7.4}
+  UE_CONTEXT_ENGINE_CARD_ROOT: ${UE_CONTEXT_ENGINE_CARD_ROOT:-/srv/ue-context/cards/ue-5.7.4}
+  UE_CONTEXT_ENGINE_ACCESS_SCOPE: ${UE_CONTEXT_ENGINE_ACCESS_SCOPE:-ue:5.7}
+  UV_PROJECT_ENVIRONMENT: ${UE_CONTEXT_UV_ENV:-/tmp/ue-context-venv}
+  UV_LINK_MODE: copy
+  UV_DEFAULT_INDEX: ${UE_CONTEXT_PYPI_INDEX:-https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/}
+  PIP_INDEX_URL: ${UE_CONTEXT_PYPI_INDEX:-https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/}
+
 services:
   test:
     image: ghcr.io/astral-sh/uv:python3.12-bookworm
-    working_dir: /workspace
+    working_dir: ${UE_CONTEXT_WORKSPACE_DIR:-/workspace}
     env_file:
       - .env
     environment:
-      PYTHONPATH: /workspace/src
-      UE_CONTEXT_AUDIT_LOG: /workspace/data/audit/source_reads.jsonl
-      UV_PROJECT_ENVIRONMENT: /tmp/ue-context-venv
-      UV_LINK_MODE: copy
-      UV_DEFAULT_INDEX: https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/
-      PIP_INDEX_URL: https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/
+      <<: *ue-context-env
     volumes:
-      - .:/workspace
+      - ${UE_CONTEXT_REPO_ROOT:-.}:${UE_CONTEXT_WORKSPACE_DIR:-/workspace}
     command: >
       sh -lc "uv sync --extra dev &&
       uv run pytest &&
@@ -22,86 +30,75 @@ services:
   ue-acceptance:
     image: ghcr.io/astral-sh/uv:python3.12-bookworm
     profiles: ["ue"]
-    working_dir: /workspace
+    working_dir: ${UE_CONTEXT_WORKSPACE_DIR:-/workspace}
     env_file:
       - .env
     environment:
-      PYTHONPATH: /workspace/src
-      UE_CONTEXT_AUDIT_LOG: /workspace/data/audit/source_reads.jsonl
-      UV_PROJECT_ENVIRONMENT: /tmp/ue-context-venv
-      UV_LINK_MODE: copy
-      UV_DEFAULT_INDEX: https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/
-      PIP_INDEX_URL: https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/
-      UE_CONTEXT_SEMANTIC_DB: /tmp/ue-context-semantic.sqlite
+      <<: *ue-context-env
+      UE_CONTEXT_SEMANTIC_DB: ${UE_CONTEXT_SEMANTIC_DB:-/tmp/ue-context-semantic.sqlite}
     volumes:
-      - .:/workspace
-      - E:/UnrealEngine_5.7:/srv/ue/5.7.4:ro
+      - ${UE_CONTEXT_REPO_ROOT:-.}:${UE_CONTEXT_WORKSPACE_DIR:-/workspace}
+      - ${UE_CONTEXT_ENGINE_HOST_ROOT:-E:/UnrealEngine_5.7}:${UE_CONTEXT_ENGINE_SOURCE_ROOT:-/srv/ue/5.7.4}:ro
     command: >
       sh -lc "uv sync --extra dev &&
-      uv run ue-context-index-engine --version 5.7.4 --smoke &&
-      uv run ue-context-extract-semantic --version 5.7.4 --semantic-db \"$$UE_CONTEXT_SEMANTIC_DB\" --min-modules 100 --min-reflection-entities 100 --min-guards 10 --stop-after-min &&
-      uv run ue-context-verify-cards --version 5.7.4 &&
+      uv run ue-context-index-engine --version \"$${UE_CONTEXT_ENGINE_VERSION}\" --smoke &&
+      uv run ue-context-extract-semantic --version \"$${UE_CONTEXT_ENGINE_VERSION}\" --semantic-db \"$${UE_CONTEXT_SEMANTIC_DB}\" --min-modules 100 --min-reflection-entities 100 --min-guards 10 --stop-after-min &&
+      uv run ue-context-verify-cards --version \"$${UE_CONTEXT_ENGINE_VERSION}\" &&
       uv run pytest -m ue_acceptance"
 
   coderag-acceptance:
     image: ghcr.io/astral-sh/uv:python3.12-bookworm
     profiles: ["coderag"]
-    working_dir: /workspace
+    working_dir: ${UE_CONTEXT_WORKSPACE_DIR:-/workspace}
     env_file:
       - .env
     environment:
-      PYTHONPATH: /workspace/src
-      UV_PROJECT_ENVIRONMENT: /tmp/ue-context-venv
-      UV_LINK_MODE: copy
-      UV_DEFAULT_INDEX: https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/
-      PIP_INDEX_URL: https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/
+      <<: *ue-context-env
       CODERAG_PROVIDER: fake
       CODERAG_INDEX_ALL_TEXT: "1"
       CODERAG_GITIGNORE: "0"
-      CODERAG_STORE_DIR: /var/lib/ue-context/coderag/ue-5.7.4
+      CODERAG_STORE_DIR: ${UE_CONTEXT_CODERAG_STORE_DIR:-/var/lib/ue-context/coderag/ue-5.7.4}
+      UE_CONTEXT_CODERAG_STORE_DIR: ${UE_CONTEXT_CODERAG_STORE_DIR:-/var/lib/ue-context/coderag/ue-5.7.4}
       UE_CONTEXT_NATIVE_CODERAG_PROGRESS: "1"
     volumes:
-      - .:/workspace
-      - E:/UnrealEngine_5.7:/srv/ue/5.7.4:ro
-      - E:/UnrealEngine_5.7/Engine/Source:/srv/ue-context/corpora/ue-5.7.4/Engine/Source:ro
-      - E:/UnrealEngine_5.7/Engine/Plugins/Runtime/GameplayAbilities:/srv/ue-context/corpora/ue-5.7.4/Engine/Plugins/Runtime/GameplayAbilities:ro
+      - ${UE_CONTEXT_REPO_ROOT:-.}:${UE_CONTEXT_WORKSPACE_DIR:-/workspace}
+      - ${UE_CONTEXT_ENGINE_HOST_ROOT:-E:/UnrealEngine_5.7}:${UE_CONTEXT_ENGINE_SOURCE_ROOT:-/srv/ue/5.7.4}:ro
+      - ${UE_CONTEXT_ENGINE_SOURCE_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Source}:${UE_CONTEXT_ENGINE_INDEXED_ROOT:-/srv/ue-context/corpora/ue-5.7.4}/Engine/Source:ro
+      - ${UE_CONTEXT_GAMEPLAY_ABILITIES_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Plugins/Runtime/GameplayAbilities}:${UE_CONTEXT_ENGINE_INDEXED_ROOT:-/srv/ue-context/corpora/ue-5.7.4}/Engine/Plugins/Runtime/GameplayAbilities:ro
     command: >
       sh -lc "uv sync &&
-      uv run ue-context-coderag-acceptance --version 5.7.4 --provider fake --full"
+      uv run ue-context-coderag-acceptance --version \"$${UE_CONTEXT_ENGINE_VERSION}\" --provider fake --full"
 
   coderag-ollama-acceptance:
     image: ghcr.io/astral-sh/uv:python3.12-bookworm
     profiles: ["coderag"]
-    working_dir: /workspace
+    working_dir: ${UE_CONTEXT_WORKSPACE_DIR:-/workspace}
     env_file:
       - .env
     environment:
-      PYTHONPATH: /workspace/src
-      UV_PROJECT_ENVIRONMENT: /tmp/ue-context-venv
-      UV_LINK_MODE: copy
-      UV_DEFAULT_INDEX: https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/
-      PIP_INDEX_URL: https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/
+      <<: *ue-context-env
       CODERAG_PROVIDER: openai
-      CODERAG_OPENAI_MODEL: qwen3-embedding:0.6b
-      CODERAG_OPENAI_BATCH: "32"
-      CODERAG_WORKERS: "4"
-      OPENAI_BASE_URL: http://host.docker.internal:11434/v1
-      OPENAI_API_KEY: ollama
+      CODERAG_OPENAI_MODEL: ${CODERAG_OPENAI_MODEL:-qwen3-embedding:0.6b}
+      CODERAG_OPENAI_BATCH: ${CODERAG_OPENAI_BATCH:-32}
+      CODERAG_WORKERS: ${CODERAG_WORKERS:-4}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://host.docker.internal:11434/v1}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-ollama}
       CODERAG_INDEX_ALL_TEXT: "1"
       CODERAG_GITIGNORE: "0"
-      CODERAG_STORE_DIR: /var/lib/ue-context/coderag/ue-5.7.4-ollama-qwen3-embedding-0.6b
-      UE_CONTEXT_CODERAG_MAX_CHUNK_CHARS: "2048"
+      CODERAG_STORE_DIR: ${UE_CONTEXT_CODERAG_OLLAMA_STORE_DIR:-/var/lib/ue-context/coderag/ue-5.7.4-ollama-qwen3-embedding-0.6b}
+      UE_CONTEXT_CODERAG_STORE_DIR: ${UE_CONTEXT_CODERAG_OLLAMA_STORE_DIR:-/var/lib/ue-context/coderag/ue-5.7.4-ollama-qwen3-embedding-0.6b}
+      UE_CONTEXT_CODERAG_MAX_CHUNK_CHARS: ${UE_CONTEXT_CODERAG_MAX_CHUNK_CHARS:-2048}
       UE_CONTEXT_NATIVE_CODERAG_PROGRESS: "1"
       PYTHONWARNINGS: ignore::SyntaxWarning
     volumes:
-      - .:/workspace
-      - coderag-ollama-store:/var/lib/ue-context/coderag
-      - E:/UnrealEngine_5.7:/srv/ue/5.7.4:ro
-      - E:/UnrealEngine_5.7/Engine/Source:/srv/ue-context/corpora/ue-5.7.4/Engine/Source:ro
-      - E:/UnrealEngine_5.7/Engine/Plugins/Runtime/GameplayAbilities:/srv/ue-context/corpora/ue-5.7.4/Engine/Plugins/Runtime/GameplayAbilities:ro
+      - ${UE_CONTEXT_REPO_ROOT:-.}:${UE_CONTEXT_WORKSPACE_DIR:-/workspace}
+      - coderag-ollama-store:${UE_CONTEXT_CODERAG_VOLUME_ROOT:-/var/lib/ue-context/coderag}
+      - ${UE_CONTEXT_ENGINE_HOST_ROOT:-E:/UnrealEngine_5.7}:${UE_CONTEXT_ENGINE_SOURCE_ROOT:-/srv/ue/5.7.4}:ro
+      - ${UE_CONTEXT_ENGINE_SOURCE_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Source}:${UE_CONTEXT_ENGINE_INDEXED_ROOT:-/srv/ue-context/corpora/ue-5.7.4}/Engine/Source:ro
+      - ${UE_CONTEXT_GAMEPLAY_ABILITIES_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Plugins/Runtime/GameplayAbilities}:${UE_CONTEXT_ENGINE_INDEXED_ROOT:-/srv/ue-context/corpora/ue-5.7.4}/Engine/Plugins/Runtime/GameplayAbilities:ro
     command: >
       sh -lc "uv sync &&
-      uv run ue-context-coderag-acceptance --version 5.7.4 --provider openai --output-dir reports/coderag-ollama"
+      uv run ue-context-coderag-acceptance --version \"$${UE_CONTEXT_ENGINE_VERSION}\" --provider openai --output-dir reports/coderag-ollama"
 
 volumes:
   coderag-ollama-store:

@@ -1,28 +1,28 @@
 {
   "engines": {
-    "ue-5.7.4": {
+    "ue-${UE_CONTEXT_ENGINE_VERSION:-5.7.4}": {
       "kind": "engine",
-      "ue_version": "5.7.4",
-      "source_commit": "UNKNOWN",
-      "source_root": "/srv/ue/5.7.4",
-      "indexed_root": "/srv/ue-context/corpora/ue-5.7.4",
-      "coderag_store": "/var/lib/ue-context/coderag/ue-5.7.4",
-      "semantic_schema": "ue_5_7_4",
-      "card_root": "/srv/ue-context/cards/ue-5.7.4",
+      "ue_version": "${UE_CONTEXT_ENGINE_VERSION:-5.7.4}",
+      "source_commit": "${UE_CONTEXT_ENGINE_SOURCE_COMMIT:-UNKNOWN}",
+      "source_root": "${UE_CONTEXT_ENGINE_SOURCE_ROOT:-/srv/ue/5.7.4}",
+      "indexed_root": "${UE_CONTEXT_ENGINE_INDEXED_ROOT:-/srv/ue-context/corpora/ue-5.7.4}",
+      "coderag_store": "${UE_CONTEXT_CODERAG_STORE_DIR:-/var/lib/ue-context/coderag/ue-5.7.4}",
+      "semantic_schema": "${UE_CONTEXT_ENGINE_SEMANTIC_SCHEMA:-ue_5_7_4}",
+      "card_root": "${UE_CONTEXT_ENGINE_CARD_ROOT:-/srv/ue-context/cards/ue-5.7.4}",
       "default": true,
-      "access_scopes": ["ue:5.7", "source:read"]
+      "access_scopes": ["${UE_CONTEXT_ENGINE_ACCESS_SCOPE:-ue:5.7}", "source:read"]
     }
   },
   "projects": {
-    "ProjectA": {
+    "${UE_CONTEXT_PROJECT_ID:-ProjectA}": {
       "kind": "project",
-      "engine_corpus": "ue-5.7.4",
-      "source_root": "fixtures/project_overlay/ProjectA",
-      "indexed_root": "fixtures/project_overlay/ProjectA",
-      "coderag_store": "data/coderag/project-a",
-      "semantic_schema": "project_a",
-      "card_root": "data/cards/project-a",
-      "access_scopes": ["project:ProjectA", "source:read"]
+      "engine_corpus": "ue-${UE_CONTEXT_ENGINE_VERSION:-5.7.4}",
+      "source_root": "${UE_CONTEXT_PROJECT_SOURCE_ROOT:-fixtures/project_overlay/ProjectA}",
+      "indexed_root": "${UE_CONTEXT_PROJECT_INDEXED_ROOT:-fixtures/project_overlay/ProjectA}",
+      "coderag_store": "${UE_CONTEXT_PROJECT_CODERAG_STORE_DIR:-data/coderag/project-a}",
+      "semantic_schema": "${UE_CONTEXT_PROJECT_SEMANTIC_SCHEMA:-project_a}",
+      "card_root": "${UE_CONTEXT_PROJECT_CARD_ROOT:-data/cards/project-a}",
+      "access_scopes": ["${UE_CONTEXT_PROJECT_ACCESS_SCOPE:-project:ProjectA}", "source:read"]
     }
   }
 }
