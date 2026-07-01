@@ -82,14 +82,14 @@ services:
       PIP_INDEX_URL: https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/
       CODERAG_PROVIDER: openai
       CODERAG_OPENAI_MODEL: qwen3-embedding:0.6b
-      CODERAG_OPENAI_BATCH: "256"
+      CODERAG_OPENAI_BATCH: "32"
       CODERAG_WORKERS: "4"
       OPENAI_BASE_URL: http://host.docker.internal:11434/v1
       OPENAI_API_KEY: ollama
       CODERAG_INDEX_ALL_TEXT: "1"
       CODERAG_GITIGNORE: "0"
       CODERAG_STORE_DIR: /var/lib/ue-context/coderag/ue-5.7.4-ollama-qwen3-embedding-0.6b
-      UE_CONTEXT_CODERAG_MAX_CHUNK_CHARS: "4096"
+      UE_CONTEXT_CODERAG_MAX_CHUNK_CHARS: "2048"
       UE_CONTEXT_NATIVE_CODERAG_PROGRESS: "1"
       PYTHONWARNINGS: ignore::SyntaxWarning
     volumes:
