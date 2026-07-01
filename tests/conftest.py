@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from jobs.extract_semantic import extract_semantic_summary
 
 from ue_context.coderag.adapter import CodeRAGAdapter
 from ue_context.compiler.context_compiler import ContextCompiler
@@ -13,6 +14,7 @@ from ue_context.corpus.source_policy import SourcePolicy
 from ue_context.corpus.uri_resolver import URIResolver
 from ue_context.gateway.audit import AuditLogger
 from ue_context.gateway.tools import ToolRuntime, UETools
+from ue_context.semantic.db import SemanticStore
 
 
 @pytest.fixture()
@@ -135,10 +137,23 @@ def adapter(registry: CorpusRegistry) -> CodeRAGAdapter:
 
 
 @pytest.fixture()
-def tools(tmp_path: Path, registry: CorpusRegistry, policy_path: Path, adapter: CodeRAGAdapter) -> UETools:
+def tools(
+    tmp_path: Path,
+    fake_engine_root: Path,
+    registry: CorpusRegistry,
+    policy_path: Path,
+    adapter: CodeRAGAdapter,
+) -> UETools:
     resolver = URIResolver(registry)
     policy = SourcePolicy.from_file(str(policy_path))
-    compiler = ContextCompiler(registry, adapter)
+    semantic_store = SemanticStore(tmp_path / "semantic.sqlite")
+    extract_semantic_summary(
+        fake_engine_root,
+        corpus_id="ue-5.7.4",
+        version="5.7.4",
+        store=semantic_store,
+    )
+    compiler = ContextCompiler(registry, adapter, semantic_store=semantic_store)
     runtime = ToolRuntime(
         registry=registry,
         resolver=resolver,
@@ -147,5 +162,6 @@ def tools(tmp_path: Path, registry: CorpusRegistry, policy_path: Path, adapter: 
         compiler=compiler,
         audit=AuditLogger(tmp_path / "audit.jsonl"),
         scopes={"source:read", "index:status", "cards:read", "graph:read", "ue:5.7"},
+        semantic_store=semantic_store,
     )
     return UETools(runtime)

@@ -14,6 +14,8 @@ from ue_context.corpus.source_policy import SourcePolicy
 from ue_context.corpus.uri_resolver import URIResolver
 from ue_context.gateway.audit import AuditLogger, AuditRecord
 from ue_context.gateway.auth import scopes_from_env
+from ue_context.semantic.db import SemanticStore
+from ue_context.semantic.graph import query_graph
 
 
 @dataclass(slots=True)
@@ -25,6 +27,7 @@ class ToolRuntime:
     compiler: ContextCompiler
     audit: AuditLogger
     scopes: set[str]
+    semantic_store: SemanticStore | None = None
 
 
 def create_runtime(
@@ -37,7 +40,11 @@ def create_runtime(
     resolver = URIResolver(registry)
     policy = SourcePolicy.from_file(source_policy_path)
     adapter = CodeRAGAdapter(registry)
-    compiler = ContextCompiler(registry, adapter)
+    semantic_db = os.getenv("UE_CONTEXT_SEMANTIC_DB") or str(
+        Path("data") / "semantic" / "ue_context.sqlite"
+    )
+    semantic_store = SemanticStore(semantic_db)
+    compiler = ContextCompiler(registry, adapter, semantic_store=semantic_store)
     audit = AuditLogger(
         audit_log
         or os.getenv("UE_CONTEXT_AUDIT_LOG")
@@ -51,6 +58,7 @@ def create_runtime(
         compiler=compiler,
         audit=audit,
         scopes=scopes_from_env(),
+        semantic_store=semantic_store,
     )
 
 
@@ -160,11 +168,20 @@ class UETools:
         if "index:status" not in self.runtime.scopes:
             return {"error": "Missing required scope: index:status"}
         resolution = self.runtime.registry.resolve(version, project, include_project_overlay=bool(project))
+        semantic = {
+            "engine": self.runtime.semantic_store.semantic_status(resolution.engine.corpus_id)
+            if self.runtime.semantic_store
+            else None,
+            "project": self.runtime.semantic_store.semantic_status(resolution.project.corpus_id)
+            if self.runtime.semantic_store and resolution.project
+            else None,
+        }
         return {
             "engine": self.runtime.adapter.status(resolution.engine.corpus_id),
             "project": self.runtime.adapter.status(resolution.project.corpus_id)
             if resolution.project
             else None,
+            "semantic": semantic,
         }
 
     def ue_lookup_symbol(
@@ -183,7 +200,24 @@ class UETools:
             mode="api_usage" if include_examples else "explain",
             max_source_spans=8,
         )
-        return {"symbol": symbol, "kind": kind, "context": pack}
+        graph = self.ue_graph(node=symbol, version=version, project=project, max_nodes=24)
+        examples = (
+            self.ue_examples(
+                symbol_or_api=symbol,
+                version=version,
+                project=project,
+                max_examples=5,
+            )["examples"]
+            if include_examples
+            else []
+        )
+        return {
+            "symbol": symbol,
+            "kind": kind,
+            "context": pack,
+            "graph": graph,
+            "examples": examples,
+        }
 
     def ue_graph(
         self,
@@ -195,6 +229,39 @@ class UETools:
         depth: int = 1,
         max_nodes: int = 80,
     ) -> dict[str, Any]:
+        if "graph:read" not in self.runtime.scopes:
+            return {"error": "Missing required scope: graph:read"}
+        resolution = self.runtime.registry.resolve(version, project, include_project_overlay=bool(project))
+        if self.runtime.semantic_store is None:
+            return {
+                "node": node,
+                "version": version,
+                "project": project,
+                "edge_types": edge_types or [],
+                "depth": depth,
+                "max_nodes": max_nodes,
+                "nodes": [],
+                "edges": [],
+                "caveat": "Semantic graph store is not configured.",
+            }
+        nodes: dict[str, dict[str, Any]] = {}
+        edges: dict[tuple[object, object, object], dict[str, Any]] = {}
+        for corpus in resolution.ordered:
+            result = query_graph(
+                self.runtime.semantic_store,
+                corpus_id=corpus.corpus_id,
+                node=node,
+                edge_types=edge_types,
+                depth=depth,
+                max_nodes=max_nodes,
+            )
+            for result_node in result["nodes"]:
+                if isinstance(result_node, dict):
+                    nodes[str(result_node["id"])] = dict(result_node)
+            for edge in result["edges"]:
+                if isinstance(edge, dict):
+                    key = (edge.get("from"), edge.get("edge_type"), edge.get("to"))
+                    edges[key] = edge
         return {
             "node": node,
             "version": version,
@@ -202,9 +269,11 @@ class UETools:
             "edge_types": edge_types or [],
             "depth": depth,
             "max_nodes": max_nodes,
-            "nodes": [],
-            "edges": [],
-            "caveat": "v0 graph endpoint is registered; semantic edge expansion is populated by extractor jobs.",
+            "nodes": list(nodes.values())[:max_nodes],
+            "edges": list(edges.values()),
+            "caveat": None
+            if edges
+            else "No semantic graph edges matched this node. Run ue-context-extract-semantic with --semantic-db for this corpus.",
         }
 
     def ue_examples(
@@ -246,7 +315,7 @@ def tool_schemas() -> list[dict[str, Any]]:
     return [
         {
             "name": "ue_context",
-            "description": "Use first for any Unreal Engine / UE5 source-level question. Returns a version-pinned, source-backed Context Pack.",
+            "description": "Use first for any Unreal Engine / UE5 source-level question. Returns a version-pinned, source-backed Context Pack using CodeRAG retrieval plus UE semantic graph.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -285,18 +354,68 @@ def tool_schemas() -> list[dict[str, Any]]:
         },
         {
             "name": "ue_lookup_symbol",
-            "description": "Resolve a UE C++ or reflection symbol to source-backed context.",
-            "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]},
+            "description": "Resolve a UE C++ or reflection symbol to definitions, declarations, modules, UHT metadata, generated-code relation, references, examples, and source URIs.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "symbol": {"type": "string"},
+                    "version": {"type": "string", "default": "5.7.4"},
+                    "project": {"type": "string"},
+                    "kind": {
+                        "type": "string",
+                        "enum": [
+                            "any",
+                            "class",
+                            "struct",
+                            "function",
+                            "method",
+                            "macro",
+                            "module",
+                            "uclass",
+                            "ufunction",
+                            "uproperty",
+                        ],
+                        "default": "any",
+                    },
+                    "include_examples": {"type": "boolean", "default": True},
+                },
+                "required": ["symbol"],
+            },
         },
         {
             "name": "ue_graph",
-            "description": "Return UE graph neighbors for modules, plugins, symbols, and reflection entities.",
-            "inputSchema": {"type": "object", "properties": {"node": {"type": "string"}}, "required": ["node"]},
+            "description": "Return UE graph neighbors for modules, plugins, C++ symbols, reflection entities, Build.cs dependencies, include edges, overrides, generated-code relations, and usage examples.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "node": {"type": "string"},
+                    "version": {"type": "string", "default": "5.7.4"},
+                    "project": {"type": "string"},
+                    "edge_types": {"type": "array", "items": {"type": "string"}},
+                    "depth": {"type": "integer", "default": 1},
+                    "max_nodes": {"type": "integer", "default": 80},
+                },
+                "required": ["node"],
+            },
         },
         {
             "name": "ue_examples",
-            "description": "Find real usages of a UE API or symbol in engine and project source.",
-            "inputSchema": {"type": "object", "properties": {"symbol_or_api": {"type": "string"}}, "required": ["symbol_or_api"]},
+            "description": "Find real usages of a UE API or symbol in Engine source, plugins, tests, samples, and project overlay.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "symbol_or_api": {"type": "string"},
+                    "version": {"type": "string", "default": "5.7.4"},
+                    "project": {"type": "string"},
+                    "scope": {
+                        "type": "string",
+                        "enum": ["engine", "plugins", "tests", "project", "all"],
+                        "default": "all",
+                    },
+                    "max_examples": {"type": "integer", "default": 8},
+                },
+                "required": ["symbol_or_api"],
+            },
         },
         {
             "name": "ue_compare_versions",
@@ -307,6 +426,11 @@ def tool_schemas() -> list[dict[str, Any]]:
                     "target": {"type": "string"},
                     "from_version": {"type": "string"},
                     "to_version": {"type": "string"},
+                    "diff_type": {
+                        "type": "string",
+                        "enum": ["summary", "api", "source", "module_deps", "reflection", "behavior"],
+                        "default": "summary",
+                    },
                 },
                 "required": ["target", "from_version", "to_version"],
             },

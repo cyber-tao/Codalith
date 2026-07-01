@@ -34,3 +34,9 @@ CREATE TABLE IF NOT EXISTS ue_graph_edges (
   confidence REAL DEFAULT 1.0,
   metadata TEXT DEFAULT '{}'
 );
+
+CREATE INDEX IF NOT EXISTS idx_ue_graph_from
+ON ue_graph_edges(corpus_id, from_node, edge_type);
+
+CREATE INDEX IF NOT EXISTS idx_ue_graph_to
+ON ue_graph_edges(corpus_id, to_node, edge_type);

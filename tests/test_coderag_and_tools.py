@@ -57,14 +57,44 @@ def test_ue_context_returns_context_pack(tools):
     assert pack["schema_version"] == "0.1"
     assert pack["version"] == "5.7.4"
     assert pack["source_spans"]
+    assert pack["graph_edges"]
     assert any(span["path"].endswith("Actor.h") for span in pack["source_spans"])
+
+
+def test_ue_graph_returns_semantic_edges(tools):
+    graph = tools.ue_graph(node="AActor", version="5.7.4", depth=2)
+
+    assert any(edge["edge_type"] == "owns_reflection" for edge in graph["edges"])
+    assert any(edge["edge_type"] == "replicated_using" for edge in graph["edges"])
+
+
+def test_ue_lookup_symbol_includes_graph_and_examples(tools):
+    result = tools.ue_lookup_symbol(symbol="AActor", version="5.7.4")
+
+    assert result["context"]["source_spans"]
+    assert result["graph"]["edges"]
+    assert result["examples"]
+
+
+def test_ue_index_status_reports_semantic_store(tools):
+    status = tools.ue_index_status(version="5.7.4")
+
+    assert status["semantic"]["engine"]["graph_edges"] > 0
 
 
 def test_mcp_tools_list_and_call(tools):
     listed = handle_request({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, tools)
     assert listed is not None
     names = {item["name"] for item in listed["result"]["tools"]}
-    assert {"ue_context", "ue_read_source", "ue_index_status"} <= names
+    assert {
+        "ue_context",
+        "ue_read_source",
+        "ue_index_status",
+        "ue_lookup_symbol",
+        "ue_graph",
+        "ue_examples",
+        "ue_compare_versions",
+    } <= names
     called = handle_request(
         {
             "jsonrpc": "2.0",
@@ -79,3 +109,32 @@ def test_mcp_tools_list_and_call(tools):
     )
     assert called is not None
     assert called["result"]["structuredContent"]["source_spans"]
+
+
+def test_mcp_resources_list_templates_and_read(tools):
+    listed = handle_request({"jsonrpc": "2.0", "id": 1, "method": "resources/list"}, tools)
+    assert listed is not None
+    assert any(item["uri"] == "ue://5.7.4/modules" for item in listed["result"]["resources"])
+
+    templates = handle_request(
+        {"jsonrpc": "2.0", "id": 2, "method": "resources/templates/list"},
+        tools,
+    )
+    assert templates is not None
+    assert any(
+        item["uriTemplate"] == "ue://{version}/symbol/{symbol}"
+        for item in templates["result"]["resourceTemplates"]
+    )
+
+    read = handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "resources/read",
+            "params": {"uri": "ue://5.7.4"},
+        },
+        tools,
+    )
+    assert read is not None
+    content = json.loads(read["result"]["contents"][0]["text"])
+    assert content["semantic"]["graph_edges"] > 0

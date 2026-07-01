@@ -11,12 +11,20 @@ from ue_context.compiler.reranker import rerank
 from ue_context.compiler.retrieval_planner import plan_queries
 from ue_context.compiler.source_locator import locate_source_priors
 from ue_context.corpus.registry import CorpusRegistry
+from ue_context.semantic.graph import GraphStore, query_graph
 
 
 class ContextCompiler:
-    def __init__(self, registry: CorpusRegistry, adapter: CodeRAGAdapter) -> None:
+    def __init__(
+        self,
+        registry: CorpusRegistry,
+        adapter: CodeRAGAdapter,
+        *,
+        semantic_store: GraphStore | None = None,
+    ) -> None:
         self.registry = registry
         self.adapter = adapter
+        self.semantic_store = semantic_store
 
     def compile(
         self,
@@ -54,6 +62,10 @@ class ContextCompiler:
         inferred_modules = _module_entries(version, modules, hits)
         source_spans = select_source_spans(hits)
         source_spans.extend(_card_evidence_spans(hits))
+        graph_edges = self._graph_edges(
+            resolution.engine.corpus_id,
+            [*identifiers, *(module["name"] for module in inferred_modules)],
+        )
         cards = [
             {
                 "uri": hit.uri,
@@ -85,9 +97,9 @@ class ContextCompiler:
             ],
             cards=cards,
             source_spans=source_spans,
-            graph_edges=[],
+            graph_edges=graph_edges,
             caveats=[
-                "v0 retrieval is source-backed but semantic graph expansion is intentionally conservative.",
+                _graph_caveat(graph_edges, self.semantic_store is not None),
                 "Exact UE behavior can depend on build target, platform guards, and project overrides.",
             ],
             recommended_next_calls=[
@@ -98,6 +110,27 @@ class ContextCompiler:
                 for span in source_spans[:3]
             ],
         )
+
+    def _graph_edges(self, corpus_id: str, nodes: list[str], max_edges: int = 24) -> list[dict[str, object]]:
+        if self.semantic_store is None:
+            return []
+        edges: dict[tuple[object, object, object], dict[str, object]] = {}
+        for node in nodes:
+            result = query_graph(
+                self.semantic_store,
+                corpus_id=corpus_id,
+                node=node,
+                depth=1,
+                max_nodes=24,
+            )
+            for edge in result["edges"]:
+                if not isinstance(edge, dict):
+                    continue
+                key = (edge.get("from"), edge.get("edge_type"), edge.get("to"))
+                edges[key] = edge
+                if len(edges) >= max_edges:
+                    return list(edges.values())
+        return list(edges.values())
 
 
 def _unique_hits(hits: list[RetrievalHit]) -> list[RetrievalHit]:
@@ -163,3 +196,11 @@ def _parse_source_uri(uri: str) -> tuple[str, int, int] | None:
     if not match:
         return None
     return match.group("path"), int(match.group("start")), int(match.group("end"))
+
+
+def _graph_caveat(graph_edges: list[dict[str, object]], has_store: bool) -> str:
+    if graph_edges:
+        return "Semantic graph edges are included from extractor output where available."
+    if has_store:
+        return "Semantic graph store is configured, but no matching graph edges were found for this query."
+    return "Semantic graph store is not configured; graph expansion is unavailable for this context pack."
