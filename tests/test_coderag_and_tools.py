@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
-from ue_context.coderag.adapter import _native_store_dir
+from ue_context.coderag.adapter import _limit_chunk_texts, _native_store_dir
 from ue_context.gateway.mcp_server import handle_request
+
+
+@dataclass(frozen=True, slots=True)
+class _Chunk:
+    text: str
 
 
 def test_local_coderag_adapter_searches_fixture(adapter):
@@ -23,6 +29,16 @@ def test_native_store_dir_prefers_env_override(registry, monkeypatch, tmp_path):
 
     monkeypatch.delenv("CODERAG_STORE_DIR")
     assert _native_store_dir(corpus) == Path(corpus.coderag_store)
+
+
+def test_limit_chunk_texts_truncates_oversized_chunks():
+    chunks = [_Chunk("abcd"), _Chunk("abcdef")]
+
+    limited = _limit_chunk_texts(chunks, 4)
+
+    assert limited[0] is chunks[0]
+    assert limited[1].text == "abcd"
+    assert chunks[1].text == "abcdef"
 
 
 def test_ue_read_source_adds_line_numbers_and_audit(tools, tmp_path):

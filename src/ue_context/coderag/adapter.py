@@ -11,7 +11,7 @@ import os
 import re
 import time
 from collections.abc import Iterable
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -239,6 +239,7 @@ class CodeRAGAdapter:
             from coderag.config import Config  # type: ignore[import-not-found]
         except Exception as exc:
             raise CodeRAGAdapterError("The coderag package is not installed") from exc
+        _configure_native_chunk_limit()
         config = Config.from_env()
         config = _dataclass_replace(
             config,
@@ -408,6 +409,38 @@ def _uri_for_hit(corpus: Corpus, path: str, start: int, end: int) -> str:
 
 def _native_store_dir(corpus: Corpus) -> Path:
     return Path(os.environ.get("CODERAG_STORE_DIR", str(corpus.coderag_store)))
+
+
+def _configure_native_chunk_limit() -> None:
+    raw = os.getenv("UE_CONTEXT_CODERAG_MAX_CHUNK_CHARS")
+    if not raw:
+        return
+    try:
+        max_chars = int(raw)
+    except ValueError as exc:
+        raise CodeRAGAdapterError("UE_CONTEXT_CODERAG_MAX_CHUNK_CHARS must be an integer") from exc
+    if max_chars <= 0:
+        return
+
+    import coderag.indexer as indexer  # type: ignore[import-not-found]
+
+    if getattr(indexer.chunk_file, "_ue_context_max_chunk_chars", None) == max_chars:
+        return
+    original = getattr(indexer.chunk_file, "_ue_context_original", indexer.chunk_file)
+
+    def limited_chunk_file(text: str, language: str, config: Any) -> list[Any]:
+        return _limit_chunk_texts(original(text, language, config), max_chars)
+
+    limited_chunk_file._ue_context_original = original  # type: ignore[attr-defined]
+    limited_chunk_file._ue_context_max_chunk_chars = max_chars  # type: ignore[attr-defined]
+    indexer.chunk_file = limited_chunk_file
+
+
+def _limit_chunk_texts(chunks: list[Any], max_chars: int) -> list[Any]:
+    return [
+        replace(chunk, text=chunk.text[:max_chars]) if len(chunk.text) > max_chars else chunk
+        for chunk in chunks
+    ]
 
 
 def _glob_match(pattern: str, path: str) -> bool:
