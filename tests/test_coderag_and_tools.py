@@ -182,6 +182,61 @@ def test_configure_native_batch_embedding_supports_concurrent_batches(monkeypatc
     assert reporter.messages[-1] == "Embedding 4/4 file(s)..."
 
 
+def test_configure_native_batch_embedding_splits_failed_batches(monkeypatch):
+    coderag_module = ModuleType("coderag")
+    indexer_module = ModuleType("coderag.indexer")
+
+    def chunk_file(text, language, config):
+        return [SimpleNamespace(text=part, language=language) for part in text.split()]
+
+    class Provider:
+        def __init__(self):
+            self.calls = []
+
+        def embed_documents(self, texts):
+            self.calls.append(tuple(texts))
+            if len(texts) > 2:
+                raise TimeoutError("slow embedding batch")
+            return [f"vec:{text}" for text in texts]
+
+    class Indexer:
+        def __init__(self):
+            self.provider = Provider()
+            self.config = object()
+            self.writes = []
+
+        def _write(self, item, chunks, vectors):
+            self.writes.append((item.text, tuple(vectors or ())))
+            return len(chunks), 0
+
+        def _embed_and_write(self, work, *, reporter):
+            raise AssertionError("original implementation should be patched")
+
+    indexer_module.chunk_file = chunk_file
+    indexer_module.Indexer = Indexer
+    coderag_module.indexer = indexer_module
+    monkeypatch.setitem(sys.modules, "coderag", coderag_module)
+    monkeypatch.setitem(sys.modules, "coderag.indexer", indexer_module)
+    monkeypatch.setenv("CODALITH_CODERAG_BATCH_CHUNKS", "4")
+
+    _configure_native_batch_embedding()
+
+    reporter = SimpleNamespace(messages=[], update=lambda message: reporter.messages.append(message))
+    indexer = Indexer()
+    work = [SimpleNamespace(text=str(i), language="text") for i in range(4)]
+
+    results = list(indexer._embed_and_write(work, reporter=reporter))
+
+    assert len(results) == 4
+    assert indexer.provider.calls == [("0", "1", "2", "3"), ("0", "1"), ("2", "3")]
+    assert indexer.writes == [
+        ("0", ("vec:0",)),
+        ("1", ("vec:1",)),
+        ("2", ("vec:2",)),
+        ("3", ("vec:3",)),
+    ]
+
+
 def test_codalith_read_source_adds_line_numbers_and_audit(tools, tmp_path):
     result = tools.codalith_read_source(
         uri="ue://5.7.4/source/Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h#L1-L4"

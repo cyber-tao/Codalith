@@ -490,6 +490,12 @@ def _configure_native_batch_embedding() -> None:
     except ValueError as exc:
         raise CodeRAGAdapterError("CODALITH_CODERAG_BATCH_CONCURRENCY must be an integer") from exc
     batch_concurrency = max(1, batch_concurrency)
+    raw_min_batch = os.getenv("CODALITH_CODERAG_EMBED_MIN_BATCH_CHUNKS")
+    try:
+        min_batch_chunks = int(raw_min_batch) if raw_min_batch else 1
+    except ValueError as exc:
+        raise CodeRAGAdapterError("CODALITH_CODERAG_EMBED_MIN_BATCH_CHUNKS must be an integer") from exc
+    min_batch_chunks = max(1, min_batch_chunks)
 
     from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
     from typing import cast
@@ -537,12 +543,12 @@ def _configure_native_batch_embedding() -> None:
 
         if batch_concurrency == 1:
             for pending, texts in groups():
-                vectors = self.provider.embed_documents(texts) if texts else None
+                vectors = _embed_documents_with_split(self.provider, texts, min_batch_chunks)
                 yield from write_group(pending, vectors)
             return
 
         def embed(texts: list[str]) -> Any:
-            return self.provider.embed_documents(texts) if texts else None
+            return _embed_documents_with_split(self.provider, texts, min_batch_chunks)
 
         group_iter = groups()
         with ThreadPoolExecutor(max_workers=batch_concurrency) as pool:
@@ -567,6 +573,20 @@ def _configure_native_batch_embedding() -> None:
     cast(Any, batched_embed_and_write)._codalith_batch_chunks = batch_chunks
     cast(Any, batched_embed_and_write)._codalith_batch_concurrency = batch_concurrency
     indexer.Indexer._embed_and_write = batched_embed_and_write
+
+
+def _embed_documents_with_split(provider: Any, texts: list[str], min_batch_chunks: int = 1) -> Any | None:
+    if not texts:
+        return None
+    try:
+        return provider.embed_documents(texts)
+    except Exception:
+        if len(texts) <= min_batch_chunks:
+            raise
+        midpoint = len(texts) // 2
+        left = _embed_documents_with_split(provider, texts[:midpoint], min_batch_chunks)
+        right = _embed_documents_with_split(provider, texts[midpoint:], min_batch_chunks)
+        return [*(left or []), *(right or [])]
 
 
 def _glob_match(pattern: str, path: str) -> bool:
