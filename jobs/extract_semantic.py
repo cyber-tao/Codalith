@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -71,7 +73,7 @@ def extract_semantic_summary(
     cpp_symbols = 0
     headers_scanned = 0
 
-    for build_file in root.rglob("*.Build.cs"):
+    for build_file in _iter_files(root, ".Build.cs"):
         try:
             extracted = build_extractor.extract_file(build_file)
         except OSError:
@@ -86,10 +88,10 @@ def extract_semantic_summary(
                 evidence_uri=_source_uri(version, root, build_file, 1, 1),
                 dependencies=extracted,
             )
+        if stop_after_min and len(modules) >= min_modules:
+            break
 
-    for header in root.rglob("*.h"):
-        if _skip_path(header):
-            continue
+    for header in _iter_files(root, ".h"):
         try:
             text = header.read_text(encoding="utf-8", errors="replace")
         except OSError:
@@ -157,8 +159,45 @@ def _enforce(summary: dict[str, Any], min_modules: int, min_reflection_entities:
         raise SystemExit("; ".join(failures))
 
 
+def _iter_files(root: Path, suffix: str) -> Iterator[Path]:
+    seen: set[Path] = set()
+    for scan_root in _semantic_scan_roots(root):
+        for dirpath, dirnames, filenames in os.walk(scan_root):
+            dirnames[:] = [
+                dirname for dirname in dirnames if not _skip_path(Path(dirpath) / dirname)
+            ]
+            for filename in filenames:
+                if not filename.endswith(suffix):
+                    continue
+                path = Path(dirpath) / filename
+                if path in seen:
+                    continue
+                seen.add(path)
+                yield path
+
+
+def _semantic_scan_roots(root: Path) -> list[Path]:
+    candidates = (
+        root / "Engine" / "Source" / "Runtime",
+        root / "Engine" / "Source" / "Developer",
+        root / "Engine" / "Source" / "Editor",
+        root,
+    )
+    roots: list[Path] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        if not candidate.exists():
+            continue
+        resolved = candidate.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        roots.append(candidate)
+    return roots
+
+
 def _skip_path(path: Path) -> bool:
-    ignored = {"Intermediate", "Binaries", "DerivedDataCache", "Saved", ".git"}
+    ignored = {"Intermediate", "Binaries", "DerivedDataCache", "Saved", ".git", "ThirdParty"}
     return any(part in ignored for part in path.parts)
 
 
