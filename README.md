@@ -85,7 +85,7 @@ Set these variables for each machine:
 | `CODALITH_ENGINE_SOURCE_ROOT` | Container path for the UE source root. |
 | `CODALITH_ENGINE_INDEXED_ROOT` | Container path for the indexed corpus root. |
 | `CODALITH_CODERAG_STORE_DIR` | Container path for the default CodeRAG store. |
-| `CODALITH_CODERAG_OLLAMA_STORE_DIR` | Container path for the Ollama/OpenAI-compatible CodeRAG store. |
+| `CODALITH_CODERAG_OPENAI_STORE_DIR` | Container path for the OpenAI-compatible CodeRAG store. |
 
 Linux server example:
 
@@ -135,10 +135,10 @@ docker compose --profile coderag run --rm coderag-acceptance
 
 This profile expects `external/CodeRAG` to be initialized. For temporary local experiments without the submodule, set `CODALITH_CODERAG_ALLOW_AUTO_CLONE=1` to allow a shallow clone into `/tmp/CodeRAG`.
 
-Run the Ollama/OpenAI-compatible CodeRAG acceptance path:
+Run the OpenAI-compatible CodeRAG acceptance path:
 
 ```bash
-docker compose --profile coderag run --rm coderag-ollama-acceptance
+docker compose --profile coderag run --rm coderag-openai-acceptance
 ```
 
 ## MCP Client Configuration

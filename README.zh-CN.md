@@ -85,7 +85,7 @@ cp .env.example .env
 | `CODALITH_ENGINE_SOURCE_ROOT` | 容器内 UE source root。 |
 | `CODALITH_ENGINE_INDEXED_ROOT` | 容器内 indexed corpus root。 |
 | `CODALITH_CODERAG_STORE_DIR` | 默认 CodeRAG store 的容器内路径。 |
-| `CODALITH_CODERAG_OLLAMA_STORE_DIR` | Ollama/OpenAI-compatible CodeRAG store 的容器内路径。 |
+| `CODALITH_CODERAG_OPENAI_STORE_DIR` | OpenAI-compatible CodeRAG store 的容器内路径。 |
 
 Linux 服务器示例：
 
@@ -135,10 +135,10 @@ docker compose --profile coderag run --rm coderag-acceptance
 
 这个 profile 需要先初始化 `external/CodeRAG`。如果只是本地临时实验且没有 submodule，可以设置 `CODALITH_CODERAG_ALLOW_AUTO_CLONE=1`，允许浅克隆到 `/tmp/CodeRAG`。
 
-运行 Ollama/OpenAI-compatible 的 CodeRAG acceptance：
+运行 OpenAI-compatible 的 CodeRAG acceptance：
 
 ```bash
-docker compose --profile coderag run --rm coderag-ollama-acceptance
+docker compose --profile coderag run --rm coderag-openai-acceptance
 ```
 
 ## MCP 客户端配置

@@ -45,7 +45,7 @@ def test_local_coderag_adapter_ignores_third_party_noise(adapter, fake_engine_ro
 
 def test_native_store_dir_prefers_env_override(registry, monkeypatch, tmp_path):
     corpus = registry.get_engine("5.7.4")
-    override = tmp_path / "ollama-store"
+    override = tmp_path / "openai-store"
     monkeypatch.setenv("CODERAG_STORE_DIR", str(override))
 
     assert _native_store_dir(corpus) == override

@@ -44,14 +44,14 @@ services:
       CODERAG_PROVIDER: openai
       CODERAG_INDEX_ALL_TEXT: "1"
       CODERAG_GITIGNORE: "0"
-      CODERAG_STORE_DIR: ${CODALITH_CODERAG_OLLAMA_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4-ollama-qwen3-embedding-0.6b}
-      CODALITH_CODERAG_STORE_DIR: ${CODALITH_CODERAG_OLLAMA_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4-ollama-qwen3-embedding-0.6b}
+      CODERAG_STORE_DIR: ${CODALITH_CODERAG_OPENAI_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4-openai-qwen3-embedding-8b}
+      CODALITH_CODERAG_STORE_DIR: ${CODALITH_CODERAG_OPENAI_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4-openai-qwen3-embedding-8b}
       PYTHONWARNINGS: ignore::SyntaxWarning
     ports:
       - "${CODALITH_HTTP_BIND:-127.0.0.1}:${CODALITH_HTTP_PORT:-8765}:${CODALITH_HTTP_PORT:-8765}"
     volumes:
       - ${CODALITH_REPO_ROOT:-.}:${CODALITH_WORKSPACE_DIR:-/workspace}
-      - coderag-ollama-store:${CODALITH_CODERAG_VOLUME_ROOT:-/var/lib/codalith/coderag}
+      - coderag-openai-store:${CODALITH_CODERAG_VOLUME_ROOT:-/var/lib/codalith/coderag}
       - ${CODALITH_ENGINE_HOST_ROOT:-E:/UnrealEngine_5.7}:${CODALITH_ENGINE_SOURCE_ROOT:-/srv/ue/5.7.4}:ro
     command: >
       sh -lc "uv sync &&
@@ -100,7 +100,7 @@ services:
       sh -lc "uv sync &&
       uv run codalith-coderag-acceptance --version \"$${CODALITH_ENGINE_VERSION}\" --provider fake --full"
 
-  coderag-ollama-acceptance:
+  coderag-openai-acceptance:
     image: ghcr.io/astral-sh/uv:python3.12-bookworm
     profiles: ["coderag"]
     working_dir: ${CODALITH_WORKSPACE_DIR:-/workspace}
@@ -112,24 +112,24 @@ services:
       CODERAG_OPENAI_MODEL: ${CODERAG_OPENAI_MODEL:-qwen3-embedding:0.6b}
       CODERAG_OPENAI_BATCH: ${CODERAG_OPENAI_BATCH:-32}
       CODERAG_WORKERS: ${CODERAG_WORKERS:-4}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://host.docker.internal:11434/v1}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-ollama}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.example.com/v1}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-replace-me}
       CODERAG_INDEX_ALL_TEXT: "1"
       CODERAG_GITIGNORE: "0"
-      CODERAG_STORE_DIR: ${CODALITH_CODERAG_OLLAMA_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4-ollama-qwen3-embedding-0.6b}
-      CODALITH_CODERAG_STORE_DIR: ${CODALITH_CODERAG_OLLAMA_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4-ollama-qwen3-embedding-0.6b}
+      CODERAG_STORE_DIR: ${CODALITH_CODERAG_OPENAI_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4-openai-qwen3-embedding-8b}
+      CODALITH_CODERAG_STORE_DIR: ${CODALITH_CODERAG_OPENAI_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4-openai-qwen3-embedding-8b}
       CODALITH_CODERAG_MAX_CHUNK_CHARS: ${CODALITH_CODERAG_MAX_CHUNK_CHARS:-2048}
       CODALITH_NATIVE_CODERAG_PROGRESS: "1"
       PYTHONWARNINGS: ignore::SyntaxWarning
     volumes:
       - ${CODALITH_REPO_ROOT:-.}:${CODALITH_WORKSPACE_DIR:-/workspace}
-      - coderag-ollama-store:${CODALITH_CODERAG_VOLUME_ROOT:-/var/lib/codalith/coderag}
+      - coderag-openai-store:${CODALITH_CODERAG_VOLUME_ROOT:-/var/lib/codalith/coderag}
       - ${CODALITH_ENGINE_HOST_ROOT:-E:/UnrealEngine_5.7}:${CODALITH_ENGINE_SOURCE_ROOT:-/srv/ue/5.7.4}:ro
       - ${CODALITH_ENGINE_SOURCE_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Source}:${CODALITH_ENGINE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Source:ro
       - ${CODALITH_GAMEPLAY_ABILITIES_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Plugins/Runtime/GameplayAbilities}:${CODALITH_ENGINE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Plugins/Runtime/GameplayAbilities:ro
     command: >
       sh -lc "uv sync &&
-      uv run codalith-coderag-acceptance --version \"$${CODALITH_ENGINE_VERSION}\" --provider openai --output-dir reports/coderag-ollama"
+      uv run codalith-coderag-acceptance --version \"$${CODALITH_ENGINE_VERSION}\" --provider openai --output-dir reports/coderag-openai"
 
 volumes:
-  coderag-ollama-store:
+  coderag-openai-store:
