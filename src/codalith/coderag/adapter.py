@@ -484,13 +484,23 @@ def _configure_native_batch_embedding() -> None:
         raise CodeRAGAdapterError("CODALITH_CODERAG_BATCH_CHUNKS must be an integer") from exc
     if batch_chunks <= 1:
         return
+    raw_concurrency = os.getenv("CODALITH_CODERAG_BATCH_CONCURRENCY")
+    try:
+        batch_concurrency = int(raw_concurrency) if raw_concurrency else 1
+    except ValueError as exc:
+        raise CodeRAGAdapterError("CODALITH_CODERAG_BATCH_CONCURRENCY must be an integer") from exc
+    batch_concurrency = max(1, batch_concurrency)
 
+    from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
     from typing import cast
 
     import coderag.indexer as indexer
 
     current = indexer.Indexer._embed_and_write
-    if getattr(current, "_codalith_batch_chunks", None) == batch_chunks:
+    if (
+        getattr(current, "_codalith_batch_chunks", None) == batch_chunks
+        and getattr(current, "_codalith_batch_concurrency", None) == batch_concurrency
+    ):
         return
 
     def batched_embed_and_write(self: Any, work: list[Any], *, reporter: Any) -> Iterator[Any]:
@@ -498,14 +508,24 @@ def _configure_native_batch_embedding() -> None:
             return
         total = len(work)
         done = 0
-        pending: list[tuple[Any, list[Any], int]] = []
-        texts: list[str] = []
+        Group = list[tuple[Any, list[Any], int]]
 
-        def flush_pending() -> Iterator[Any]:
+        def groups() -> Iterator[tuple[Group, list[str]]]:
+            pending: Group = []
+            texts: list[str] = []
+            for item in work:
+                chunks = indexer.chunk_file(item.text, item.language, self.config)
+                pending.append((item, chunks, len(chunks)))
+                texts.extend(str(chunk.text) for chunk in chunks)
+                if len(texts) >= batch_chunks:
+                    yield pending, texts
+                    pending = []
+                    texts = []
+            if pending:
+                yield pending, texts
+
+        def write_group(pending: Group, vectors: Any | None) -> Iterator[Any]:
             nonlocal done
-            if not pending:
-                return
-            vectors = self.provider.embed_documents(texts) if texts else None
             offset = 0
             for item, chunks, count in pending:
                 item_vectors = vectors[offset : offset + count] if vectors is not None else None
@@ -514,18 +534,38 @@ def _configure_native_batch_embedding() -> None:
                 yield item, added, removed
                 done += 1
                 reporter.update(f"Embedding {done}/{total} file(s)...")
-            pending.clear()
-            texts.clear()
 
-        for item in work:
-            chunks = indexer.chunk_file(item.text, item.language, self.config)
-            pending.append((item, chunks, len(chunks)))
-            texts.extend(str(chunk.text) for chunk in chunks)
-            if len(texts) >= batch_chunks:
-                yield from flush_pending()
-        yield from flush_pending()
+        if batch_concurrency == 1:
+            for pending, texts in groups():
+                vectors = self.provider.embed_documents(texts) if texts else None
+                yield from write_group(pending, vectors)
+            return
+
+        def embed(texts: list[str]) -> Any:
+            return self.provider.embed_documents(texts) if texts else None
+
+        group_iter = groups()
+        with ThreadPoolExecutor(max_workers=batch_concurrency) as pool:
+            inflight: dict[Future[Any], Group] = {}
+
+            def submit_until_full() -> None:
+                while len(inflight) < batch_concurrency:
+                    try:
+                        pending, texts = next(group_iter)
+                    except StopIteration:
+                        return
+                    inflight[pool.submit(embed, texts)] = pending
+
+            submit_until_full()
+            while inflight:
+                finished, _ = wait(inflight, return_when=FIRST_COMPLETED)
+                for future in finished:
+                    pending = inflight.pop(future)
+                    yield from write_group(pending, future.result())
+                submit_until_full()
 
     cast(Any, batched_embed_and_write)._codalith_batch_chunks = batch_chunks
+    cast(Any, batched_embed_and_write)._codalith_batch_concurrency = batch_concurrency
     indexer.Indexer._embed_and_write = batched_embed_and_write
 
 
