@@ -23,6 +23,26 @@ def test_local_coderag_adapter_searches_fixture(adapter):
     assert any(hit.path.endswith("Actor.h") for hit in hits)
 
 
+def test_local_coderag_adapter_ignores_third_party_noise(adapter, fake_engine_root):
+    noise = fake_engine_root / "Engine/Source/ThirdParty/Noise/docs/search_index.json"
+    noise.parent.mkdir(parents=True, exist_ok=True)
+    noise.write_text(
+        json.dumps({"tokens": ["AActor", "replication", "ReplicatedUsing", "OnRep"] * 200}),
+        encoding="utf-8",
+    )
+
+    adapter.reindex("ue-5.7.4")
+    hits = adapter.search_code(
+        "ue-5.7.4",
+        "Where is AActor declared and how is replication represented?",
+        top_k=5,
+    )
+
+    assert hits
+    assert all("ThirdParty" not in hit.path for hit in hits)
+    assert any(hit.path.endswith("Actor.h") for hit in hits)
+
+
 def test_native_store_dir_prefers_env_override(registry, monkeypatch, tmp_path):
     corpus = registry.get_engine("5.7.4")
     override = tmp_path / "ollama-store"

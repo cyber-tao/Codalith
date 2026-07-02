@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import re
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -310,7 +310,7 @@ class CodeRAGAdapter:
         if root.resolve() not in scan_root.parents and scan_root != root.resolve():
             raise CodeRAGAdapterError(f"Path escapes corpus root: {subpath}")
         files: list[_IndexedFile] = []
-        paths = [scan_root] if scan_root.is_file() else scan_root.rglob("*")
+        paths = [scan_root] if scan_root.is_file() else _iter_text_paths(scan_root)
         for full_path in paths:
             if not full_path.is_file() or not _is_text_candidate(full_path):
                 continue
@@ -351,7 +351,15 @@ class CodeRAGAdapter:
             status["updated_at"] = _iso_timestamp(indexed_at)
 
 
-_IGNORED_DIRS = {".git", ".coderag", "Binaries", "Intermediate", "Saved", "DerivedDataCache"}
+_IGNORED_DIRS = {
+    ".git",
+    ".coderag",
+    "Binaries",
+    "Intermediate",
+    "Saved",
+    "DerivedDataCache",
+    "ThirdParty",
+}
 _TEXT_SUFFIXES = {
     ".h",
     ".hpp",
@@ -370,6 +378,13 @@ _TEXT_SUFFIXES = {
 
 def _tokens(query: str) -> list[str]:
     return [token.lower() for token in re.findall(r"[A-Za-z_][A-Za-z0-9_]{1,}", query)]
+
+
+def _iter_text_paths(scan_root: Path) -> Iterator[Path]:
+    for dirpath, dirnames, filenames in os.walk(scan_root):
+        dirnames[:] = [dirname for dirname in dirnames if dirname not in _IGNORED_DIRS]
+        for filename in filenames:
+            yield Path(dirpath) / filename
 
 
 def _score(tokens: Iterable[str], text: str, path: str) -> float:
