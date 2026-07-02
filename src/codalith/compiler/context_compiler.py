@@ -7,6 +7,7 @@ from codalith.compiler.context_pack import ContextPack, ContextSummary
 from codalith.compiler.entity_detector import detect_identifiers, detect_modules
 from codalith.compiler.evidence_selector import select_source_spans
 from codalith.compiler.intent_detector import detect_intent
+from codalith.compiler.model_reranker import ModelReranker
 from codalith.compiler.reranker import rerank
 from codalith.compiler.retrieval_planner import plan_queries
 from codalith.compiler.source_locator import locate_source_priors
@@ -21,10 +22,14 @@ class ContextCompiler:
         adapter: CodeRAGAdapter,
         *,
         semantic_store: GraphStore | None = None,
+        model_reranker: ModelReranker | None = None,
+        retrieval_top_k: int | None = None,
     ) -> None:
         self.registry = registry
         self.adapter = adapter
         self.semantic_store = semantic_store
+        self.model_reranker = model_reranker
+        self.retrieval_top_k = retrieval_top_k
 
     def compile(
         self,
@@ -40,6 +45,7 @@ class ContextCompiler:
         intent = detect_intent(query, mode)
         identifiers = detect_identifiers(query)
         modules = detect_modules(query)
+        search_top_k = max(max_source_spans, self.retrieval_top_k or max_source_spans)
         raw_hits: list[RetrievalHit] = []
         for corpus in resolution.ordered:
             raw_hits.extend(
@@ -47,7 +53,7 @@ class ContextCompiler:
                     corpus,
                     query=query,
                     identifiers=identifiers,
-                    max_hits=max_source_spans,
+                    max_hits=search_top_k,
                 )
             )
             for planned_query in plan_queries(query, identifiers):
@@ -55,10 +61,16 @@ class ContextCompiler:
                     self.adapter.search_code(
                         corpus.corpus_id,
                         planned_query,
-                        top_k=max_source_spans,
+                        top_k=search_top_k,
                     )
                 )
-        hits = rerank(_unique_hits(raw_hits), identifiers=identifiers, max_hits=max_source_spans)
+        hits = rerank(
+            _unique_hits(raw_hits),
+            identifiers=identifiers,
+            max_hits=max_source_spans,
+            query=query,
+            model_reranker=self.model_reranker,
+        )
         inferred_modules = _module_entries(version, modules, hits)
         source_spans = select_source_spans(hits)
         source_spans.extend(_card_evidence_spans(hits))

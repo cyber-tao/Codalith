@@ -11,6 +11,7 @@ from typing import Any
 
 from codalith.coderag.adapter import CodeRAGAdapter
 from codalith.compiler.context_compiler import ContextCompiler
+from codalith.compiler.model_reranker import reranker_from_env, retrieval_top_k_from_env
 from codalith.corpus.registry import CorpusRegistry
 from codalith.eval.metrics import file_recall_at_k, module_accuracy
 
@@ -90,7 +91,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     registry = CorpusRegistry.from_file(args.registry)
     adapter = CodeRAGAdapter(registry)
-    compiler = ContextCompiler(registry, adapter)
+    model_reranker = reranker_from_env()
+    compiler = ContextCompiler(
+        registry,
+        adapter,
+        model_reranker=model_reranker,
+        retrieval_top_k=retrieval_top_k_from_env(reranker_enabled=model_reranker is not None),
+    )
     report = EvalRunner(compiler).run(args.dataset, version=args.version)
     write_reports(report, args.output_dir)
     print(json.dumps(report.as_dict(), indent=2, sort_keys=True))

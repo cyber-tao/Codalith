@@ -21,12 +21,14 @@ dev = [
 codalith-mcp = "codalith.gateway.mcp_server:main"
 codalith-mcp-http = "codalith.gateway.http_server:main"
 codalith-eval = "codalith.eval.runner:main"
+codalith-mcp-eval = "codalith.eval.mcp_runner:main"
 codalith-generate-cards = "jobs.generate_cards:main"
 codalith-verify-cards = "jobs.verify_cards:main"
 codalith-index-engine = "jobs.index_engine:main"
 codalith-extract-semantic = "jobs.extract_semantic:main"
 codalith-coderag-acceptance = "jobs.coderag_acceptance:main"
 codalith-run-eval = "jobs.run_eval:main"
+codalith-backup-coderag-store = "jobs.backup_coderag_store:main"
 
 [tool.setuptools.packages.find]
 where = ["src", "."]
