@@ -38,13 +38,24 @@ services:
       CODALITH_HTTP_PORT: ${CODALITH_HTTP_PORT:-8765}
       CODALITH_HTTP_ENDPOINT: ${CODALITH_HTTP_ENDPOINT:-/mcp}
       CODALITH_HTTP_ALLOWED_ORIGINS: ${CODALITH_HTTP_ALLOWED_ORIGINS:-}
+      CODALITH_USE_NATIVE_CODERAG: "1"
+      CODALITH_NATIVE_CODERAG_STRICT: "1"
+      CODALITH_NATIVE_CODERAG_PROGRESS: "1"
+      CODERAG_PROVIDER: openai
+      CODERAG_INDEX_ALL_TEXT: "1"
+      CODERAG_GITIGNORE: "0"
+      CODERAG_STORE_DIR: ${CODALITH_CODERAG_OLLAMA_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4-ollama-qwen3-embedding-0.6b}
+      CODALITH_CODERAG_STORE_DIR: ${CODALITH_CODERAG_OLLAMA_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4-ollama-qwen3-embedding-0.6b}
+      PYTHONWARNINGS: ignore::SyntaxWarning
     ports:
       - "${CODALITH_HTTP_BIND:-127.0.0.1}:${CODALITH_HTTP_PORT:-8765}:${CODALITH_HTTP_PORT:-8765}"
     volumes:
       - ${CODALITH_REPO_ROOT:-.}:${CODALITH_WORKSPACE_DIR:-/workspace}
+      - coderag-ollama-store:${CODALITH_CODERAG_VOLUME_ROOT:-/var/lib/codalith/coderag}
       - ${CODALITH_ENGINE_HOST_ROOT:-E:/UnrealEngine_5.7}:${CODALITH_ENGINE_SOURCE_ROOT:-/srv/ue/5.7.4}:ro
     command: >
       sh -lc "uv sync &&
+      uv run python -c 'import os; from jobs.coderag_acceptance import ensure_coderag_installed; ensure_coderag_installed(os.getenv(\"CODERAG_PROVIDER\", \"openai\"))' &&
       uv run codalith-mcp-http"
 
   ue-acceptance:
