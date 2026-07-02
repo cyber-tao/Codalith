@@ -90,9 +90,9 @@ Set these variables for each machine:
 Linux server example:
 
 ```dotenv
-CODALITH_ENGINE_HOST_ROOT=/opt/unreal/UE_5.7
-CODALITH_ENGINE_SOURCE_HOST_ROOT=/opt/unreal/UE_5.7/Engine/Source
-CODALITH_GAMEPLAY_ABILITIES_HOST_ROOT=/opt/unreal/UE_5.7/Engine/Plugins/Runtime/GameplayAbilities
+CODALITH_ENGINE_HOST_ROOT=/workdir/UnrealEngine_5.7
+CODALITH_ENGINE_SOURCE_HOST_ROOT=/workdir/UnrealEngine_5.7/Engine/Source
+CODALITH_GAMEPLAY_ABILITIES_HOST_ROOT=/workdir/UnrealEngine_5.7/Engine/Plugins/Runtime/GameplayAbilities
 ```
 
 Windows workstation example:
@@ -106,6 +106,14 @@ CODALITH_GAMEPLAY_ABILITIES_HOST_ROOT=E:/UnrealEngine_5.7/Engine/Plugins/Runtime
 `configs/corpus_registry.yaml` and `configs/mcp_server.yaml` also support `${VAR:-default}` placeholders, so the same repository can run on different machines without rewriting committed config files.
 
 ## Docker Workflows
+
+Run the HTTP MCP server as a managed Compose service:
+
+```bash
+docker compose up -d mcp-http
+```
+
+The default endpoint is `http://127.0.0.1:8765/mcp` from the Docker host. `CODALITH_HTTP_HOST` controls the container listener, while `CODALITH_HTTP_BIND` controls the host port binding; keep `CODALITH_HTTP_BIND=127.0.0.1` unless the server should be reachable from other machines. For OpenAI-compatible CodeRAG acceptance, set `BASE_URL`, `API_KEY`, `LLM_MODEL`, and `EMBEDDING_MODEL` in `.env`; Codalith maps these aliases to the underlying `OPENAI_*` and `CODERAG_*` variables.
 
 Run default checks:
 

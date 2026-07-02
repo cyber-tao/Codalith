@@ -90,9 +90,9 @@ cp .env.example .env
 Linux 服务器示例：
 
 ```dotenv
-CODALITH_ENGINE_HOST_ROOT=/opt/unreal/UE_5.7
-CODALITH_ENGINE_SOURCE_HOST_ROOT=/opt/unreal/UE_5.7/Engine/Source
-CODALITH_GAMEPLAY_ABILITIES_HOST_ROOT=/opt/unreal/UE_5.7/Engine/Plugins/Runtime/GameplayAbilities
+CODALITH_ENGINE_HOST_ROOT=/workdir/UnrealEngine_5.7
+CODALITH_ENGINE_SOURCE_HOST_ROOT=/workdir/UnrealEngine_5.7/Engine/Source
+CODALITH_GAMEPLAY_ABILITIES_HOST_ROOT=/workdir/UnrealEngine_5.7/Engine/Plugins/Runtime/GameplayAbilities
 ```
 
 Windows 工作站示例：
@@ -106,6 +106,14 @@ CODALITH_GAMEPLAY_ABILITIES_HOST_ROOT=E:/UnrealEngine_5.7/Engine/Plugins/Runtime
 `configs/corpus_registry.yaml` 和 `configs/mcp_server.yaml` 也支持 `${VAR:-default}` 占位符，所以同一个仓库可以在不同机器上运行，不需要改已提交的配置文件。
 
 ## Docker 工作流
+
+用 Compose 托管 HTTP MCP 服务：
+
+```bash
+docker compose up -d mcp-http
+```
+
+从 Docker 宿主机访问的默认 endpoint 是 `http://127.0.0.1:8765/mcp`。`CODALITH_HTTP_HOST` 控制容器内监听地址，`CODALITH_HTTP_BIND` 控制宿主机端口绑定；除非需要其他机器访问，否则保持 `CODALITH_HTTP_BIND=127.0.0.1`。如果运行 OpenAI-compatible CodeRAG acceptance，在 `.env` 中设置 `BASE_URL`、`API_KEY`、`LLM_MODEL` 和 `EMBEDDING_MODEL`；Codalith 会把这些别名映射到内部使用的 `OPENAI_*` 和 `CODERAG_*` 变量。
 
 运行默认检查：
 

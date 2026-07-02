@@ -111,12 +111,16 @@ def configure_openai_compatible_env() -> None:
         "API_KEY": "OPENAI_API_KEY",
         "BASE_URL": "OPENAI_BASE_URL",
         "MODEL": "CODERAG_OPENAI_MODEL",
+        "EMBEDDING_MODEL": "CODERAG_OPENAI_MODEL",
     }
     for source, target in mappings.items():
         if not os.getenv(target) and os.getenv(source):
             os.environ[target] = os.environ[source]
-    if not os.getenv("CODERAG_CHAT_MODEL") and os.getenv("MODEL"):
-        os.environ["CODERAG_CHAT_MODEL"] = os.environ["MODEL"]
+    if not os.getenv("CODERAG_CHAT_MODEL"):
+        if os.getenv("LLM_MODEL"):
+            os.environ["CODERAG_CHAT_MODEL"] = os.environ["LLM_MODEL"]
+        elif os.getenv("MODEL"):
+            os.environ["CODERAG_CHAT_MODEL"] = os.environ["MODEL"]
 
 
 def acceptance_minimums(
