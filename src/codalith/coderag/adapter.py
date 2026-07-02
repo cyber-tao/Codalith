@@ -247,6 +247,7 @@ class CodeRAGAdapter:
         except Exception as exc:
             raise CodeRAGAdapterError("The coderag package is not installed") from exc
         _configure_native_chunk_limit()
+        _configure_native_batch_embedding()
         config = Config.from_env()
         config = _dataclass_replace(
             config,
@@ -471,6 +472,61 @@ def _limit_chunk_texts(chunks: list[Any], max_chars: int) -> list[Any]:
         replace(chunk, text=chunk.text[:max_chars]) if len(chunk.text) > max_chars else chunk
         for chunk in chunks
     ]
+
+
+def _configure_native_batch_embedding() -> None:
+    raw = os.getenv("CODALITH_CODERAG_BATCH_CHUNKS")
+    if not raw:
+        return
+    try:
+        batch_chunks = int(raw)
+    except ValueError as exc:
+        raise CodeRAGAdapterError("CODALITH_CODERAG_BATCH_CHUNKS must be an integer") from exc
+    if batch_chunks <= 1:
+        return
+
+    from typing import cast
+
+    import coderag.indexer as indexer
+
+    current = indexer.Indexer._embed_and_write
+    if getattr(current, "_codalith_batch_chunks", None) == batch_chunks:
+        return
+
+    def batched_embed_and_write(self: Any, work: list[Any], *, reporter: Any) -> Iterator[Any]:
+        if not work:
+            return
+        total = len(work)
+        done = 0
+        pending: list[tuple[Any, list[Any], int]] = []
+        texts: list[str] = []
+
+        def flush_pending() -> Iterator[Any]:
+            nonlocal done
+            if not pending:
+                return
+            vectors = self.provider.embed_documents(texts) if texts else None
+            offset = 0
+            for item, chunks, count in pending:
+                item_vectors = vectors[offset : offset + count] if vectors is not None else None
+                offset += count
+                added, removed = self._write(item, chunks, item_vectors)
+                yield item, added, removed
+                done += 1
+                reporter.update(f"Embedding {done}/{total} file(s)...")
+            pending.clear()
+            texts.clear()
+
+        for item in work:
+            chunks = indexer.chunk_file(item.text, item.language, self.config)
+            pending.append((item, chunks, len(chunks)))
+            texts.extend(str(chunk.text) for chunk in chunks)
+            if len(texts) >= batch_chunks:
+                yield from flush_pending()
+        yield from flush_pending()
+
+    cast(Any, batched_embed_and_write)._codalith_batch_chunks = batch_chunks
+    indexer.Indexer._embed_and_write = batched_embed_and_write
 
 
 def _glob_match(pattern: str, path: str) -> bool:

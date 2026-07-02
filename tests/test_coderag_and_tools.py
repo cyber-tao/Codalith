@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
 
-from codalith.coderag.adapter import _limit_chunk_texts, _native_store_dir
+from codalith.coderag.adapter import (
+    _configure_native_batch_embedding,
+    _limit_chunk_texts,
+    _native_store_dir,
+)
 from codalith.gateway.mcp_server import handle_request
 
 
@@ -62,6 +68,63 @@ def test_limit_chunk_texts_truncates_oversized_chunks():
     assert limited[0] is chunks[0]
     assert limited[1].text == "abcd"
     assert chunks[1].text == "abcdef"
+
+
+def test_configure_native_batch_embedding_batches_across_files(monkeypatch):
+    coderag_module = ModuleType("coderag")
+    indexer_module = ModuleType("coderag.indexer")
+
+    def chunk_file(text, language, config):
+        return [SimpleNamespace(text=part, language=language) for part in text.split()]
+
+    class Provider:
+        def __init__(self):
+            self.calls = []
+
+        def embed_documents(self, texts):
+            self.calls.append(list(texts))
+            return list(texts)
+
+    class Indexer:
+        def __init__(self):
+            self.provider = Provider()
+            self.config = object()
+            self.writes = []
+
+        def _write(self, item, chunks, vectors):
+            self.writes.append((item.text, [chunk.text for chunk in chunks], list(vectors or [])))
+            return len(chunks), 0
+
+        def _embed_and_write(self, work, *, reporter):
+            raise AssertionError("original implementation should be patched")
+
+    indexer_module.chunk_file = chunk_file
+    indexer_module.Indexer = Indexer
+    coderag_module.indexer = indexer_module
+    monkeypatch.setitem(sys.modules, "coderag", coderag_module)
+    monkeypatch.setitem(sys.modules, "coderag.indexer", indexer_module)
+    monkeypatch.setenv("CODALITH_CODERAG_BATCH_CHUNKS", "3")
+
+    _configure_native_batch_embedding()
+
+    reporter = SimpleNamespace(messages=[], update=lambda message: reporter.messages.append(message))
+    indexer = Indexer()
+    work = [
+        SimpleNamespace(text="a b", language="text"),
+        SimpleNamespace(text="c", language="text"),
+        SimpleNamespace(text="d", language="text"),
+    ]
+
+    results = list(indexer._embed_and_write(work, reporter=reporter))
+
+    assert len(results) == 3
+    assert indexer.provider.calls == [["a", "b", "c"], ["d"]]
+    assert indexer.writes == [
+        ("a b", ["a", "b"], ["a", "b"]),
+        ("c", ["c"], ["c"]),
+        ("d", ["d"], ["d"]),
+    ]
+    assert reporter.messages[-1] == "Embedding 3/3 file(s)..."
 
 
 def test_codalith_read_source_adds_line_numbers_and_audit(tools, tmp_path):
