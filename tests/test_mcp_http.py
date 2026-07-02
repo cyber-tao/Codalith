@@ -37,10 +37,45 @@ def test_streamable_http_post_get_session_and_origin(tools):
         assert tools_response.status == 200
         assert tools_payload["result"]["tools"]
 
+        status_response, status_payload = _post(
+            host,
+            port,
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {
+                    "name": "codalith_index_status",
+                    "arguments": {"version": "5.7.4"},
+                },
+            },
+            session_id=session_id,
+        )
+        assert status_response.status == 200
+        assert "error" not in status_payload
+        assert status_payload["result"]["structuredContent"]["semantic"]["engine"]["corpus_id"] == "ue-5.7.4"
+
+        graph_response, graph_payload = _post(
+            host,
+            port,
+            {
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "tools/call",
+                "params": {
+                    "name": "codalith_graph",
+                    "arguments": {"node": "AActor", "version": "5.7.4"},
+                },
+            },
+            session_id=session_id,
+        )
+        assert graph_response.status == 200
+        assert "nodes" in graph_payload["result"]["structuredContent"]
+
         missing_session, _ = _post(
             host,
             port,
-            {"jsonrpc": "2.0", "id": 3, "method": "tools/list"},
+            {"jsonrpc": "2.0", "id": 5, "method": "tools/list"},
         )
         assert missing_session.status == 400
 
@@ -52,7 +87,7 @@ def test_streamable_http_post_get_session_and_origin(tools):
         forbidden, _ = _post(
             host,
             port,
-            {"jsonrpc": "2.0", "id": 4, "method": "tools/list"},
+            {"jsonrpc": "2.0", "id": 6, "method": "tools/list"},
             origin="http://evil.example",
             session_id=session_id,
         )

@@ -20,7 +20,7 @@ class SemanticStore:
     def __init__(self, path: str | Path = ":memory:") -> None:
         if path != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
-        self.connection = sqlite3.connect(path)
+        self.connection = sqlite3.connect(path, check_same_thread=False)
         self.connection.row_factory = sqlite3.Row
         self.initialize()
 
