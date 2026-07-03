@@ -9,6 +9,7 @@ from types import ModuleType, SimpleNamespace
 
 from codalith.coderag.adapter import (
     _configure_native_batch_embedding,
+    _configure_native_openai_timeout,
     _limit_chunk_texts,
     _native_store_dir,
 )
@@ -235,6 +236,60 @@ def test_configure_native_batch_embedding_splits_failed_batches(monkeypatch):
         ("2", ("vec:2",)),
         ("3", ("vec:3",)),
     ]
+
+
+def test_configure_native_openai_timeout_patches_provider(monkeypatch):
+    coderag_module = ModuleType("coderag")
+    embeddings_module = ModuleType("coderag.embeddings")
+    provider_module = ModuleType("coderag.embeddings.openai_provider")
+
+    class OpenAIEmbeddingProvider:
+        def _embed_batch(self, inputs):
+            raise AssertionError("original implementation should be patched")
+
+    class Array:
+        def __init__(self, data):
+            self.data = data
+            self.shape = (len(data), len(data[0]) if data else 0)
+
+    def retry(**kwargs):
+        assert kwargs["reraise"] is True
+
+        def decorate(fn):
+            return fn
+
+        return decorate
+
+    provider_module.OpenAIEmbeddingProvider = OpenAIEmbeddingProvider
+    provider_module.np = SimpleNamespace(array=lambda data, dtype: Array(data))
+    provider_module.retry = retry
+    provider_module.stop_after_attempt = lambda attempts: ("attempts", attempts)
+    provider_module.wait_exponential = lambda **kwargs: ("wait", kwargs)
+    embeddings_module.openai_provider = provider_module
+    coderag_module.embeddings = embeddings_module
+    monkeypatch.setitem(sys.modules, "coderag", coderag_module)
+    monkeypatch.setitem(sys.modules, "coderag.embeddings", embeddings_module)
+    monkeypatch.setitem(sys.modules, "coderag.embeddings.openai_provider", provider_module)
+    monkeypatch.setenv("CODALITH_CODERAG_OPENAI_TIMEOUT_SECONDS", "180")
+    monkeypatch.setenv("CODALITH_CODERAG_OPENAI_RETRY_ATTEMPTS", "2")
+
+    _configure_native_openai_timeout()
+
+    calls = []
+
+    class Embeddings:
+        def create(self, *, model, input, timeout):
+            calls.append((model, list(input), timeout))
+            return SimpleNamespace(data=[SimpleNamespace(embedding=[1.0, 2.0]) for _ in input])
+
+    provider = OpenAIEmbeddingProvider()
+    provider._model = "Qwen3-Embedding-8B"
+    provider._client = SimpleNamespace(embeddings=Embeddings())
+
+    vectors = provider._embed_batch(["chunk"])
+
+    assert calls == [("Qwen3-Embedding-8B", ["chunk"], 180.0)]
+    assert vectors.shape == (1, 2)
 
 
 def test_codalith_read_source_adds_line_numbers_and_audit(tools, tmp_path):

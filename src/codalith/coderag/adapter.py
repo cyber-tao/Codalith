@@ -247,6 +247,7 @@ class CodeRAGAdapter:
         except Exception as exc:
             raise CodeRAGAdapterError("The coderag package is not installed") from exc
         _configure_native_chunk_limit()
+        _configure_native_openai_timeout()
         _configure_native_batch_embedding()
         config = Config.from_env()
         config = _dataclass_replace(
@@ -472,6 +473,54 @@ def _limit_chunk_texts(chunks: list[Any], max_chars: int) -> list[Any]:
         replace(chunk, text=chunk.text[:max_chars]) if len(chunk.text) > max_chars else chunk
         for chunk in chunks
     ]
+
+
+def _configure_native_openai_timeout() -> None:
+    raw = os.getenv("CODALITH_CODERAG_OPENAI_TIMEOUT_SECONDS")
+    if not raw:
+        return
+    try:
+        timeout_seconds = float(raw)
+    except ValueError as exc:
+        raise CodeRAGAdapterError("CODALITH_CODERAG_OPENAI_TIMEOUT_SECONDS must be a number") from exc
+    if timeout_seconds <= 0:
+        return
+    try:
+        retry_attempts = int(os.getenv("CODALITH_CODERAG_OPENAI_RETRY_ATTEMPTS", "3"))
+    except ValueError as exc:
+        raise CodeRAGAdapterError("CODALITH_CODERAG_OPENAI_RETRY_ATTEMPTS must be an integer") from exc
+    retry_attempts = max(1, retry_attempts)
+
+    import coderag.embeddings.openai_provider as openai_provider  # type: ignore[import-not-found]
+
+    np_module = openai_provider.np
+    retry = openai_provider.retry
+    stop_after_attempt = openai_provider.stop_after_attempt
+    wait_exponential = openai_provider.wait_exponential
+
+    current = openai_provider.OpenAIEmbeddingProvider._embed_batch
+    if (
+        getattr(current, "_codalith_openai_timeout_seconds", None) == timeout_seconds
+        and getattr(current, "_codalith_openai_retry_attempts", None) == retry_attempts
+    ):
+        return
+
+    def embed_batch(self: Any, inputs: list[str]) -> Any:
+        resp = self._client.embeddings.create(
+            model=self._model,
+            input=inputs,
+            timeout=timeout_seconds,
+        )
+        return np_module.array([item.embedding for item in resp.data], dtype="float32")
+
+    patched = retry(
+        stop=stop_after_attempt(retry_attempts),
+        wait=wait_exponential(multiplier=0.5, max=8),
+        reraise=True,
+    )(embed_batch)
+    patched._codalith_openai_timeout_seconds = timeout_seconds
+    patched._codalith_openai_retry_attempts = retry_attempts
+    openai_provider.OpenAIEmbeddingProvider._embed_batch = patched
 
 
 def _configure_native_batch_embedding() -> None:
