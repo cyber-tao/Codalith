@@ -13,6 +13,7 @@ import time
 from collections.abc import Iterable, Iterator
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -247,6 +248,7 @@ class CodeRAGAdapter:
         except Exception as exc:
             raise CodeRAGAdapterError("The coderag package is not installed") from exc
         _configure_native_chunk_limit()
+        _configure_native_index_policy_hash()
         _configure_native_openai_timeout()
         _configure_native_batch_embedding()
         config = Config.from_env()
@@ -444,35 +446,185 @@ def _native_store_dir(corpus: Corpus) -> Path:
 
 
 def _configure_native_chunk_limit() -> None:
-    raw = os.getenv("CODALITH_CODERAG_MAX_CHUNK_CHARS")
-    if not raw:
-        return
-    try:
-        max_chars = int(raw)
-    except ValueError as exc:
-        raise CodeRAGAdapterError("CODALITH_CODERAG_MAX_CHUNK_CHARS must be an integer") from exc
-    if max_chars <= 0:
+    max_chars, max_bytes = _native_chunk_budget_from_env()
+    if max_chars <= 0 and max_bytes <= 0:
         return
 
     import coderag.indexer as indexer  # type: ignore[import-not-found]
 
-    if getattr(indexer.chunk_file, "_codalith_max_chunk_chars", None) == max_chars:
+    budget = (max_chars, max_bytes)
+    if getattr(indexer.chunk_file, "_codalith_chunk_budget", None) == budget:
         return
     original = getattr(indexer.chunk_file, "_codalith_original", indexer.chunk_file)
 
     def limited_chunk_file(text: str, language: str, config: Any) -> list[Any]:
-        return _limit_chunk_texts(original(text, language, config), max_chars)
+        return _limit_chunk_texts(original(text, language, config), max_chars, max_bytes)
 
     limited_chunk_file._codalith_original = original  # type: ignore[attr-defined]
-    limited_chunk_file._codalith_max_chunk_chars = max_chars  # type: ignore[attr-defined]
+    limited_chunk_file._codalith_chunk_budget = budget  # type: ignore[attr-defined]
     indexer.chunk_file = limited_chunk_file
 
 
-def _limit_chunk_texts(chunks: list[Any], max_chars: int) -> list[Any]:
-    return [
-        replace(chunk, text=chunk.text[:max_chars]) if len(chunk.text) > max_chars else chunk
-        for chunk in chunks
-    ]
+def _native_chunk_budget_from_env() -> tuple[int, int]:
+    max_chars = _parse_positive_env_int("CODALITH_CODERAG_MAX_CHUNK_CHARS")
+    max_bytes = _parse_positive_env_int("CODALITH_CODERAG_MAX_CHUNK_BYTES")
+    return max_chars, max_bytes
+
+
+def _parse_positive_env_int(key: str) -> int:
+    raw = os.getenv(key)
+    if not raw:
+        return 0
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise CodeRAGAdapterError(f"{key} must be an integer") from exc
+    return max(0, value)
+
+
+def _limit_chunk_texts(chunks: list[Any], max_chars: int, max_bytes: int = 0) -> list[Any]:
+    limited: list[Any] = []
+    for chunk in chunks:
+        limited.extend(_split_chunk_by_budget(chunk, max_chars, max_bytes))
+    return limited
+
+
+def _split_chunk_by_budget(chunk: Any, max_chars: int, max_bytes: int) -> list[Any]:
+    text = str(chunk.text)
+    if _within_chunk_budget(text, max_chars, max_bytes):
+        return [chunk]
+    start_line = int(getattr(chunk, "start_line", 1))
+    lines = text.split("\n")
+    if len(lines) == 1:
+        return [
+            _replace_chunk_text(chunk, part, start_line, start_line)
+            for part in _split_text_by_budget(text, max_chars, max_bytes)
+        ]
+
+    result: list[Any] = []
+    current: list[str] = []
+    current_start = start_line
+    for offset, line in enumerate(lines):
+        line_no = start_line + offset
+        candidate = line if not current else "\n".join([*current, line])
+        if current and not _within_chunk_budget(candidate, max_chars, max_bytes):
+            result.append(
+                _replace_chunk_text(chunk, "\n".join(current), current_start, line_no - 1)
+            )
+            current = [line]
+            current_start = line_no
+        else:
+            current.append(line)
+
+        if current and len(current) == 1 and not _within_chunk_budget(
+            current[0], max_chars, max_bytes
+        ):
+            result.extend(
+                _replace_chunk_text(chunk, part, line_no, line_no)
+                for part in _split_text_by_budget(current[0], max_chars, max_bytes)
+            )
+            current = []
+            current_start = line_no + 1
+
+    if current:
+        result.append(
+            _replace_chunk_text(
+                chunk,
+                "\n".join(current),
+                current_start,
+                start_line + len(lines) - 1,
+            )
+        )
+    return result
+
+
+def _within_chunk_budget(text: str, max_chars: int, max_bytes: int) -> bool:
+    return (max_chars <= 0 or len(text) <= max_chars) and (
+        max_bytes <= 0 or len(text.encode("utf-8")) <= max_bytes
+    )
+
+
+def _split_text_by_budget(text: str, max_chars: int, max_bytes: int) -> list[str]:
+    parts: list[str] = []
+    current: list[str] = []
+    current_bytes = 0
+    for char in text:
+        char_bytes = len(char.encode("utf-8"))
+        would_exceed = (
+            (max_chars > 0 and len(current) + 1 > max_chars)
+            or (max_bytes > 0 and current_bytes + char_bytes > max_bytes)
+        )
+        if current and would_exceed:
+            parts.append("".join(current))
+            current = []
+            current_bytes = 0
+        current.append(char)
+        current_bytes += char_bytes
+    if current:
+        parts.append("".join(current))
+    return parts
+
+
+def _replace_chunk_text(chunk: Any, text: str, start_line: int, end_line: int) -> Any:
+    values: dict[str, Any] = {"text": text}
+    if hasattr(chunk, "start_line"):
+        values["start_line"] = start_line
+    if hasattr(chunk, "end_line"):
+        values["end_line"] = end_line
+    return replace(chunk, **values)
+
+
+def _configure_native_index_policy_hash() -> None:
+    signature = _native_chunk_policy_signature()
+    if not signature:
+        return
+
+    import coderag.indexer as indexer
+
+    current = indexer.Indexer._maybe_work
+    if getattr(current, "_codalith_chunk_policy_signature", None) == signature:
+        return
+    original = getattr(current, "_codalith_original", current)
+    prefix = _policy_hash_prefix(signature)
+
+    def maybe_work(
+        self: Any,
+        abs_path: Path,
+        rel: str,
+        language: str,
+        metas: dict[str, dict[str, Any]],
+    ) -> Any:
+        effective_metas = metas
+        existing = metas.get(rel)
+        if existing is not None and not str(existing.get("content_hash", "")).startswith(prefix):
+            effective_metas = dict(metas)
+            forced = dict(existing)
+            forced["content_hash"] = ""
+            forced["mtime"] = None
+            effective_metas[rel] = forced
+        item = original(self, abs_path, rel, language, effective_metas)
+        if item is None:
+            return None
+        return replace(item, content_hash=_policy_content_hash(signature, str(item.content_hash)))
+
+    maybe_work._codalith_original = original  # type: ignore[attr-defined]
+    maybe_work._codalith_chunk_policy_signature = signature  # type: ignore[attr-defined]
+    indexer.Indexer._maybe_work = maybe_work
+
+
+def _native_chunk_policy_signature() -> str | None:
+    max_chars, max_bytes = _native_chunk_budget_from_env()
+    if max_chars <= 0 and max_bytes <= 0:
+        return None
+    return f"chunk-budget:chars={max_chars}:bytes={max_bytes}"
+
+
+def _policy_hash_prefix(signature: str) -> str:
+    return f"codalith-v1:{sha256(signature.encode('utf-8')).hexdigest()[:16]}:"
+
+
+def _policy_content_hash(signature: str, source_hash: str) -> str:
+    return f"{_policy_hash_prefix(signature)}{source_hash}"
 
 
 def _configure_native_openai_timeout() -> None:

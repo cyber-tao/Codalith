@@ -9,9 +9,11 @@ from types import ModuleType, SimpleNamespace
 
 from codalith.coderag.adapter import (
     _configure_native_batch_embedding,
+    _configure_native_index_policy_hash,
     _configure_native_openai_timeout,
     _limit_chunk_texts,
     _native_store_dir,
+    _policy_content_hash,
 )
 from codalith.gateway.mcp_server import handle_request
 
@@ -19,6 +21,16 @@ from codalith.gateway.mcp_server import handle_request
 @dataclass(frozen=True, slots=True)
 class _Chunk:
     text: str
+
+
+@dataclass(frozen=True, slots=True)
+class _LineChunk:
+    text: str
+    start_line: int
+    end_line: int
+    language: str = "cpp"
+    symbol: str | None = None
+    kind: str = "window"
 
 
 def test_local_coderag_adapter_searches_fixture(adapter):
@@ -61,14 +73,113 @@ def test_native_store_dir_prefers_env_override(registry, monkeypatch, tmp_path):
     assert _native_store_dir(corpus) == Path(corpus.coderag_store)
 
 
-def test_limit_chunk_texts_truncates_oversized_chunks():
+def test_limit_chunk_texts_splits_oversized_chunks():
     chunks = [_Chunk("abcd"), _Chunk("abcdef")]
 
     limited = _limit_chunk_texts(chunks, 4)
 
     assert limited[0] is chunks[0]
-    assert limited[1].text == "abcd"
+    assert [chunk.text for chunk in limited[1:]] == ["abcd", "ef"]
     assert chunks[1].text == "abcdef"
+
+
+def test_limit_chunk_texts_preserves_line_ranges_with_byte_budget():
+    chunks = [_LineChunk("aa\n汉汉汉汉\nbb", 10, 12)]
+
+    limited = _limit_chunk_texts(chunks, max_chars=100, max_bytes=8)
+
+    assert [(chunk.text, chunk.start_line, chunk.end_line) for chunk in limited] == [
+        ("aa", 10, 10),
+        ("汉汉", 11, 11),
+        ("汉汉", 11, 11),
+        ("bb", 12, 12),
+    ]
+
+
+def test_configure_native_index_policy_hash_reindexes_old_hashes(monkeypatch, tmp_path):
+    coderag_module = ModuleType("coderag")
+    indexer_module = ModuleType("coderag.indexer")
+
+    @dataclass(frozen=True, slots=True)
+    class Work:
+        rel: str
+        language: str
+        text: str
+        content_hash: str
+        mtime: float
+        size: int
+        existed: bool
+
+    class Indexer:
+        def _maybe_work(self, abs_path, rel, language, metas):
+            existing = metas.get(rel)
+            stat = abs_path.stat()
+            if (
+                existing is not None
+                and existing.get("size") == stat.st_size
+                and abs(float(existing.get("mtime") or 0.0) - stat.st_mtime) < 1e-6
+            ):
+                return None
+            data = abs_path.read_bytes()
+            content_hash = hashlib.sha256(data).hexdigest()
+            if existing is not None and existing.get("content_hash") == content_hash:
+                return None
+            return Work(
+                rel,
+                language,
+                data.decode("utf-8"),
+                content_hash,
+                stat.st_mtime,
+                len(data),
+                True,
+            )
+
+    indexer_module.Indexer = Indexer
+    coderag_module.indexer = indexer_module
+    monkeypatch.setitem(sys.modules, "coderag", coderag_module)
+    monkeypatch.setitem(sys.modules, "coderag.indexer", indexer_module)
+    monkeypatch.setenv("CODALITH_CODERAG_MAX_CHUNK_CHARS", "3072")
+    monkeypatch.setenv("CODALITH_CODERAG_MAX_CHUNK_BYTES", "3584")
+
+    path = tmp_path / "Actor.cpp"
+    path.write_text("source", encoding="utf-8")
+    source_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+
+    _configure_native_index_policy_hash()
+    indexer = Indexer()
+    old_hash_result = indexer._maybe_work(
+        path,
+        "Actor.cpp",
+        "cpp",
+        {
+            "Actor.cpp": {
+                "content_hash": source_hash,
+                "mtime": path.stat().st_mtime,
+                "size": path.stat().st_size,
+            }
+        },
+    )
+
+    assert old_hash_result is not None
+    assert old_hash_result.content_hash == _policy_content_hash(
+        "chunk-budget:chars=3072:bytes=3584",
+        source_hash,
+    )
+
+    current_hash_result = indexer._maybe_work(
+        path,
+        "Actor.cpp",
+        "cpp",
+        {
+            "Actor.cpp": {
+                "content_hash": old_hash_result.content_hash,
+                "mtime": path.stat().st_mtime,
+                "size": path.stat().st_size,
+            }
+        },
+    )
+
+    assert current_hash_result is None
 
 
 def test_configure_native_batch_embedding_batches_across_files(monkeypatch):
