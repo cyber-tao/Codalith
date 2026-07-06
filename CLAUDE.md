@@ -147,7 +147,7 @@ HTTP 端点：`http://127.0.0.1:8765/mcp`
 docker compose run --rm test                                  # 默认检查
 docker compose --profile ue run --rm ue-acceptance            # UE 源码冒烟（需挂载）
 docker compose --profile coderag run --rm coderag-acceptance  # CodeRAG fake provider
-docker compose --profile coderag run --rm coderag-ollama-acceptance  # Ollama/OpenAI 兼容
+docker compose --profile coderag run --rm coderag-openai-acceptance  # OpenAI-compatible provider
 ```
 
 ### 配置路径
@@ -155,9 +155,9 @@ docker compose --profile coderag run --rm coderag-ollama-acceptance  # Ollama/Op
 所有主机相关路径通过 `.env` 配置（勿直接改 `docker-compose.yml`）。关键变量见 `.env.example`：
 
 - 主机路径：`CODALITH_ENGINE_HOST_ROOT`、`CODALITH_ENGINE_SOURCE_HOST_ROOT`、`CODALITH_GAMEPLAY_ABILITIES_HOST_ROOT`
-- 容器路径：`CODALITH_ENGINE_SOURCE_ROOT`、`CODALITH_ENGINE_INDEXED_ROOT`、`CODALITH_CODERAG_STORE_DIR`、`CODALITH_CODERAG_OLLAMA_STORE_DIR`
+- 容器路径：`CODALITH_ENGINE_SOURCE_ROOT`、`CODALITH_ENGINE_INDEXED_ROOT`、`CODALITH_CODERAG_STORE_DIR`、`CODALITH_CODERAG_OPENAI_STORE_DIR`
 - 运行时：`CODALITH_AUDIT_LOG`、`CODALITH_SEMANTIC_DB`、`CODALITH_SCOPES`、`CODALITH_HTTP_*`
-- CodeRAG：`CODERAG_PROVIDER`、`CODALITH_USE_NATIVE_CODERAG`、`CODALITH_CODERAG_MAX_CHUNK_CHARS`
+- CodeRAG：`CODALITH_CODERAG_PROVIDER`、`CODALITH_CODERAG_EMBEDDING_MODEL`、`CODALITH_CODERAG_CHAT_MODEL`、`CODALITH_CODERAG_MAX_CHUNK_CHARS`
 
 `configs/*.yaml` 支持 `${VAR:-default}` 占位符，同一仓库可在不同机器运行而无需改提交的配置文件。
 

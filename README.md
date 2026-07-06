@@ -86,6 +86,10 @@ Set these variables for each machine:
 | `CODALITH_ENGINE_INDEXED_ROOT` | Container path for the indexed corpus root. |
 | `CODALITH_CODERAG_STORE_DIR` | Container path for the default CodeRAG store. |
 | `CODALITH_CODERAG_OPENAI_STORE_DIR` | Container path for the OpenAI-compatible CodeRAG store. |
+| `CODALITH_CODERAG_PROVIDER` | Default CodeRAG provider for local commands. |
+| `CODALITH_CODERAG_EMBEDDING_MODEL` | Embedding model used by the OpenAI-compatible provider. |
+| `CODALITH_CODERAG_CHAT_MODEL` | Chat model used when CodeRAG needs answer generation. |
+| `CODALITH_CODERAG_EMBEDDING_BATCH_SIZE` | OpenAI-compatible embedding batch size. |
 
 Linux server example:
 
@@ -113,7 +117,7 @@ Run the HTTP MCP server as a managed Compose service:
 docker compose up -d mcp-http
 ```
 
-The default endpoint is `http://127.0.0.1:8765/mcp` from the Docker host. `CODALITH_HTTP_HOST` controls the container listener, while `CODALITH_HTTP_BIND` controls the host port binding; keep `CODALITH_HTTP_BIND=127.0.0.1` unless the server should be reachable from other machines. For OpenAI-compatible CodeRAG acceptance, set `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `CODERAG_OPENAI_MODEL`, and `CODERAG_CHAT_MODEL` in `.env`.
+The default endpoint is `http://127.0.0.1:8765/mcp` from the Docker host. `CODALITH_HTTP_HOST` controls the container listener, while `CODALITH_HTTP_BIND` controls the host port binding; keep `CODALITH_HTTP_BIND=127.0.0.1` unless the server should be reachable from other machines. For OpenAI-compatible CodeRAG acceptance, set `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `CODALITH_CODERAG_EMBEDDING_MODEL`, and `CODALITH_CODERAG_CHAT_MODEL` in `.env`.
 
 Run default checks:
 

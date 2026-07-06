@@ -15,11 +15,12 @@ x-codalith-env: &codalith-env
   LANCE_INCLUDE_VECTOR_CENTROIDS: ${LANCE_INCLUDE_VECTOR_CENTROIDS:-false}
 
 x-coderag-openai-env: &coderag-openai-env
+  # Upstream CodeRAG still reads CODERAG_*; .env exposes CODALITH_* names.
   CODERAG_PROVIDER: openai
-  CODERAG_OPENAI_MODEL: ${CODERAG_OPENAI_MODEL:-qwen3-embedding:0.6b}
-  CODERAG_CHAT_MODEL: ${CODERAG_CHAT_MODEL:-kimi-k2.7}
-  CODERAG_OPENAI_BATCH: ${CODERAG_OPENAI_BATCH:-32}
-  CODERAG_WORKERS: ${CODERAG_WORKERS:-4}
+  CODERAG_OPENAI_MODEL: ${CODALITH_CODERAG_EMBEDDING_MODEL:-Qwen3-Embedding-8B}
+  CODERAG_CHAT_MODEL: ${CODALITH_CODERAG_CHAT_MODEL:-kimi-k2.7}
+  CODERAG_OPENAI_BATCH: ${CODALITH_CODERAG_EMBEDDING_BATCH_SIZE:-32}
+  CODERAG_WORKERS: ${CODALITH_CODERAG_WORKERS:-4}
   OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.example.com/v1}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-replace-me}
   CODERAG_INDEX_ALL_TEXT: "1"
@@ -83,7 +84,7 @@ services:
       - ${CODALITH_ENGINE_HOST_ROOT:-E:/UnrealEngine_5.7}:${CODALITH_ENGINE_SOURCE_ROOT:-/srv/ue/5.7.4}:ro
     command: >
       sh -lc "uv sync &&
-      uv run python -c 'import os; from jobs.coderag_acceptance import ensure_coderag_installed; ensure_coderag_installed(os.getenv(\"CODERAG_PROVIDER\", \"openai\"))' &&
+      uv run python -c 'from jobs.coderag_acceptance import ensure_coderag_installed; ensure_coderag_installed(\"openai\")' &&
       uv run codalith-mcp-http"
 
   ue-acceptance:
@@ -116,6 +117,7 @@ services:
       CODERAG_PROVIDER: fake
       CODERAG_INDEX_ALL_TEXT: "1"
       CODERAG_GITIGNORE: "0"
+      CODERAG_WORKERS: ${CODALITH_CODERAG_WORKERS:-4}
       CODERAG_STORE_DIR: ${CODALITH_CODERAG_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4}
       CODALITH_CODERAG_STORE_DIR: ${CODALITH_CODERAG_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4}
       CODALITH_NATIVE_CODERAG_PROGRESS: "1"

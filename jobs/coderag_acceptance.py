@@ -20,6 +20,11 @@ from codalith.corpus.registry import Corpus, CorpusRegistry
 from codalith.corpus.uri_resolver import URIResolver
 from codalith.eval.runner import EvalRunner, write_reports
 
+DEFAULT_CODERAG_EMBEDDING_BATCH_SIZE = "32"
+DEFAULT_CODERAG_EMBEDDING_MODEL = "Qwen3-Embedding-8B"
+DEFAULT_CODERAG_CHAT_MODEL = "kimi-k2.7"
+DEFAULT_CODERAG_WORKERS = "4"
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
@@ -27,7 +32,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dataset", default="eval/datasets/ue50.jsonl")
     parser.add_argument("--version", default="5.7.4")
     parser.add_argument("--output-dir", default="reports/coderag")
-    parser.add_argument("--provider", default=os.getenv("CODERAG_PROVIDER", "fake"))
+    parser.add_argument("--provider", default=os.getenv("CODALITH_CODERAG_PROVIDER", "fake"))
     parser.add_argument("--index-path")
     parser.add_argument("--min-files", type=int)
     parser.add_argument("--min-chunks", type=int)
@@ -38,6 +43,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     min_files, min_chunks = acceptance_minimums(args.index_path, args.min_files, args.min_chunks)
 
+    configure_coderag_runtime_env(args.provider)
     ensure_coderag_installed(args.provider)
     configure_openai_batch_limit(args.provider)
     registry = CorpusRegistry.from_file(args.registry)
@@ -58,10 +64,7 @@ def main(argv: list[str] | None = None) -> int:
 
     os.environ["CODALITH_USE_NATIVE_CODERAG"] = "1"
     os.environ["CODALITH_NATIVE_CODERAG_STRICT"] = "1"
-    os.environ["CODERAG_PROVIDER"] = args.provider
-    os.environ["CODERAG_INDEX_ALL_TEXT"] = "1"
     os.environ.setdefault("CODERAG_GITIGNORE", "0")
-    os.environ.setdefault("CODERAG_WORKERS", "4")
 
     adapter = CodeRAGAdapter(registry, prefer_native=True)
     started = time.perf_counter()
@@ -103,6 +106,26 @@ def main(argv: list[str] | None = None) -> int:
         max_p95_ms=args.max_p95_ms,
     )
     return 0
+
+
+def configure_coderag_runtime_env(provider: str) -> None:
+    os.environ["CODERAG_PROVIDER"] = provider
+    os.environ["CODERAG_INDEX_ALL_TEXT"] = "1"
+    os.environ["CODERAG_WORKERS"] = os.getenv(
+        "CODALITH_CODERAG_WORKERS", DEFAULT_CODERAG_WORKERS
+    )
+    if provider.lower() != "openai":
+        return
+    os.environ["CODERAG_OPENAI_MODEL"] = os.getenv(
+        "CODALITH_CODERAG_EMBEDDING_MODEL", DEFAULT_CODERAG_EMBEDDING_MODEL
+    )
+    os.environ["CODERAG_CHAT_MODEL"] = os.getenv(
+        "CODALITH_CODERAG_CHAT_MODEL", DEFAULT_CODERAG_CHAT_MODEL
+    )
+    os.environ["CODERAG_OPENAI_BATCH"] = os.getenv(
+        "CODALITH_CODERAG_EMBEDDING_BATCH_SIZE",
+        DEFAULT_CODERAG_EMBEDDING_BATCH_SIZE,
+    )
 
 
 def acceptance_minimums(
