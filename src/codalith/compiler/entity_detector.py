@@ -8,11 +8,13 @@ _IDENT_RE = re.compile(r"\b[A-Z][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)?\b")
 _MODULE_HINTS = {
     "Core",
     "CoreUObject",
+    "EnhancedInput",
     "Engine",
-    "UnrealEd",
+    "GameplayAbilities",
+    "Net",
     "Renderer",
     "NetCore",
-    "GameplayAbilities",
+    "UnrealEd",
 }
 
 
