@@ -88,7 +88,6 @@ cp .env.example .env
 | `CODALITH_CODERAG_OPENAI_STORE_DIR` | OpenAI-compatible CodeRAG store 的容器内路径。 |
 | `CODALITH_CODERAG_PROVIDER` | 本地命令默认使用的 CodeRAG provider。 |
 | `CODALITH_CODERAG_EMBEDDING_MODEL` | OpenAI-compatible provider 使用的 embedding model。 |
-| `CODALITH_CODERAG_CHAT_MODEL` | CodeRAG 需要生成回答时使用的 chat model。 |
 | `CODALITH_CODERAG_EMBEDDING_BATCH_SIZE` | OpenAI-compatible embedding batch size。 |
 
 Linux 服务器示例：
@@ -117,7 +116,7 @@ CODALITH_GAMEPLAY_ABILITIES_HOST_ROOT=E:/UnrealEngine_5.7/Engine/Plugins/Runtime
 docker compose up -d mcp-http
 ```
 
-从 Docker 宿主机访问的默认 endpoint 是 `http://127.0.0.1:8765/mcp`。`CODALITH_HTTP_HOST` 控制容器内监听地址，`CODALITH_HTTP_BIND` 控制宿主机端口绑定；除非需要其他机器访问，否则保持 `CODALITH_HTTP_BIND=127.0.0.1`。如果运行 OpenAI-compatible CodeRAG acceptance，在 `.env` 中设置 `OPENAI_BASE_URL`、`OPENAI_API_KEY`、`CODALITH_CODERAG_EMBEDDING_MODEL` 和 `CODALITH_CODERAG_CHAT_MODEL`。
+从 Docker 宿主机访问的默认 endpoint 是 `http://127.0.0.1:8765/mcp`。`CODALITH_HTTP_HOST` 控制容器内监听地址，`CODALITH_HTTP_BIND` 控制宿主机端口绑定；除非需要其他机器访问，否则保持 `CODALITH_HTTP_BIND=127.0.0.1`。如果运行 OpenAI-compatible CodeRAG acceptance，在 `.env` 中设置 `OPENAI_BASE_URL`、`OPENAI_API_KEY` 和 `CODALITH_CODERAG_EMBEDDING_MODEL`。
 
 运行默认检查：
 

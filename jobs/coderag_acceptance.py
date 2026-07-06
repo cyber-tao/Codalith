@@ -22,7 +22,6 @@ from codalith.eval.runner import EvalRunner, write_reports
 
 DEFAULT_CODERAG_EMBEDDING_BATCH_SIZE = "32"
 DEFAULT_CODERAG_EMBEDDING_MODEL = "Qwen3-Embedding-8B"
-DEFAULT_CODERAG_CHAT_MODEL = "kimi-k2.7"
 DEFAULT_CODERAG_WORKERS = "4"
 
 
@@ -118,9 +117,6 @@ def configure_coderag_runtime_env(provider: str) -> None:
         return
     os.environ["CODERAG_OPENAI_MODEL"] = os.getenv(
         "CODALITH_CODERAG_EMBEDDING_MODEL", DEFAULT_CODERAG_EMBEDDING_MODEL
-    )
-    os.environ["CODERAG_CHAT_MODEL"] = os.getenv(
-        "CODALITH_CODERAG_CHAT_MODEL", DEFAULT_CODERAG_CHAT_MODEL
     )
     os.environ["CODERAG_OPENAI_BATCH"] = os.getenv(
         "CODALITH_CODERAG_EMBEDDING_BATCH_SIZE",
