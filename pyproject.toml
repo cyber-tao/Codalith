@@ -8,7 +8,9 @@ version = "0.1.0"
 description = "UE-aware source context MCP gateway powered by a CodeRAG adapter."
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "psycopg[binary]>=3.2,<4",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -25,6 +27,7 @@ codalith-mcp-eval = "codalith.eval.mcp_runner:main"
 codalith-generate-cards = "jobs.generate_cards:main"
 codalith-verify-cards = "jobs.verify_cards:main"
 codalith-index-engine = "jobs.index_engine:main"
+codalith-index-generated = "jobs.index_generated:main"
 codalith-extract-semantic = "jobs.extract_semantic:main"
 codalith-coderag-acceptance = "jobs.coderag_acceptance:main"
 codalith-run-eval = "jobs.run_eval:main"

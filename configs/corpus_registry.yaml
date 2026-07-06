@@ -24,5 +24,18 @@
       "card_root": "${CODALITH_PROJECT_CARD_ROOT:-data/cards/project-a}",
       "access_scopes": ["${CODALITH_PROJECT_ACCESS_SCOPE:-project:ProjectA}", "source:read"]
     }
+  },
+  "generated": {
+    "generated-ue-${CODALITH_ENGINE_VERSION:-5.7.4}": {
+      "kind": "generated",
+      "engine_corpus": "ue-${CODALITH_ENGINE_VERSION:-5.7.4}",
+      "ue_version": "${CODALITH_ENGINE_VERSION:-5.7.4}",
+      "source_root": "${CODALITH_GENERATED_SOURCE_ROOT:-data/generated/ue-5.7.4}",
+      "indexed_root": "${CODALITH_GENERATED_INDEXED_ROOT:-data/generated/ue-5.7.4}",
+      "coderag_store": "${CODALITH_GENERATED_CODERAG_STORE_DIR:-data/coderag/generated-ue-5.7.4}",
+      "semantic_schema": "${CODALITH_GENERATED_SEMANTIC_SCHEMA:-generated_ue_5_7_4}",
+      "card_root": "${CODALITH_GENERATED_CARD_ROOT:-data/cards/generated-ue-5.7.4}",
+      "access_scopes": ["${CODALITH_GENERATED_ACCESS_SCOPE:-generated:read}", "source:read"]
+    }
   }
 }

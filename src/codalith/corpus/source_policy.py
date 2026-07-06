@@ -26,6 +26,8 @@ class SourcePolicy:
     hard_max_lines: int = 500
     max_source_reads_per_10min: int = 100
     max_total_lines_per_10min: int = 10000
+    max_distinct_paths_per_10min: int = 50
+    max_adjacent_reads_per_path_per_10min: int = 8
     deny_patterns: tuple[str, ...] = ()
     sensitive_patterns: tuple[SensitivePattern, ...] = ()
 
@@ -38,6 +40,10 @@ class SourcePolicy:
             hard_max_lines=int(limits.get("hard_max_lines", 500)),
             max_source_reads_per_10min=int(limits.get("max_source_reads_per_10min", 100)),
             max_total_lines_per_10min=int(limits.get("max_total_lines_per_10min", 10000)),
+            max_distinct_paths_per_10min=int(limits.get("max_distinct_paths_per_10min", 50)),
+            max_adjacent_reads_per_path_per_10min=int(
+                limits.get("max_adjacent_reads_per_path_per_10min", 8)
+            ),
             deny_patterns=tuple(str(item) for item in raw.get("deny_patterns", [])),
             sensitive_patterns=tuple(
                 SensitivePattern(
@@ -80,6 +86,8 @@ class SourcePolicy:
                 "hard_max_lines": self.hard_max_lines,
                 "max_source_reads_per_10min": self.max_source_reads_per_10min,
                 "max_total_lines_per_10min": self.max_total_lines_per_10min,
+                "max_distinct_paths_per_10min": self.max_distinct_paths_per_10min,
+                "max_adjacent_reads_per_path_per_10min": self.max_adjacent_reads_per_path_per_10min,
             },
             "deny_patterns": list(self.deny_patterns),
             "sensitive_patterns": [
@@ -100,14 +108,28 @@ class SourceReadRateLimiter:
         self.policy = policy
         self.window_seconds = window_seconds
         self.time_func = time_func
-        self._events: list[tuple[float, int]] = []
+        self._events: list[tuple[float, int, str | None, int | None, int | None]] = []
 
     def check_and_record(self, line_count: int) -> None:
+        self.record_read(line_count=line_count)
+
+    def record_read(
+        self,
+        *,
+        line_count: int,
+        path: str | None = None,
+        start_line: int | None = None,
+        end_line: int | None = None,
+    ) -> None:
         now = float(self.time_func())
         cutoff = now - self.window_seconds
-        self._events = [(timestamp, lines) for timestamp, lines in self._events if timestamp >= cutoff]
+        self._events = [
+            (timestamp, lines, event_path, event_start, event_end)
+            for timestamp, lines, event_path, event_start, event_end in self._events
+            if timestamp >= cutoff
+        ]
         read_count = len(self._events)
-        total_lines = sum(lines for _, lines in self._events)
+        total_lines = sum(lines for _, lines, _, _, _ in self._events)
         if read_count + 1 > self.policy.max_source_reads_per_10min:
             raise SourcePolicyError(
                 f"Source read rate limit exceeded: {read_count + 1} > "
@@ -118,9 +140,48 @@ class SourceReadRateLimiter:
                 f"Source read line budget exceeded: {total_lines + line_count} > "
                 f"{self.policy.max_total_lines_per_10min} per 10 minutes"
             )
-        self._events.append((now, line_count))
+        if path is not None:
+            paths = {event_path for _, _, event_path, _, _ in self._events if event_path}
+            if path not in paths and len(paths) + 1 > self.policy.max_distinct_paths_per_10min:
+                raise SourcePolicyError(
+                    "Potential bulk export detected: distinct source path budget exceeded"
+                )
+            same_path_reads = [
+                (event_start, event_end)
+                for _, _, event_path, event_start, event_end in self._events
+                if event_path == path
+            ]
+            touches_existing = any(
+                _ranges_touch_or_overlap(event_start, event_end, start_line, end_line)
+                for event_start, event_end in same_path_reads
+            )
+            adjacent_reads = sum(
+                1
+                for index, (event_start, event_end) in enumerate(same_path_reads)
+                if any(
+                    index != other_index
+                    and _ranges_touch_or_overlap(event_start, event_end, other_start, other_end)
+                    for other_index, (other_start, other_end) in enumerate(same_path_reads)
+                )
+            )
+            if touches_existing and adjacent_reads + 1 > self.policy.max_adjacent_reads_per_path_per_10min:
+                raise SourcePolicyError(
+                    "Potential bulk export detected: repeated adjacent reads for one source path"
+                )
+        self._events.append((now, line_count, path, start_line, end_line))
 
 
 def _match(pattern: str, path: str) -> bool:
     parent_pattern = pattern[:-3] if pattern.endswith("/**") else pattern
     return fnmatch.fnmatchcase(path, pattern) or fnmatch.fnmatchcase(path, parent_pattern)
+
+
+def _ranges_touch_or_overlap(
+    left_start: int | None,
+    left_end: int | None,
+    right_start: int | None,
+    right_end: int | None,
+) -> bool:
+    if left_start is None or left_end is None or right_start is None or right_end is None:
+        return False
+    return right_start <= left_end + 1 and left_start <= right_end + 1

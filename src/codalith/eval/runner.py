@@ -12,7 +12,13 @@ from typing import Any
 from codalith.coderag.adapter import CodeRAGAdapter
 from codalith.compiler.context_compiler import ContextCompiler
 from codalith.corpus.registry import CorpusRegistry
-from codalith.eval.metrics import file_recall_at_k, module_accuracy
+from codalith.eval.metrics import (
+    file_recall_at_k,
+    missing_source_citation_rate,
+    module_accuracy,
+    symbol_recall,
+    wrong_version_rate,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +26,9 @@ class EvalReport:
     count: int
     file_recall_at_5: float
     module_accuracy: float
+    symbol_recall: float
+    missing_source_citation_rate: float
+    wrong_version_rate: float
     latency_p95_ms: float
     rows: list[dict[str, Any]]
 
@@ -28,6 +37,9 @@ class EvalReport:
             "count": self.count,
             "file_recall@5": self.file_recall_at_5,
             "module_accuracy": self.module_accuracy,
+            "symbol_recall": self.symbol_recall,
+            "missing_source_citation_rate": self.missing_source_citation_rate,
+            "wrong_version_rate": self.wrong_version_rate,
             "latency_p95_ms": self.latency_p95_ms,
             "rows": self.rows,
         }
@@ -52,12 +64,18 @@ class EvalRunner:
             latencies.append(elapsed_ms)
             file_recall = file_recall_at_k(pack, [str(path) for path in item.get("expected_files", [])], k=5)
             module_score = module_accuracy(pack, [str(module) for module in item.get("expected_modules", [])])
+            symbol_score = symbol_recall(pack, [str(symbol) for symbol in item.get("expected_symbols", [])])
+            missing_citation = missing_source_citation_rate(pack)
+            wrong_version = wrong_version_rate(pack, str(item.get("version", version)))
             rows.append(
                 {
                     "id": item.get("id"),
                     "query": item["query"],
                     "file_recall@5": file_recall,
                     "module_accuracy": module_score,
+                    "symbol_recall": symbol_score,
+                    "missing_source_citation_rate": missing_citation,
+                    "wrong_version_rate": wrong_version,
                     "latency_ms": elapsed_ms,
                 }
             )
@@ -66,6 +84,9 @@ class EvalRunner:
             count=count,
             file_recall_at_5=sum(row["file_recall@5"] for row in rows) / count if count else 0.0,
             module_accuracy=sum(row["module_accuracy"] for row in rows) / count if count else 0.0,
+            symbol_recall=sum(row["symbol_recall"] for row in rows) / count if count else 0.0,
+            missing_source_citation_rate=sum(row["missing_source_citation_rate"] for row in rows) / count if count else 0.0,
+            wrong_version_rate=sum(row["wrong_version_rate"] for row in rows) / count if count else 0.0,
             latency_p95_ms=_p95(latencies),
             rows=rows,
         )
@@ -120,15 +141,20 @@ def _markdown(report: EvalReport) -> str:
         f"- count: {report.count}",
         f"- file_recall@5: {report.file_recall_at_5:.3f}",
         f"- module_accuracy: {report.module_accuracy:.3f}",
+        f"- symbol_recall: {report.symbol_recall:.3f}",
+        f"- missing_source_citation_rate: {report.missing_source_citation_rate:.3f}",
+        f"- wrong_version_rate: {report.wrong_version_rate:.3f}",
         f"- latency_p95_ms: {report.latency_p95_ms:.1f}",
         "",
-        "| id | file_recall@5 | module_accuracy | latency_ms |",
-        "| --- | ---: | ---: | ---: |",
+        "| id | file_recall@5 | module_accuracy | symbol_recall | missing_citation | wrong_version | latency_ms |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in report.rows:
         lines.append(
             f"| {row['id']} | {row['file_recall@5']:.3f} | "
-            f"{row['module_accuracy']:.3f} | {row['latency_ms']:.1f} |"
+            f"{row['module_accuracy']:.3f} | {row['symbol_recall']:.3f} | "
+            f"{row['missing_source_citation_rate']:.3f} | {row['wrong_version_rate']:.3f} | "
+            f"{row['latency_ms']:.1f} |"
         )
     return "\n".join(lines) + "\n"
 

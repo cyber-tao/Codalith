@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+from codalith.cards.hashing import source_sha256
 from codalith.coderag.adapter import CodeRAGAdapter, RetrievalHit
 from codalith.compiler.context_pack import ContextPack, ContextSummary
 from codalith.compiler.entity_detector import detect_identifiers, detect_modules
@@ -11,7 +14,7 @@ from codalith.compiler.reranker import rerank
 from codalith.compiler.retrieval_planner import plan_queries
 from codalith.compiler.source_locator import locate_source_priors
 from codalith.corpus.registry import CorpusRegistry
-from codalith.semantic.graph import GraphStore, query_graph
+from codalith.semantic.graph import query_graph
 
 
 class ContextCompiler:
@@ -20,7 +23,7 @@ class ContextCompiler:
         registry: CorpusRegistry,
         adapter: CodeRAGAdapter,
         *,
-        semantic_store: GraphStore | None = None,
+        semantic_store: Any | None = None,
     ) -> None:
         self.registry = registry
         self.adapter = adapter
@@ -35,8 +38,14 @@ class ContextCompiler:
         mode: str | None = None,
         max_source_spans: int = 8,
         include_project_overlay: bool = True,
+        include_generated_overlay: bool = False,
     ) -> ContextPack:
-        resolution = self.registry.resolve(version, project, include_project_overlay)
+        resolution = self.registry.resolve(
+            version,
+            project,
+            include_project_overlay,
+            include_generated_overlay=include_generated_overlay,
+        )
         intent = detect_intent(query, mode)
         identifiers = detect_identifiers(query)
         modules = detect_modules(query)
@@ -63,12 +72,13 @@ class ContextCompiler:
             _unique_hits(raw_hits),
             identifiers=identifiers,
             max_hits=max_source_spans,
+            mode=intent,
         )
         inferred_modules = _module_entries(version, modules, hits)
-        source_spans = select_source_spans(hits)
+        source_spans = self._enriched_source_spans(hits)
         source_spans.extend(_card_evidence_spans(hits))
         graph_edges = self._graph_edges(
-            resolution.engine.corpus_id,
+            [corpus.corpus_id for corpus in resolution.ordered],
             [*identifiers, *(module["name"] for module in inferred_modules)],
         )
         cards = [
@@ -91,15 +101,7 @@ class ContextCompiler:
                 text="Context pack compiled from CodeRAG retrieval, UE URI resolution, and v0 heuristics."
             ),
             modules=inferred_modules,
-            symbols=[
-                {
-                    "name": identifier,
-                    "uri": f"ue://{version}/symbol/{identifier}",
-                    "kind": "symbol",
-                    "reason": "Identifier detected in the user query.",
-                }
-                for identifier in identifiers
-            ],
+            symbols=self._symbol_entries([corpus.corpus_id for corpus in resolution.ordered], identifiers, version),
             cards=cards,
             source_spans=source_spans,
             graph_edges=graph_edges,
@@ -116,26 +118,107 @@ class ContextCompiler:
             ],
         )
 
-    def _graph_edges(self, corpus_id: str, nodes: list[str], max_edges: int = 24) -> list[dict[str, object]]:
+    def _graph_edges(self, corpus_ids: list[str], nodes: list[str], max_edges: int = 24) -> list[dict[str, object]]:
         if self.semantic_store is None:
             return []
         edges: dict[tuple[object, object, object], dict[str, object]] = {}
-        for node in nodes:
-            result = query_graph(
-                self.semantic_store,
-                corpus_id=corpus_id,
-                node=node,
-                depth=1,
-                max_nodes=24,
-            )
-            for edge in result["edges"]:
-                if not isinstance(edge, dict):
-                    continue
-                key = (edge.get("from"), edge.get("edge_type"), edge.get("to"))
-                edges[key] = edge
-                if len(edges) >= max_edges:
-                    return list(edges.values())
+        for corpus_id in corpus_ids:
+            for node in nodes:
+                result = query_graph(
+                    self.semantic_store,
+                    corpus_id=corpus_id,
+                    node=node,
+                    depth=1,
+                    max_nodes=24,
+                )
+                for edge in result["edges"]:
+                    if not isinstance(edge, dict):
+                        continue
+                    key = (edge.get("from"), edge.get("edge_type"), edge.get("to"))
+                    edge = {**edge, "corpus_id": corpus_id}
+                    edges[key] = edge
+                    if len(edges) >= max_edges:
+                        return list(edges.values())
         return list(edges.values())
+
+    def _enriched_source_spans(self, hits: list[RetrievalHit]) -> list[dict[str, object]]:
+        spans = select_source_spans(hits)
+        for span in spans:
+            corpus_id = str(span.get("corpus_id", ""))
+            path = str(span.get("path", ""))
+            raw_start = span.get("start_line", 0)
+            raw_end = span.get("end_line", raw_start)
+            start = int(raw_start) if isinstance(raw_start, int | str) else 0
+            end = int(raw_end) if isinstance(raw_end, int | str) else start
+            hit = next(
+                (
+                    item
+                    for item in hits
+                    if item.corpus_id == corpus_id
+                    and item.path == path
+                    and item.start_line == start
+                    and item.end_line == end
+                ),
+                None,
+            )
+            if hit is not None:
+                span["source_hash"] = source_sha256(hit.snippet)
+                span["language"] = hit.language
+                span["kind"] = hit.kind
+                span["extractor"] = hit.metadata.get("matched_by") or hit.source
+                span["confidence"] = min(1.0, max(0.0, hit.score / (hit.score + 1.0)))
+            if self.semantic_store is not None and corpus_id and path and start:
+                guards = self.semantic_store.guards_for_span(corpus_id, path, start, end)
+                if guards:
+                    span["guard"] = [
+                        {
+                            "macro": guard["macro"],
+                            "expression": guard["expression"],
+                            "start_line": guard["start_line"],
+                            "end_line": guard["end_line"],
+                        }
+                        for guard in guards
+                    ]
+        return spans
+
+    def _symbol_entries(
+        self,
+        corpus_ids: list[str],
+        identifiers: list[str],
+        version: str,
+    ) -> list[dict[str, object]]:
+        entries: list[dict[str, object]] = []
+        seen: set[tuple[str, str, str | None]] = set()
+        for identifier in identifiers:
+            found = False
+            if self.semantic_store is not None:
+                for corpus_id in corpus_ids:
+                    for row in self.semantic_store.find_symbols(corpus_id, identifier, limit=5):
+                        key = (str(row["name"]), str(row["kind"]), row.get("declaration_uri"))
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        entries.append(
+                            {
+                                "name": row["name"],
+                                "qualified_name": row.get("qualified_name"),
+                                "kind": row["kind"],
+                                "module": row.get("module_name"),
+                                "uri": row.get("declaration_uri") or f"ue://{version}/symbol/{identifier}",
+                                "reason": "Resolved from semantic symbol table.",
+                            }
+                        )
+                        found = True
+            if not found:
+                entries.append(
+                    {
+                        "name": identifier,
+                        "uri": f"ue://{version}/symbol/{identifier}",
+                        "kind": "symbol",
+                        "reason": "Identifier detected in the user query.",
+                    }
+                )
+        return entries
 
 
 def _unique_hits(hits: list[RetrievalHit]) -> list[RetrievalHit]:

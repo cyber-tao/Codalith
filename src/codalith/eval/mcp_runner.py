@@ -5,13 +5,20 @@ from __future__ import annotations
 import argparse
 import http.client
 import json
+import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from codalith.eval.metrics import file_recall_at_k, module_accuracy
+from codalith.eval.metrics import (
+    file_recall_at_k,
+    missing_source_citation_rate,
+    module_accuracy,
+    symbol_recall,
+    wrong_version_rate,
+)
 
 PROTOCOL_VERSION = "2025-11-25"
 
@@ -26,6 +33,9 @@ class MCPEvalReport:
     file_recall_at_k: float
     candidate_file_recall: float
     module_accuracy: float
+    symbol_recall: float
+    missing_source_citation_rate: float
+    wrong_version_rate: float
     latency_p95_ms: float
     rows: list[dict[str, Any]]
 
@@ -39,13 +49,22 @@ class MCPEvalReport:
             "file_recall@k": self.file_recall_at_k,
             "candidate_file_recall": self.candidate_file_recall,
             "module_accuracy": self.module_accuracy,
+            "symbol_recall": self.symbol_recall,
+            "missing_source_citation_rate": self.missing_source_citation_rate,
+            "wrong_version_rate": self.wrong_version_rate,
             "latency_p95_ms": self.latency_p95_ms,
             "rows": self.rows,
         }
 
 
 class MCPClient:
-    def __init__(self, endpoint: str, *, timeout_seconds: float = 120.0) -> None:
+    def __init__(
+        self,
+        endpoint: str,
+        *,
+        timeout_seconds: float = 120.0,
+        bearer_token: str | None = None,
+    ) -> None:
         parsed = urlparse(endpoint)
         if parsed.scheme not in {"http", "https"}:
             raise ValueError("MCP endpoint must start with http:// or https://")
@@ -55,6 +74,7 @@ class MCPClient:
         self.port = parsed.port or 80
         self.path = parsed.path or "/mcp"
         self.timeout_seconds = timeout_seconds
+        self.bearer_token = bearer_token
         self.session_id: str | None = None
         self._next_id = 1
 
@@ -103,6 +123,8 @@ class MCPClient:
         }
         if require_session and self.session_id:
             headers["MCP-Session-Id"] = self.session_id
+        if self.bearer_token:
+            headers["Authorization"] = f"Bearer {self.bearer_token}"
         connection = http.client.HTTPConnection(self.host, self.port, timeout=self.timeout_seconds)
         connection.request("POST", self.path, body=json.dumps(request), headers=headers)
         response = connection.getresponse()
@@ -124,19 +146,25 @@ def run_mcp_eval(
     metric_k: int = 5,
     timeout_seconds: float = 120.0,
 ) -> MCPEvalReport:
-    client = MCPClient(endpoint, timeout_seconds=timeout_seconds)
+    client = MCPClient(
+        endpoint,
+        timeout_seconds=timeout_seconds,
+        bearer_token=os.getenv("CODALITH_HTTP_BEARER_TOKEN") or None,
+    )
     client.initialize()
     rows: list[dict[str, Any]] = []
     latencies: list[float] = []
     for item in _read_jsonl(dataset_path):
         expected_files = [str(path) for path in item.get("expected_files", [])]
         expected_modules = [str(module) for module in item.get("expected_modules", [])]
+        expected_symbols = [str(symbol) for symbol in item.get("expected_symbols", [])]
+        expected_version = str(item.get("version", version))
         started = time.perf_counter()
         pack = client.call_tool(
             "codalith_context",
             {
                 "query": str(item["query"]),
-                "version": str(item.get("version", version)),
+                "version": expected_version,
                 "mode": str(item.get("mode", "explain")),
                 "max_source_spans": max_source_spans,
             },
@@ -146,6 +174,9 @@ def run_mcp_eval(
         file_recall = file_recall_at_k(pack, expected_files, k=metric_k)
         candidate_recall = file_recall_at_k(pack, expected_files, k=max_source_spans)
         module_score = module_accuracy(pack, expected_modules)
+        symbol_score = symbol_recall(pack, expected_symbols)
+        missing_citation = missing_source_citation_rate(pack)
+        wrong_version = wrong_version_rate(pack, expected_version)
         source_spans = pack.get("source_spans", [])
         rows.append(
             {
@@ -154,6 +185,9 @@ def run_mcp_eval(
                 f"file_recall@{metric_k}": file_recall,
                 f"file_recall@{max_source_spans}": candidate_recall,
                 "module_accuracy": module_score,
+                "symbol_recall": symbol_score,
+                "missing_source_citation_rate": missing_citation,
+                "wrong_version_rate": wrong_version,
                 "latency_ms": elapsed_ms,
                 "failure_class": _failure_class(file_recall, candidate_recall, module_score),
                 "expected_files": expected_files,
@@ -172,6 +206,9 @@ def run_mcp_eval(
         file_recall_at_k=_average(rows, f"file_recall@{metric_k}"),
         candidate_file_recall=_average(rows, f"file_recall@{max_source_spans}"),
         module_accuracy=_average(rows, "module_accuracy"),
+        symbol_recall=_average(rows, "symbol_recall"),
+        missing_source_citation_rate=_average(rows, "missing_source_citation_rate"),
+        wrong_version_rate=_average(rows, "wrong_version_rate"),
         latency_p95_ms=_p95(latencies),
         rows=rows,
     )
@@ -251,6 +288,9 @@ def _markdown(report: MCPEvalReport) -> str:
         f"- file_recall@k: {report.file_recall_at_k:.3f}",
         f"- candidate_file_recall: {report.candidate_file_recall:.3f}",
         f"- module_accuracy: {report.module_accuracy:.3f}",
+        f"- symbol_recall: {report.symbol_recall:.3f}",
+        f"- missing_source_citation_rate: {report.missing_source_citation_rate:.3f}",
+        f"- wrong_version_rate: {report.wrong_version_rate:.3f}",
         f"- latency_p95_ms: {report.latency_p95_ms:.1f}",
         "",
         "| id | file_recall@k | candidate_recall | module_accuracy | latency_ms | failure_class |",

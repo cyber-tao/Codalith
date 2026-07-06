@@ -2670,19 +2670,19 @@ latency
 
 ---
 
-## 30. 开放问题
+## 30. 第一版产品决策
 
 ```text
-1. UE 版本命名以 tag、branch、commit 还是内部构建号为准？
-2. 是否需要索引完整 Engine/Plugins，还是先只索引白名单模块？
-3. 是否索引 Intermediate generated code？如果索引，按什么 build configuration？
-4. Console platform / NDA code 是否完全隔离为独立 corpus？
-5. 第一版是否启用 CodeRAG reranker？
-6. 是否需要公司内部 SSO/OAuth，还是先用 static bearer token？
-7. Project Overlay 是否第一版就接入真实项目，还是先用样例项目？
-8. Knowledge Cards 是 AI 自动生成还是人工 seed + AI 补 evidence？
-9. Eval 中 expected files 如何维护，是否按版本分开？
-10. 最终是否 fork CodeRAG，还是长期保持 wrapper 模式？
+1. UE 版本命名以 registry 中的 ue_version 为主，source_commit 作为不可变溯源锚点；内部构建号可作为 metadata 扩展，不替代 ue_version。
+2. 第一版默认索引完整 Engine/Source 与 Engine/Plugins；source policy 与 corpus access_scopes 负责第三方、平台和项目访问控制，不通过裁剪索引实现安全边界。
+3. Intermediate generated code、build outputs、logs、crashes 作为 generated corpus / project overlay 的可选输入，不进入默认 engine corpus；写入前必须声明 build configuration、保留策略和访问 scope。
+4. Console platform / NDA code 必须隔离为独立 corpus，并默认通过 deny_patterns 与 platform/thirdparty scope 拒绝访问。
+5. 第一版不启用外部 CodeRAG reranker；Codalith 在 Context Compiler 内使用 deterministic UE-aware rerank 权重，避免引入额外模型依赖。
+6. 第一版内置 static bearer token 与可信反向代理 identity header；企业 SSO/OAuth 放在反向代理或上游网关层，Codalith 只消费已认证 identity/scopes。
+7. Project Overlay 第一版支持真实项目 corpus，也保留 ProjectA fixture 作为测试样例；项目语义抽取与 engine 语义抽取走同一套 extractor/store。
+8. Knowledge Cards 第一版采用人工 seed + 自动 evidence/hash/semantic 验证；AI 自动扩写只能生成候选，必须经过 verifier 才能写入 UE_KNOWLEDGE。
+9. Eval expected files 按数据集和 UE version 维护；UE50 与 UE5.7 common issues 分开存放，报告写入 reports/，不提交生成结果。
+10. 第一版长期保持 CodeRAG wrapper 模式，并将 CodeRAG 作为 pinned submodule；只有 wrapper 无法满足 chunk/index/search 契约时才评估 fork。
 ```
 
 ---

@@ -12,6 +12,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import urlparse
 
+from codalith.gateway.auth import (
+    AuthContext,
+    AuthError,
+    authenticate_http_headers,
+    reset_current_auth_context,
+    set_current_auth_context,
+)
 from codalith.gateway.mcp_server import handle_request
 from codalith.gateway.tools import CodalithTools, create_runtime
 
@@ -49,6 +56,9 @@ class StreamableHTTPHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         if not self._preflight():
             return
+        auth = self._authenticate()
+        if auth is None:
+            return
         if not self._accepts("application/json") or not self._accepts("text/event-stream"):
             self._write_json_error(
                 HTTPStatus.NOT_ACCEPTABLE,
@@ -69,7 +79,11 @@ class StreamableHTTPHandler(BaseHTTPRequestHandler):
             return
         if not self._session_is_valid(request):
             return
-        response = handle_request(request, self.server.tools)
+        token = set_current_auth_context(auth)
+        try:
+            response = handle_request(request, self.server.tools)
+        finally:
+            reset_current_auth_context(token)
         if response is None:
             self.send_response(HTTPStatus.ACCEPTED)
             self.send_header("Content-Length", "0")
@@ -84,6 +98,8 @@ class StreamableHTTPHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         if not self._preflight():
+            return
+        if self._authenticate() is None:
             return
         if not self._accepts("text/event-stream"):
             self._write_json_error(
@@ -105,6 +121,8 @@ class StreamableHTTPHandler(BaseHTTPRequestHandler):
 
     def do_DELETE(self) -> None:
         if not self._preflight():
+            return
+        if self._authenticate() is None:
             return
         session_id = self.headers.get("MCP-Session-Id")
         if session_id and session_id in self.server.sessions:
@@ -147,6 +165,13 @@ class StreamableHTTPHandler(BaseHTTPRequestHandler):
             return True
         self._write_json_error(HTTPStatus.BAD_REQUEST, "Missing or invalid MCP-Session-Id")
         return False
+
+    def _authenticate(self) -> AuthContext | None:
+        try:
+            return authenticate_http_headers({key: value for key, value in self.headers.items()})
+        except AuthError as exc:
+            self._write_json_error(HTTPStatus.UNAUTHORIZED, str(exc))
+            return None
 
     def _write_json_error(self, status: HTTPStatus, message: str) -> None:
         payload = {

@@ -340,6 +340,8 @@ class CodeRAGAdapter:
             return self.registry.engines[corpus_id]
         if corpus_id in self.registry.projects:
             return self.registry.projects[corpus_id]
+        if corpus_id in self.registry.generated:
+            return self.registry.generated[corpus_id]
         raise CorpusNotFoundError(f"Unknown corpus: {corpus_id}")
 
     @staticmethod
@@ -437,6 +439,8 @@ def _module_from_path(path: str) -> str | None:
 def _uri_for_hit(corpus: Corpus, path: str, start: int, end: int) -> str:
     if corpus.kind == "project":
         return f"ue-project://{corpus.corpus_id}/source/{path}#L{start}-L{end}"
+    if corpus.kind == "generated":
+        return f"ue-generated://{corpus.corpus_id}/source/{path}#L{start}-L{end}"
     version = corpus.ue_version or corpus.corpus_id.removeprefix("ue-")
     return f"ue://{version}/source/{path}#L{start}-L{end}"
 

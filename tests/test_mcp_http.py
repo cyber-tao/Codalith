@@ -98,6 +98,32 @@ def test_streamable_http_post_get_session_and_origin(tools):
         thread.join(timeout=5)
 
 
+def test_streamable_http_requires_configured_bearer_token(tools, monkeypatch):
+    monkeypatch.setenv("CODALITH_HTTP_BEARER_TOKEN", "secret-token")
+    server = create_http_server(tools, StreamableHTTPConfig(port=0))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    host, port = server.server_address
+
+    try:
+        initialize = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {"protocolVersion": "2025-11-25"},
+        }
+        anonymous, _ = _post(host, port, initialize)
+        assert anonymous.status == 401
+
+        authorized, payload = _post(host, port, initialize, bearer_token="secret-token")
+        assert authorized.status == 200
+        assert payload["result"]["serverInfo"]["name"] == "codalith"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
 def _post(
     host: str,
     port: int,
@@ -105,6 +131,7 @@ def _post(
     *,
     origin: str = "http://127.0.0.1",
     session_id: str | None = None,
+    bearer_token: str | None = None,
 ) -> tuple[http.client.HTTPResponse, dict[str, object]]:
     headers = {
         "Accept": "application/json, text/event-stream",
@@ -114,6 +141,8 @@ def _post(
     }
     if session_id:
         headers["MCP-Session-Id"] = session_id
+    if bearer_token:
+        headers["Authorization"] = f"Bearer {bearer_token}"
     connection = http.client.HTTPConnection(host, port, timeout=5)
     connection.request("POST", "/mcp", body=json.dumps(payload), headers=headers)
     response = connection.getresponse()

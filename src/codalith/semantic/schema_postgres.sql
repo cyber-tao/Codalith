@@ -6,8 +6,8 @@ CREATE TABLE IF NOT EXISTS codalith_corpora (
   source_root TEXT,
   indexed_root TEXT,
   semantic_schema TEXT,
-  metadata TEXT DEFAULT '{}',
-  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  metadata JSONB DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS codalith_source_files (
@@ -17,8 +17,8 @@ CREATE TABLE IF NOT EXISTS codalith_source_files (
   module_name TEXT,
   source_hash TEXT,
   line_count INTEGER DEFAULT 0,
-  metadata TEXT DEFAULT '{}',
-  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  metadata JSONB DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ DEFAULT now(),
   PRIMARY KEY(corpus_id, path)
 );
 
@@ -27,11 +27,11 @@ CREATE TABLE IF NOT EXISTS ue_modules (
   module_name TEXT NOT NULL,
   module_type TEXT,
   loading_phase TEXT,
-  supported_platforms TEXT DEFAULT '[]',
-  public_include_paths TEXT DEFAULT '[]',
-  private_include_paths TEXT DEFAULT '[]',
+  supported_platforms JSONB DEFAULT '[]'::jsonb,
+  public_include_paths JSONB DEFAULT '[]'::jsonb,
+  private_include_paths JSONB DEFAULT '[]'::jsonb,
   source_uri TEXT,
-  metadata TEXT DEFAULT '{}',
+  metadata JSONB DEFAULT '{}'::jsonb,
   PRIMARY KEY(corpus_id, module_name)
 );
 
@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS ue_module_deps (
   to_module TEXT NOT NULL,
   dep_kind TEXT NOT NULL,
   evidence_uri TEXT NOT NULL,
-  metadata TEXT DEFAULT '{}',
+  metadata JSONB DEFAULT '{}'::jsonb,
   PRIMARY KEY(corpus_id, from_module, to_module, dep_kind)
 );
 
@@ -56,8 +56,8 @@ CREATE TABLE IF NOT EXISTS ue_symbols (
   definition_uri TEXT,
   signature TEXT,
   build_guard TEXT,
-  metadata TEXT DEFAULT '{}',
-  confidence REAL DEFAULT 1.0
+  metadata JSONB DEFAULT '{}'::jsonb,
+  confidence DOUBLE PRECISION DEFAULT 1.0
 );
 
 CREATE TABLE IF NOT EXISTS ue_reflection_entities (
@@ -70,9 +70,9 @@ CREATE TABLE IF NOT EXISTS ue_reflection_entities (
   module_name TEXT,
   declaration_uri TEXT,
   generated_uri TEXT,
-  specifiers TEXT DEFAULT '{}',
-  metadata TEXT DEFAULT '{}',
-  confidence REAL DEFAULT 1.0
+  specifiers JSONB DEFAULT '{}'::jsonb,
+  metadata JSONB DEFAULT '{}'::jsonb,
+  confidence DOUBLE PRECISION DEFAULT 1.0
 );
 
 CREATE TABLE IF NOT EXISTS ue_compile_guards (
@@ -84,17 +84,17 @@ CREATE TABLE IF NOT EXISTS ue_compile_guards (
   start_line INTEGER NOT NULL,
   end_line INTEGER,
   evidence_uri TEXT,
-  metadata TEXT DEFAULT '{}'
+  metadata JSONB DEFAULT '{}'::jsonb
 );
 
 CREATE TABLE IF NOT EXISTS ue_targets (
   corpus_id TEXT NOT NULL,
   target_name TEXT NOT NULL,
   target_type TEXT,
-  extra_modules TEXT DEFAULT '[]',
+  extra_modules JSONB DEFAULT '[]'::jsonb,
   build_settings TEXT,
   declaration_uri TEXT,
-  metadata TEXT DEFAULT '{}',
+  metadata JSONB DEFAULT '{}'::jsonb,
   PRIMARY KEY(corpus_id, target_name)
 );
 
@@ -102,9 +102,9 @@ CREATE TABLE IF NOT EXISTS ue_plugins (
   corpus_id TEXT NOT NULL,
   plugin_name TEXT NOT NULL,
   path TEXT NOT NULL,
-  modules TEXT DEFAULT '[]',
-  supported_platforms TEXT DEFAULT '[]',
-  metadata TEXT DEFAULT '{}',
+  modules JSONB DEFAULT '[]'::jsonb,
+  supported_platforms JSONB DEFAULT '[]'::jsonb,
+  metadata JSONB DEFAULT '{}'::jsonb,
   PRIMARY KEY(corpus_id, plugin_name)
 );
 
@@ -112,9 +112,9 @@ CREATE TABLE IF NOT EXISTS ue_projects (
   corpus_id TEXT NOT NULL,
   project_name TEXT NOT NULL,
   path TEXT NOT NULL,
-  modules TEXT DEFAULT '[]',
-  plugins TEXT DEFAULT '[]',
-  metadata TEXT DEFAULT '{}',
+  modules JSONB DEFAULT '[]'::jsonb,
+  plugins JSONB DEFAULT '[]'::jsonb,
+  metadata JSONB DEFAULT '{}'::jsonb,
   PRIMARY KEY(corpus_id, project_name)
 );
 
@@ -125,9 +125,9 @@ CREATE TABLE IF NOT EXISTS knowledge_cards (
   title TEXT NOT NULL,
   version TEXT,
   verification_status TEXT NOT NULL,
-  related_nodes TEXT DEFAULT '[]',
-  source_hashes TEXT DEFAULT '{}',
-  metadata TEXT DEFAULT '{}',
+  related_nodes JSONB DEFAULT '[]'::jsonb,
+  source_hashes JSONB DEFAULT '{}'::jsonb,
+  metadata JSONB DEFAULT '{}'::jsonb,
   PRIMARY KEY(corpus_id, card_id)
 );
 
@@ -139,14 +139,14 @@ CREATE TABLE IF NOT EXISTS codalith_graph_edges (
   edge_type TEXT NOT NULL,
   evidence_uri TEXT,
   extractor TEXT NOT NULL,
-  confidence REAL DEFAULT 1.0,
-  metadata TEXT DEFAULT '{}'
+  confidence DOUBLE PRECISION DEFAULT 1.0,
+  metadata JSONB DEFAULT '{}'::jsonb
 );
 
-CREATE INDEX IF NOT EXISTS idx_ue_graph_from
+CREATE INDEX IF NOT EXISTS idx_codalith_graph_from
 ON codalith_graph_edges(corpus_id, from_node, edge_type);
 
-CREATE INDEX IF NOT EXISTS idx_ue_graph_to
+CREATE INDEX IF NOT EXISTS idx_codalith_graph_to
 ON codalith_graph_edges(corpus_id, to_node, edge_type);
 
 CREATE INDEX IF NOT EXISTS idx_ue_symbols_name

@@ -13,6 +13,7 @@ from codalith.corpus.registry import CorpusRegistry
 from codalith.corpus.source_policy import SourcePolicy
 from codalith.corpus.uri_resolver import URIResolver
 from codalith.gateway.audit import AuditLogger
+from codalith.gateway.auth import AuthContext
 from codalith.gateway.tools import CodalithTools, ToolRuntime
 from codalith.semantic.db import SemanticStore
 
@@ -65,6 +66,29 @@ def fake_engine_root(tmp_path: Path) -> Path:
         "Source/ProjectA/ProjectA.Build.cs": (
             "PublicDependencyModuleNames.AddRange(new string[] { \"Core\", \"CoreUObject\", \"Engine\" });\n"
             "PrivateDependencyModuleNames.AddRange(new string[] { \"GameplayAbilities\" });\n"
+        ),
+        "ProjectA.uproject": (
+            "{\n"
+            "  \"EngineAssociation\": \"5.7\",\n"
+            "  \"Modules\": [{\"Name\": \"ProjectA\", \"Type\": \"Runtime\", \"LoadingPhase\": \"Default\"}],\n"
+            "  \"Plugins\": [{\"Name\": \"GameplayAbilities\", \"Enabled\": true}]\n"
+            "}\n"
+        ),
+        "Source/ProjectA/ProjectATarget.Target.cs": (
+            "public class ProjectATarget : TargetRules {\n"
+            "  public ProjectATarget(TargetInfo Target) : base(Target) {\n"
+            "    Type = TargetType.Game;\n"
+            "    DefaultBuildSettings = BuildSettingsVersion.V5;\n"
+            "    ExtraModuleNames.AddRange(new string[] { \"ProjectA\" });\n"
+            "  }\n"
+            "}\n"
+        ),
+        "Engine/Plugins/Runtime/Sample/Sample.uplugin": (
+            "{\n"
+            "  \"FriendlyName\": \"Sample\",\n"
+            "  \"SupportedTargetPlatforms\": [\"Win64\"],\n"
+            "  \"Modules\": [{\"Name\": \"SampleRuntime\", \"Type\": \"Runtime\", \"LoadingPhase\": \"Default\"}]\n"
+            "}\n"
         ),
         "Source/ProjectA/Public/InventoryComponent.h": (
             "#pragma once\n"
@@ -127,6 +151,19 @@ def registry_path(tmp_path: Path, fake_engine_root: Path) -> Path:
                 "semantic_schema": "project_a",
                 "card_root": str(tmp_path / "project-cards"),
                 "access_scopes": ["project:ProjectA", "source:read"],
+            }
+        },
+        "generated": {
+            "generated-ue-5.7.4": {
+                "kind": "generated",
+                "engine_corpus": "ue-5.7.4",
+                "ue_version": "5.7.4",
+                "source_root": str(fake_engine_root / "Saved" / "Generated"),
+                "indexed_root": str(fake_engine_root / "Saved" / "Generated"),
+                "coderag_store": str(tmp_path / "generated-store"),
+                "semantic_schema": "generated_ue_5_7_4",
+                "card_root": str(tmp_path / "generated-cards"),
+                "access_scopes": ["generated:read", "source:read"],
             }
         },
     }
@@ -195,7 +232,29 @@ def tools(
         adapter=adapter,
         compiler=compiler,
         audit=AuditLogger(tmp_path / "audit.jsonl"),
-        scopes={"source:read", "index:status", "cards:read", "graph:read", "ue:5.7"},
+        scopes={
+            "source:read",
+            "index:status",
+            "cards:read",
+            "graph:read",
+            "ue:5.7",
+            "project:ProjectA",
+        },
+        identity=AuthContext(
+            user_id="test-user",
+            session_id="test-session",
+            client="pytest",
+            scopes=frozenset(
+                {
+                    "source:read",
+                    "index:status",
+                    "cards:read",
+                    "graph:read",
+                    "ue:5.7",
+                    "project:ProjectA",
+                }
+            ),
+        ),
         semantic_store=semantic_store,
     )
     return CodalithTools(runtime)

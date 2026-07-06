@@ -47,16 +47,23 @@ class Corpus:
 class CorpusResolution:
     engine: Corpus
     project: Corpus | None = None
+    overlays: tuple[Corpus, ...] = ()
 
     @property
     def ordered(self) -> list[Corpus]:
-        return [self.project, self.engine] if self.project else [self.engine]
+        return [item for item in [self.project, *self.overlays, self.engine] if item is not None]
 
 
 class CorpusRegistry:
-    def __init__(self, engines: dict[str, Corpus], projects: dict[str, Corpus]) -> None:
+    def __init__(
+        self,
+        engines: dict[str, Corpus],
+        projects: dict[str, Corpus],
+        generated: dict[str, Corpus] | None = None,
+    ) -> None:
         self.engines = engines
         self.projects = projects
+        self.generated = generated or {}
 
     @classmethod
     def from_file(cls, path: str | Path) -> CorpusRegistry:
@@ -69,7 +76,11 @@ class CorpusRegistry:
             project_id: Corpus.from_config(project_id, value)
             for project_id, value in raw.get("projects", {}).items()
         }
-        return cls(engines=engines, projects=projects)
+        generated = {
+            corpus_id: Corpus.from_config(corpus_id, value)
+            for corpus_id, value in raw.get("generated", {}).items()
+        }
+        return cls(engines=engines, projects=projects, generated=generated)
 
     def get_engine(self, version: str | None = None) -> Corpus:
         if version:
@@ -93,14 +104,26 @@ class CorpusRegistry:
             return self.projects[project]
         raise CorpusNotFoundError(f"Unknown project corpus: {project}")
 
+    def get_generated_for_engine(self, engine: Corpus) -> list[Corpus]:
+        return [
+            corpus
+            for corpus in self.generated.values()
+            if corpus.engine_corpus in {None, engine.corpus_id}
+            or corpus.ue_version == engine.ue_version
+        ]
+
     def resolve(
         self,
         version: str | None = None,
         project: str | None = None,
         include_project_overlay: bool = True,
+        include_generated_overlay: bool = False,
     ) -> CorpusResolution:
         if project and include_project_overlay:
             project_corpus = self.get_project(project)
             engine = self.get_engine(project_corpus.engine_corpus or version)
-            return CorpusResolution(engine=engine, project=project_corpus)
-        return CorpusResolution(engine=self.get_engine(version))
+            overlays = tuple(self.get_generated_for_engine(engine)) if include_generated_overlay else ()
+            return CorpusResolution(engine=engine, project=project_corpus, overlays=overlays)
+        engine = self.get_engine(version)
+        overlays = tuple(self.get_generated_for_engine(engine)) if include_generated_overlay else ()
+        return CorpusResolution(engine=engine, overlays=overlays)

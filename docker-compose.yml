@@ -1,6 +1,7 @@
 x-codalith-env: &codalith-env
   PYTHONPATH: ${CODALITH_WORKSPACE_DIR:-/workspace}/src
   CODALITH_AUDIT_LOG: ${CODALITH_AUDIT_LOG:-/workspace/data/audit/source_reads.jsonl}
+  CODALITH_SEMANTIC_DSN: ${CODALITH_SEMANTIC_DSN:-postgresql://codalith:codalith@postgres:5432/codalith}
   CODALITH_ENGINE_VERSION: ${CODALITH_ENGINE_VERSION:-5.7.4}
   CODALITH_ENGINE_SEMANTIC_SCHEMA: ${CODALITH_ENGINE_SEMANTIC_SCHEMA:-ue_5_7_4}
   CODALITH_ENGINE_SOURCE_ROOT: ${CODALITH_ENGINE_SOURCE_ROOT:-/srv/ue/5.7.4}
@@ -36,6 +37,20 @@ x-coderag-openai-env: &coderag-openai-env
   PYTHONWARNINGS: ignore::SyntaxWarning
 
 services:
+  postgres:
+    image: postgres:16-bookworm
+    environment:
+      POSTGRES_DB: ${CODALITH_POSTGRES_DB:-codalith}
+      POSTGRES_USER: ${CODALITH_POSTGRES_USER:-codalith}
+      POSTGRES_PASSWORD: ${CODALITH_POSTGRES_PASSWORD:-codalith}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    volumes:
+      - codalith-postgres:/var/lib/postgresql/data
+
   test:
     image: ghcr.io/astral-sh/uv:python3.12-bookworm
     working_dir: ${CODALITH_WORKSPACE_DIR:-/workspace}
@@ -43,6 +58,9 @@ services:
       - .env
     environment:
       <<: *codalith-env
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
       - ${CODALITH_REPO_ROOT:-.}:${CODALITH_WORKSPACE_DIR:-/workspace}
     command: >
@@ -67,6 +85,9 @@ services:
       CODALITH_USE_NATIVE_CODERAG: "1"
       CODALITH_NATIVE_CODERAG_STRICT: "1"
       CODALITH_NATIVE_CODERAG_PROGRESS: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "${CODALITH_HTTP_BIND:-127.0.0.1}:${CODALITH_HTTP_PORT:-8765}:${CODALITH_HTTP_PORT:-8765}"
     volumes:
@@ -86,14 +107,17 @@ services:
       - .env
     environment:
       <<: *codalith-env
-      CODALITH_SEMANTIC_DB: ${CODALITH_SEMANTIC_DB:-/tmp/codalith-semantic.sqlite}
+      CODALITH_EXPECT_SEMANTIC_READY: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
       - ${CODALITH_REPO_ROOT:-.}:${CODALITH_WORKSPACE_DIR:-/workspace}
       - ${CODALITH_ENGINE_HOST_ROOT:-E:/UnrealEngine_5.7}:${CODALITH_ENGINE_SOURCE_ROOT:-/srv/ue/5.7.4}:ro
     command: >
       sh -lc "uv sync --extra dev &&
       uv run codalith-index-engine --version \"$${CODALITH_ENGINE_VERSION}\" --smoke &&
-      uv run codalith-extract-semantic --version \"$${CODALITH_ENGINE_VERSION}\" --semantic-db \"$${CODALITH_SEMANTIC_DB}\" --min-modules 100 --min-reflection-entities 100 --min-guards 10 --stop-after-min &&
+      uv run codalith-extract-semantic --version \"$${CODALITH_ENGINE_VERSION}\" --semantic-db \"$${CODALITH_SEMANTIC_DSN}\" --min-modules 100 --min-reflection-entities 100 --min-guards 10 --stop-after-min &&
       uv run codalith-verify-cards --version \"$${CODALITH_ENGINE_VERSION}\" &&
       uv run pytest -m ue_acceptance"
 
@@ -112,6 +136,9 @@ services:
       CODERAG_STORE_DIR: ${CODALITH_CODERAG_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4}
       CODALITH_CODERAG_STORE_DIR: ${CODALITH_CODERAG_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4}
       CODALITH_NATIVE_CODERAG_PROGRESS: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
       - ${CODALITH_REPO_ROOT:-.}:${CODALITH_WORKSPACE_DIR:-/workspace}
       - ${CODALITH_ENGINE_HOST_ROOT:-E:/UnrealEngine_5.7}:${CODALITH_ENGINE_SOURCE_ROOT:-/srv/ue/5.7.4}:ro
@@ -132,6 +159,9 @@ services:
         - *codalith-env
         - *coderag-openai-env
       CODALITH_NATIVE_CODERAG_PROGRESS: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
       - ${CODALITH_REPO_ROOT:-.}:${CODALITH_WORKSPACE_DIR:-/workspace}
       - ${CODALITH_CODERAG_OPENAI_HOST_ROOT:-coderag-openai-store}:${CODALITH_CODERAG_VOLUME_ROOT:-/var/lib/codalith/coderag}
@@ -143,4 +173,5 @@ services:
       uv run codalith-coderag-acceptance --version \"$${CODALITH_ENGINE_VERSION}\" --provider openai --output-dir reports/coderag-openai"
 
 volumes:
+  codalith-postgres:
   coderag-openai-store:

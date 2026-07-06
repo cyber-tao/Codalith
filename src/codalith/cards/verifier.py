@@ -8,6 +8,7 @@ from codalith.cards.hashing import source_sha256
 from codalith.cards.schema import KnowledgeCard
 from codalith.coderag.adapter import CodeRAGAdapter
 from codalith.corpus.uri_resolver import URIResolver
+from codalith.semantic.db import SemanticStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,12 +21,19 @@ class VerificationResult:
 
 
 class KnowledgeCardVerifier:
-    def __init__(self, resolver: URIResolver, adapter: CodeRAGAdapter) -> None:
+    def __init__(
+        self,
+        resolver: URIResolver,
+        adapter: CodeRAGAdapter,
+        semantic_store: SemanticStore | None = None,
+    ) -> None:
         self.resolver = resolver
         self.adapter = adapter
+        self.semantic_store = semantic_store
 
     def verify(self, card: KnowledgeCard) -> VerificationResult:
         errors: list[str] = []
+        evidence_semantically_scanned = False
         if not card.claims:
             errors.append("Card must contain at least one claim")
         for index, claim in enumerate(card.claims):
@@ -37,6 +45,11 @@ class KnowledgeCardVerifier:
                     if resolved.start_line is None or resolved.end_line is None:
                         errors.append(f"Evidence URI has no line range: {evidence.uri}")
                         continue
+                    if (
+                        self.semantic_store is not None
+                        and self.semantic_store.source_file_exists(card.corpus_id, resolved.relative_path)
+                    ):
+                        evidence_semantically_scanned = True
                     content = self.adapter.get_file(
                         resolved.corpus_id,
                         resolved.relative_path,
@@ -55,4 +68,32 @@ class KnowledgeCardVerifier:
         for node in card.related_nodes:
             if not node.strip():
                 errors.append("Related node cannot be blank")
+            elif self.semantic_store is not None:
+                self._verify_related_node(
+                    card.corpus_id,
+                    node,
+                    errors,
+                    evidence_semantically_scanned=evidence_semantically_scanned,
+                )
+        if self.semantic_store is not None and not card.related_nodes:
+            errors.append("Card must declare related semantic nodes when semantic verification is enabled")
         return VerificationResult(ok=not errors, errors=errors)
+
+    def _verify_related_node(
+        self,
+        corpus_id: str,
+        node: str,
+        errors: list[str],
+        *,
+        evidence_semantically_scanned: bool,
+    ) -> None:
+        store = self.semantic_store
+        if store is None:
+            return
+        if node.startswith("module:"):
+            module = node.split(":", maxsplit=1)[1]
+            if not store.module_exists(corpus_id, module):
+                errors.append(f"Related module does not exist in semantic DB: {module}")
+        elif node.startswith(("symbol:", "reflection:")) and not store.symbol_or_reflection_exists(corpus_id, node):
+            if evidence_semantically_scanned:
+                errors.append(f"Related semantic node does not exist in semantic DB: {node}")

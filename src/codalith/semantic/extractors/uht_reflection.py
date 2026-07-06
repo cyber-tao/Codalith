@@ -22,9 +22,11 @@ class ReflectionEntity:
 
 
 class UHTReflectionExtractor:
-    _MACRO_RE = re.compile(r"\b(?P<macro>UCLASS|USTRUCT|UENUM|UFUNCTION|UPROPERTY)\s*\((?P<body>[^)]*)\)")
+    _MACRO_RE = re.compile(r"\b(?P<macro>UCLASS|USTRUCT|UENUM|UINTERFACE|UFUNCTION|UPROPERTY)\s*\((?P<body>[^)]*)\)")
+    _GENERATED_MACRO_RE = re.compile(r"\b(?P<macro>GENERATED_BODY|GENERATED_UCLASS_BODY|GENERATED_USTRUCT_BODY)\s*\(")
     _GENERATED_RE = re.compile(r'#include\s+"(?P<header>[^"]+\.generated\.h)"')
     _CLASS_RE = re.compile(r"\b(?:class|struct)\s+(?:[A-Z0-9_]+_API\s+)?(?P<name>[A-Za-z_][A-Za-z0-9_]*)")
+    _ENUM_RE = re.compile(r"\benum\s+(?:class\s+)?(?P<name>[A-Za-z_][A-Za-z0-9_]*)")
     _FUNCTION_RE = re.compile(r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\(")
     _PROPERTY_RE = re.compile(r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*(?:=\s*[^;]+)?;")
 
@@ -40,6 +42,20 @@ class UHTReflectionExtractor:
         owner: str | None = None
         pending: tuple[str, dict[str, Any]] | None = None
         for line in text.splitlines():
+            generated_macro = self._GENERATED_MACRO_RE.search(line)
+            if generated_macro and owner:
+                entities.append(
+                    ReflectionEntity(
+                        kind="generated_macro",
+                        name=generated_macro.group("macro"),
+                        owner=owner,
+                        specifiers={},
+                        declaration_uri=declaration_uri,
+                        generated_header=generated,
+                        module_name=module_name,
+                        confidence=0.8,
+                    )
+                )
             macro = self._MACRO_RE.search(line)
             if macro:
                 pending = (macro.group("macro"), parse_specifiers(macro.group("body")))
@@ -50,7 +66,7 @@ class UHTReflectionExtractor:
                     owner = class_match.group("name")
                 continue
             macro_name, specifiers = pending
-            if macro_name in {"UCLASS", "USTRUCT"}:
+            if macro_name in {"UCLASS", "USTRUCT", "UINTERFACE"}:
                 class_match = self._CLASS_RE.search(line)
                 if class_match:
                     owner = class_match.group("name")
@@ -58,6 +74,37 @@ class UHTReflectionExtractor:
                         ReflectionEntity(
                             kind=macro_name.lower(),
                             name=owner,
+                            owner=None,
+                            specifiers=specifiers,
+                            declaration_uri=declaration_uri,
+                            generated_header=generated,
+                            module_name=module_name,
+                        )
+                    )
+                    generated_inline = self._GENERATED_MACRO_RE.search(line)
+                    if generated_inline:
+                        entities.append(
+                            ReflectionEntity(
+                                kind="generated_macro",
+                                name=generated_inline.group("macro"),
+                                owner=owner,
+                                specifiers={},
+                                declaration_uri=declaration_uri,
+                                generated_header=generated,
+                                module_name=module_name,
+                                confidence=0.8,
+                            )
+                        )
+                    pending = None
+                continue
+            if macro_name == "UENUM":
+                enum_match = self._ENUM_RE.search(line)
+                if enum_match:
+                    name = enum_match.group("name")
+                    entities.append(
+                        ReflectionEntity(
+                            kind="uenum",
+                            name=name,
                             owner=None,
                             specifiers=specifiers,
                             declaration_uri=declaration_uri,

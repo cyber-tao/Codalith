@@ -39,6 +39,8 @@ class URIResolver:
             return self._resolve_engine(parsed, uri)
         if parsed.scheme == "ue-project":
             return self._resolve_project(parsed, uri)
+        if parsed.scheme == "ue-generated":
+            return self._resolve_generated(parsed, uri)
         raise URIResolutionError(f"Unsupported URI scheme: {parsed.scheme or '<empty>'}")
 
     def _resolve_engine(self, parsed: ParseResult, uri: str) -> ResolvedURI:
@@ -72,6 +74,22 @@ class URIResolver:
             corpus_id=corpus.corpus_id,
             relative_path=relative_path,
             source_kind="project",
+            start_line=start_line,
+            end_line=end_line,
+        )
+
+    def _resolve_generated(self, parsed: ParseResult, uri: str) -> ResolvedURI:
+        corpus_id = parsed.netloc
+        if corpus_id not in self.registry.generated:
+            raise URIResolutionError(f"Unknown generated corpus: {corpus_id}")
+        relative_path = self._source_path(parsed.path)
+        start_line, end_line = self._line_fragment(parsed.fragment)
+        return ResolvedURI(
+            uri=uri,
+            scheme="ue-generated",
+            corpus_id=corpus_id,
+            relative_path=relative_path,
+            source_kind="generated",
             start_line=start_line,
             end_line=end_line,
         )

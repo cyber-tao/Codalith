@@ -15,6 +15,7 @@ from codalith.coderag.adapter import (
     _native_store_dir,
     _policy_content_hash,
 )
+from codalith.gateway.auth import AuthContext
 from codalith.gateway.mcp_server import handle_request
 
 
@@ -421,6 +422,25 @@ def test_codalith_read_source_adds_line_numbers_and_audit(tools, tmp_path):
     audit = json.loads(audit_path.read_text(encoding="utf-8").splitlines()[0])
     assert audit["decision"] == "allowed"
     assert audit["source_hash"] == expected_hash
+    assert audit["user_id"] == "test-user"
+
+
+def test_codalith_read_source_requires_corpus_scope(tools):
+    tools.runtime.identity = AuthContext(
+        user_id="limited",
+        session_id="limited-session",
+        client="pytest",
+        scopes=frozenset({"source:read"}),
+    )
+
+    try:
+        tools.codalith_read_source(
+            uri="ue://5.7.4/source/Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h#L1-L4"
+        )
+    except PermissionError as exc:
+        assert "ue-5.7.4" in str(exc)
+    else:
+        raise AssertionError("read_source should require the engine corpus scope")
 
 
 def test_codalith_context_returns_context_pack(tools):

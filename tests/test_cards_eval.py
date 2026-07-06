@@ -3,12 +3,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from jobs.extract_semantic import extract_semantic_summary
+
 from codalith.cards.generator import attach_source_hashes, built_in_cards, write_cards
 from codalith.cards.schema import CardClaim, KnowledgeCard
 from codalith.cards.verifier import KnowledgeCardVerifier
 from codalith.compiler.context_compiler import ContextCompiler
 from codalith.corpus.uri_resolver import URIResolver
 from codalith.eval.runner import EvalRunner, write_reports
+from codalith.semantic.db import SemanticStore
 
 
 def test_built_in_cards_verify_against_fixture(registry, adapter, tmp_path):
@@ -62,15 +65,37 @@ def test_card_hash_mismatch_fails(registry, adapter):
     assert any("hash mismatch" in error for error in result.errors)
 
 
+def test_card_verifier_checks_related_semantic_nodes(registry, adapter, fake_engine_root, tmp_path):
+    store = SemanticStore(tmp_path / "semantic.sqlite")
+    extract_semantic_summary(fake_engine_root, corpus_id="ue-5.7.4", store=store)
+    resolver = URIResolver(registry)
+    card = attach_source_hashes(built_in_cards()[:1], resolver, adapter)[0]
+
+    result = KnowledgeCardVerifier(resolver, adapter, store).verify(card)
+
+    assert result.ok
+
+    bad_card = KnowledgeCard.from_dict(
+        {
+            **card.as_dict(),
+            "related_nodes": ["module:MissingModule"],
+        }
+    )
+    bad_result = KnowledgeCardVerifier(resolver, adapter, store).verify(bad_card)
+    assert not bad_result.ok
+    assert any("MissingModule" in error for error in bad_result.errors)
+
+
 def test_eval_runner_generates_json_and_markdown(registry, adapter, tmp_path):
     dataset = tmp_path / "dataset.jsonl"
     dataset.write_text(
         json.dumps(
             {
                 "id": "case-1",
-                "query": "UPROPERTY ReplicatedUsing OnRep",
+                "query": "AActor UPROPERTY ReplicatedUsing OnRep",
                 "expected_files": ["Actor.h"],
                 "expected_modules": ["Engine"],
+                "expected_symbols": ["AActor"],
             }
         )
         + "\n",
@@ -80,6 +105,7 @@ def test_eval_runner_generates_json_and_markdown(registry, adapter, tmp_path):
     report = EvalRunner(compiler).run(dataset)
     assert report.count == 1
     assert report.file_recall_at_5 == 1.0
+    assert report.symbol_recall == 1.0
     json_path, md_path = write_reports(report, tmp_path / "reports")
     assert json.loads(json_path.read_text(encoding="utf-8"))["count"] == 1
     assert Path(md_path).read_text(encoding="utf-8").startswith("# Codalith Eval Report")

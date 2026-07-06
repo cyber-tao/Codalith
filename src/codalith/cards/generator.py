@@ -61,7 +61,7 @@ def built_in_cards(*, corpus_id: str = "ue-5.7.4", version: str = "5.7.4") -> li
                         evidence=[CardEvidence(uri=evidence_uri, reason="seed evidence")],
                     )
                 ],
-                related_nodes=[title],
+                related_nodes=[_related_node(card_id, card_type, title)],
             )
         )
     return cards
@@ -100,3 +100,13 @@ def attach_source_hashes(
                 source_hashes[evidence.uri] = source_sha256(content)
         hashed_cards.append(replace(card, source_hashes=source_hashes))
     return hashed_cards
+
+
+def _related_node(card_id: str, card_type: str, title: str) -> str:
+    if card_type == "module":
+        return f"module:{title.removesuffix(' Module').replace(' ', '')}"
+    if card_type == "symbol":
+        return f"symbol:{title}"
+    if card_id.startswith("build-"):
+        return "module:Engine"
+    return f"mechanism:{title}"

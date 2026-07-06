@@ -52,5 +52,5 @@ def test_stop_after_min_prunes_third_party_headers(tmp_path: Path):
 
     assert summary["modules"] == 1
     assert summary["headers_scanned"] == 1
-    assert summary["reflection_entities"] == 2
+    assert summary["reflection_entities"] == 3
     assert summary["compile_guards"] == 1

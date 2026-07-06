@@ -8,13 +8,13 @@ from pathlib import Path
 from typing import Any
 
 from codalith.cards.hashing import source_sha256
-from codalith.coderag.adapter import CodeRAGAdapter
+from codalith.coderag.adapter import CodeRAGAdapter, RetrievalHit
 from codalith.compiler.context_compiler import ContextCompiler
 from codalith.corpus.registry import CorpusRegistry
 from codalith.corpus.source_policy import SourcePolicy, SourceReadRateLimiter
 from codalith.corpus.uri_resolver import URIResolver
 from codalith.gateway.audit import AuditLogger, AuditRecord
-from codalith.gateway.auth import scopes_from_env
+from codalith.gateway.auth import AuthContext, current_auth_context
 from codalith.semantic.db import SemanticStore
 from codalith.semantic.graph import query_graph
 
@@ -28,6 +28,7 @@ class ToolRuntime:
     compiler: ContextCompiler
     audit: AuditLogger
     scopes: set[str]
+    identity: AuthContext
     semantic_store: SemanticStore | None = None
     rate_limiter: SourceReadRateLimiter | None = None
 
@@ -42,10 +43,10 @@ def create_runtime(
     resolver = URIResolver(registry)
     policy = SourcePolicy.from_file(source_policy_path)
     adapter = CodeRAGAdapter(registry)
-    semantic_db = os.getenv("CODALITH_SEMANTIC_DB") or str(
+    semantic_target = os.getenv("CODALITH_SEMANTIC_DSN") or os.getenv("CODALITH_SEMANTIC_DB") or str(
         Path("data") / "semantic" / "codalith.sqlite"
     )
-    semantic_store = SemanticStore(semantic_db)
+    semantic_store = SemanticStore(semantic_target)
     compiler = ContextCompiler(
         registry,
         adapter,
@@ -63,7 +64,8 @@ def create_runtime(
         adapter=adapter,
         compiler=compiler,
         audit=audit,
-        scopes=scopes_from_env(),
+        scopes=set(AuthContext.local().scopes),
+        identity=AuthContext.local(),
         semantic_store=semantic_store,
         rate_limiter=SourceReadRateLimiter(policy),
     )
@@ -82,7 +84,15 @@ class CodalithTools:
         mode: str = "explain",
         max_source_spans: int = 8,
         include_project_overlay: bool = True,
+        include_generated_overlay: bool = False,
     ) -> dict[str, Any]:
+        resolution = self.runtime.registry.resolve(
+            version,
+            project,
+            include_project_overlay,
+            include_generated_overlay=include_generated_overlay,
+        )
+        self._require_resolution_access(resolution)
         pack = self.runtime.compiler.compile(
             query=query,
             version=version,
@@ -90,6 +100,7 @@ class CodalithTools:
             mode=mode,
             max_source_spans=max_source_spans,
             include_project_overlay=include_project_overlay,
+            include_generated_overlay=include_generated_overlay,
         )
         return pack.as_dict()
 
@@ -113,7 +124,8 @@ class CodalithTools:
                 end_line=end_line or resolved.end_line,
             )
         try:
-            self.runtime.policy.check(resolved, self.runtime.scopes)
+            self._require_corpus_access(resolved.corpus_id)
+            self.runtime.policy.check(resolved, self._scopes())
             assert resolved.start_line is not None
             assert resolved.end_line is not None
             content = self.runtime.adapter.get_file(
@@ -124,8 +136,14 @@ class CodalithTools:
             )
             line_count = resolved.line_count or 0
             if self.runtime.rate_limiter is not None:
-                self.runtime.rate_limiter.check_and_record(line_count)
+                self.runtime.rate_limiter.record_read(
+                    line_count=line_count,
+                    path=resolved.relative_path,
+                    start_line=resolved.start_line,
+                    end_line=resolved.end_line,
+                )
             source_hash = source_sha256(content)
+            auth = self._auth()
             if with_line_numbers:
                 content = "\n".join(
                     f"{resolved.start_line + index}|{line}"
@@ -142,6 +160,9 @@ class CodalithTools:
                     line_count=line_count,
                     decision="allowed",
                     source_hash=source_hash,
+                    user_id=auth.user_id,
+                    session_id=auth.session_id,
+                    client=auth.client,
                 )
             )
             return {
@@ -156,6 +177,7 @@ class CodalithTools:
         except Exception as exc:
             start = resolved.start_line or 0
             end = resolved.end_line or start
+            auth = self._auth()
             self.runtime.audit.write(
                 AuditRecord.create(
                     tool="codalith_read_source",
@@ -167,6 +189,9 @@ class CodalithTools:
                     line_count=max(0, end - start + 1),
                     decision="denied",
                     reason=str(exc),
+                    user_id=auth.user_id,
+                    session_id=auth.session_id,
+                    client=auth.client,
                 )
             )
             raise
@@ -177,9 +202,10 @@ class CodalithTools:
         version: str | None = None,
         project: str | None = None,
     ) -> dict[str, Any]:
-        if "index:status" not in self.runtime.scopes:
+        if "index:status" not in self._scopes():
             return {"error": "Missing required scope: index:status"}
         resolution = self.runtime.registry.resolve(version, project, include_project_overlay=bool(project))
+        self._require_resolution_access(resolution)
         semantic = {
             "engine": self.runtime.semantic_store.semantic_status(resolution.engine.corpus_id)
             if self.runtime.semantic_store
@@ -205,6 +231,23 @@ class CodalithTools:
         kind: str = "any",
         include_examples: bool = True,
     ) -> dict[str, Any]:
+        resolution = self.runtime.registry.resolve(version, project, include_project_overlay=bool(project))
+        self._require_resolution_access(resolution)
+        semantic_matches: list[dict[str, Any]] = []
+        if self.runtime.semantic_store is not None:
+            for corpus in resolution.ordered:
+                semantic_matches.extend(
+                    {
+                        **row,
+                        "corpus_id": corpus.corpus_id,
+                    }
+                    for row in self.runtime.semantic_store.find_symbols(
+                        corpus.corpus_id,
+                        symbol,
+                        kind=kind,
+                        limit=20,
+                    )
+                )
         pack = self.codalith_context(
             query=symbol,
             version=version,
@@ -226,6 +269,15 @@ class CodalithTools:
         return {
             "symbol": symbol,
             "kind": kind,
+            "semantic_matches": semantic_matches,
+            "definitions": [
+                match
+                for match in semantic_matches
+                if match.get("definition_uri") or match.get("declaration_uri")
+            ],
+            "modules": sorted(
+                {str(match["module_name"]) for match in semantic_matches if match.get("module_name")}
+            ),
             "context": pack,
             "graph": graph,
             "examples": examples,
@@ -241,9 +293,10 @@ class CodalithTools:
         depth: int = 1,
         max_nodes: int = 80,
     ) -> dict[str, Any]:
-        if "graph:read" not in self.runtime.scopes:
+        if "graph:read" not in self._scopes():
             return {"error": "Missing required scope: graph:read"}
         resolution = self.runtime.registry.resolve(version, project, include_project_overlay=bool(project))
+        self._require_resolution_access(resolution)
         if self.runtime.semantic_store is None:
             return {
                 "node": node,
@@ -297,10 +350,18 @@ class CodalithTools:
         scope: str = "all",
         max_examples: int = 8,
     ) -> dict[str, Any]:
-        resolution = self.runtime.registry.resolve(version, project, include_project_overlay=scope in {"project", "all"})
-        hits = []
+        resolution = self.runtime.registry.resolve(
+            version,
+            project,
+            include_project_overlay=scope in {"project", "all"},
+            include_generated_overlay=scope == "generated"
+            or (scope == "all" and "generated:read" in self._scopes()),
+        )
+        self._require_resolution_access(resolution)
+        hits: list[RetrievalHit] = []
         for corpus in resolution.ordered:
-            hits.extend(self.runtime.adapter.search_code(corpus.corpus_id, symbol_or_api, top_k=max_examples))
+            corpus_hits = self.runtime.adapter.search_code(corpus.corpus_id, symbol_or_api, top_k=max_examples * 2)
+            hits.extend(hit for hit in corpus_hits if _scope_matches(scope, hit.path, corpus.kind))
         return {"symbol_or_api": symbol_or_api, "examples": [hit.as_dict() for hit in hits[:max_examples]]}
 
     def codalith_compare_versions(
@@ -311,6 +372,10 @@ class CodalithTools:
         to_version: str,
         diff_type: str = "summary",
     ) -> dict[str, Any]:
+        from_resolution = self.runtime.registry.resolve(from_version)
+        to_resolution = self.runtime.registry.resolve(to_version)
+        self._require_resolution_access(from_resolution)
+        self._require_resolution_access(to_resolution)
         from_pack = self.codalith_context(
             query=target,
             version=from_version,
@@ -323,14 +388,110 @@ class CodalithTools:
             mode="compare",
             max_source_spans=5,
         )
+        diff = self._semantic_diff(
+            target=target,
+            diff_type=diff_type,
+            from_corpus=from_resolution.engine.corpus_id,
+            to_corpus=to_resolution.engine.corpus_id,
+        )
         return {
             "target": target,
             "from_version": from_version,
             "to_version": to_version,
             "diff_type": diff_type,
+            "diff": diff,
             "from": from_pack,
             "to": to_pack,
         }
+
+    def _auth(self) -> AuthContext:
+        return current_auth_context(self.runtime.identity)
+
+    def _scopes(self) -> set[str]:
+        return set(self._auth().scopes)
+
+    def _require_resolution_access(self, resolution: Any) -> None:
+        for corpus in resolution.ordered:
+            self._require_corpus_access(corpus.corpus_id)
+
+    def _require_corpus_access(self, corpus_id: str) -> None:
+        corpus = (
+            self.runtime.registry.engines.get(corpus_id)
+            or self.runtime.registry.projects.get(corpus_id)
+            or self.runtime.registry.generated.get(corpus_id)
+        )
+        if corpus is None:
+            raise ValueError(f"Unknown corpus: {corpus_id}")
+        missing = sorted(scope for scope in corpus.access_scopes if scope not in self._scopes())
+        if missing:
+            raise PermissionError(f"Missing required corpus scope(s) for {corpus_id}: {', '.join(missing)}")
+
+    def _semantic_diff(
+        self,
+        *,
+        target: str,
+        diff_type: str,
+        from_corpus: str,
+        to_corpus: str,
+    ) -> dict[str, Any]:
+        if self.runtime.semantic_store is None:
+            return {"status": "unavailable", "reason": "Semantic store is not configured."}
+        if diff_type == "module_deps":
+            from_rows = self.runtime.semantic_store.list_module_deps(from_corpus, target)
+            to_rows = self.runtime.semantic_store.list_module_deps(to_corpus, target)
+            from_map = {_module_dep_key(row): row for row in from_rows}
+            to_map = {_module_dep_key(row): row for row in to_rows}
+        else:
+            from_rows = self.runtime.semantic_store.find_symbols(from_corpus, target, limit=100)
+            to_rows = self.runtime.semantic_store.find_symbols(to_corpus, target, limit=100)
+            from_map = {_symbol_key(row): row for row in from_rows}
+            to_map = {_symbol_key(row): row for row in to_rows}
+        added = [to_map[item] for item in sorted(to_map.keys() - from_map.keys(), key=str)]
+        removed = [from_map[item] for item in sorted(from_map.keys() - to_map.keys(), key=str)]
+        common = sorted(from_map.keys() & to_map.keys(), key=str)
+        changed = [
+            {"from": from_map[item], "to": to_map[item]}
+            for item in common
+            if from_map[item] != to_map[item]
+        ]
+        return {
+            "status": "ok",
+            "target": target,
+            "diff_type": diff_type,
+            "added": added,
+            "removed": removed,
+            "changed": changed,
+            "unchanged_count": len(common) - len(changed),
+        }
+
+
+def _scope_matches(scope: str, path: str, corpus_kind: str) -> bool:
+    if scope == "all":
+        return True
+    if scope == "project":
+        return corpus_kind == "project"
+    if scope == "generated":
+        return corpus_kind == "generated"
+    if corpus_kind == "project":
+        return False
+    if corpus_kind == "generated":
+        return scope == "all"
+    if scope == "plugins":
+        return path.startswith("Engine/Plugins/")
+    if scope == "tests":
+        lowered = path.lower()
+        return "/test" in lowered or "/tests/" in lowered or "automation" in lowered
+    if scope == "engine":
+        return path.startswith("Engine/Source/")
+    return True
+
+
+def _module_dep_key(row: dict[str, Any]) -> tuple[object, ...]:
+    return (row["from_module"], row["to_module"], row["dep_kind"])
+
+
+def _symbol_key(row: dict[str, Any]) -> tuple[object, ...]:
+    return (row["name"], row["kind"], row.get("qualified_name"), row.get("signature"))
 
 
 def tool_schemas() -> list[dict[str, Any]]:
@@ -351,6 +512,7 @@ def tool_schemas() -> list[dict[str, Any]]:
                     },
                     "max_source_spans": {"type": "integer", "default": 8},
                     "include_project_overlay": {"type": "boolean", "default": True},
+                    "include_generated_overlay": {"type": "boolean", "default": False},
                 },
                 "required": ["query"],
             },
@@ -431,7 +593,7 @@ def tool_schemas() -> list[dict[str, Any]]:
                     "project": {"type": "string"},
                     "scope": {
                         "type": "string",
-                        "enum": ["engine", "plugins", "tests", "project", "all"],
+                        "enum": ["engine", "plugins", "tests", "project", "generated", "all"],
                         "default": "all",
                     },
                     "max_examples": {"type": "integer", "default": 8},

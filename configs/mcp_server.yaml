@@ -1,5 +1,18 @@
 {
-  "transport": "stdio",
+  "transport": "streamable-http",
+  "endpoint": "${CODALITH_HTTP_ENDPOINT:-/mcp}",
+  "host": "${CODALITH_HTTP_HOST:-127.0.0.1}",
+  "port": "${CODALITH_HTTP_PORT:-8765}",
   "default_version": "${CODALITH_ENGINE_VERSION:-5.7.4}",
-  "audit_log": "${CODALITH_AUDIT_LOG:-/workspace/data/audit/source_reads.jsonl}"
+  "audit_log": "${CODALITH_AUDIT_LOG:-/workspace/data/audit/source_reads.jsonl}",
+  "tools": {
+    "primary": ["codalith_context", "codalith_read_source"],
+    "secondary": [
+      "codalith_lookup_symbol",
+      "codalith_graph",
+      "codalith_examples",
+      "codalith_compare_versions",
+      "codalith_index_status"
+    ]
+  }
 }
