@@ -10,6 +10,7 @@ x-codalith-env: &codalith-env
   UV_LINK_MODE: copy
   UV_DEFAULT_INDEX: ${CODALITH_PYPI_INDEX:-https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/}
   PIP_INDEX_URL: ${CODALITH_PYPI_INDEX:-https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/}
+  LANCE_INCLUDE_VECTOR_CENTROIDS: ${LANCE_INCLUDE_VECTOR_CENTROIDS:-false}
 
 services:
   test:
