@@ -113,7 +113,7 @@ Run the HTTP MCP server as a managed Compose service:
 docker compose up -d mcp-http
 ```
 
-The default endpoint is `http://127.0.0.1:8765/mcp` from the Docker host. `CODALITH_HTTP_HOST` controls the container listener, while `CODALITH_HTTP_BIND` controls the host port binding; keep `CODALITH_HTTP_BIND=127.0.0.1` unless the server should be reachable from other machines. For OpenAI-compatible CodeRAG acceptance, set `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `CODERAG_OPENAI_MODEL`, and `CODERAG_CHAT_MODEL` in `.env`; legacy aliases such as `BASE_URL` and `API_KEY` remain accepted as fallbacks.
+The default endpoint is `http://127.0.0.1:8765/mcp` from the Docker host. `CODALITH_HTTP_HOST` controls the container listener, while `CODALITH_HTTP_BIND` controls the host port binding; keep `CODALITH_HTTP_BIND=127.0.0.1` unless the server should be reachable from other machines. For OpenAI-compatible CodeRAG acceptance, set `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `CODERAG_OPENAI_MODEL`, and `CODERAG_CHAT_MODEL` in `.env`.
 
 Run default checks:
 

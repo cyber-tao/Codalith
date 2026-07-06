@@ -113,7 +113,7 @@ CODALITH_GAMEPLAY_ABILITIES_HOST_ROOT=E:/UnrealEngine_5.7/Engine/Plugins/Runtime
 docker compose up -d mcp-http
 ```
 
-从 Docker 宿主机访问的默认 endpoint 是 `http://127.0.0.1:8765/mcp`。`CODALITH_HTTP_HOST` 控制容器内监听地址，`CODALITH_HTTP_BIND` 控制宿主机端口绑定；除非需要其他机器访问，否则保持 `CODALITH_HTTP_BIND=127.0.0.1`。如果运行 OpenAI-compatible CodeRAG acceptance，在 `.env` 中设置 `OPENAI_BASE_URL`、`OPENAI_API_KEY`、`CODERAG_OPENAI_MODEL` 和 `CODERAG_CHAT_MODEL`；`BASE_URL`、`API_KEY` 等旧别名仍作为 fallback 兼容。
+从 Docker 宿主机访问的默认 endpoint 是 `http://127.0.0.1:8765/mcp`。`CODALITH_HTTP_HOST` 控制容器内监听地址，`CODALITH_HTTP_BIND` 控制宿主机端口绑定；除非需要其他机器访问，否则保持 `CODALITH_HTTP_BIND=127.0.0.1`。如果运行 OpenAI-compatible CodeRAG acceptance，在 `.env` 中设置 `OPENAI_BASE_URL`、`OPENAI_API_KEY`、`CODERAG_OPENAI_MODEL` 和 `CODERAG_CHAT_MODEL`。
 
 运行默认检查：
 

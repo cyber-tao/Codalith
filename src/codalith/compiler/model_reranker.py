@@ -123,7 +123,7 @@ def reranker_from_env() -> ModelReranker | None:
     timeout = _env_float("CODALITH_RERANKER_TIMEOUT_SECONDS", 30.0)
     max_candidates = _env_int("CODALITH_RERANKER_MAX_CANDIDATES", 40)
     strict = os.getenv("CODALITH_RERANKER_STRICT", "").lower() in {"1", "true", "yes"}
-    api_key = os.getenv("CODALITH_RERANKER_API_KEY") or os.getenv("API_KEY")
+    api_key = os.getenv("CODALITH_RERANKER_API_KEY")
     return HTTPModelReranker(
         base_url=base_url,
         model=model,

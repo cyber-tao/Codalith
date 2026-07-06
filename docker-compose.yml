@@ -16,12 +16,12 @@ x-codalith-env: &codalith-env
 
 x-coderag-openai-env: &coderag-openai-env
   CODERAG_PROVIDER: openai
-  CODERAG_OPENAI_MODEL: ${CODERAG_OPENAI_MODEL:-${EMBEDDING_MODEL:-qwen3-embedding:0.6b}}
-  CODERAG_CHAT_MODEL: ${CODERAG_CHAT_MODEL:-${LLM_MODEL:-${MODEL:-kimi-k2.7}}}
+  CODERAG_OPENAI_MODEL: ${CODERAG_OPENAI_MODEL:-qwen3-embedding:0.6b}
+  CODERAG_CHAT_MODEL: ${CODERAG_CHAT_MODEL:-kimi-k2.7}
   CODERAG_OPENAI_BATCH: ${CODERAG_OPENAI_BATCH:-32}
   CODERAG_WORKERS: ${CODERAG_WORKERS:-4}
-  OPENAI_BASE_URL: ${OPENAI_BASE_URL:-${BASE_URL:-https://api.example.com/v1}}
-  OPENAI_API_KEY: ${OPENAI_API_KEY:-${API_KEY:-replace-me}}
+  OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.example.com/v1}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-replace-me}
   CODERAG_INDEX_ALL_TEXT: "1"
   CODERAG_GITIGNORE: "0"
   CODERAG_STORE_DIR: ${CODALITH_CODERAG_OPENAI_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4-openai-qwen3-embedding-8b}
