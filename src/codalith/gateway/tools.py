@@ -10,7 +10,6 @@ from typing import Any
 from codalith.cards.hashing import source_sha256
 from codalith.coderag.adapter import CodeRAGAdapter
 from codalith.compiler.context_compiler import ContextCompiler
-from codalith.compiler.model_reranker import reranker_from_env, retrieval_top_k_from_env
 from codalith.corpus.registry import CorpusRegistry
 from codalith.corpus.source_policy import SourcePolicy, SourceReadRateLimiter
 from codalith.corpus.uri_resolver import URIResolver
@@ -43,8 +42,6 @@ def create_runtime(
     resolver = URIResolver(registry)
     policy = SourcePolicy.from_file(source_policy_path)
     adapter = CodeRAGAdapter(registry)
-    model_reranker = reranker_from_env()
-    retrieval_top_k = retrieval_top_k_from_env(reranker_enabled=model_reranker is not None)
     semantic_db = os.getenv("CODALITH_SEMANTIC_DB") or str(
         Path("data") / "semantic" / "codalith.sqlite"
     )
@@ -53,8 +50,6 @@ def create_runtime(
         registry,
         adapter,
         semantic_store=semantic_store,
-        model_reranker=model_reranker,
-        retrieval_top_k=retrieval_top_k,
     )
     audit = AuditLogger(
         audit_log

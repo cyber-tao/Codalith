@@ -1,9 +1,8 @@
-"""Simple score normalization and reranking."""
+"""Simple score normalization and ranking."""
 
 from __future__ import annotations
 
 from codalith.coderag.adapter import RetrievalHit
-from codalith.compiler.model_reranker import ModelReranker
 
 
 def rerank(
@@ -11,8 +10,6 @@ def rerank(
     *,
     identifiers: list[str],
     max_hits: int,
-    query: str | None = None,
-    model_reranker: ModelReranker | None = None,
 ) -> list[RetrievalHit]:
     identifier_set = {item.lower() for item in identifiers}
 
@@ -22,6 +19,4 @@ def rerank(
         return hit.score + exact + card
 
     ordered = sorted(hits, key=score, reverse=True)
-    if model_reranker is not None and query:
-        ordered = model_reranker.rerank(query, ordered)
     return ordered[:max_hits]
