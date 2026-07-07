@@ -13,9 +13,9 @@ from codalith.compiler.context_compiler import ContextCompiler
 from codalith.corpus.registry import CorpusRegistry
 from codalith.corpus.source_policy import SourcePolicy, SourceReadRateLimiter
 from codalith.corpus.uri_resolver import ResolvedURI, URIResolver
-from codalith.errors import SourcePolicyError
+from codalith.errors import CorpusNotFoundError, SourcePolicyError
 from codalith.gateway.audit import AuditLogger, AuditRecord
-from codalith.gateway.auth import AuthContext, current_auth_context
+from codalith.gateway.auth import AuthContext, AuthError, current_auth_context
 from codalith.semantic.graph import query_graph
 from codalith.semantic.store import SemanticStore
 
@@ -198,8 +198,7 @@ class CodalithTools:
         version: str | None = None,
         project: str | None = None,
     ) -> dict[str, Any]:
-        if "index:status" not in self._scopes():
-            return {"error": "Missing required scope: index:status"}
+        self._require_scope("index:status")
         resolution = self.runtime.registry.resolve(version, project, include_project_overlay=bool(project))
         self._require_resolution_access(resolution)
         semantic = {
@@ -251,18 +250,8 @@ class CodalithTools:
             mode="api_usage" if include_examples else "explain",
             max_source_spans=8,
         )
-        graph = self.codalith_graph(node=symbol, version=version, project=project, max_nodes=24)
-        examples = (
-            self.codalith_examples(
-                symbol_or_api=symbol,
-                version=version,
-                project=project,
-                max_examples=5,
-            )["examples"]
-            if include_examples
-            else []
-        )
-        return {
+        warnings: list[str] = []
+        result: dict[str, Any] = {
             "symbol": symbol,
             "kind": kind,
             "semantic_matches": semantic_matches,
@@ -275,9 +264,24 @@ class CodalithTools:
                 {str(match["module_name"]) for match in semantic_matches if match.get("module_name")}
             ),
             "context": pack,
-            "graph": graph,
-            "examples": examples,
         }
+        if "graph:read" in self._scopes():
+            result["graph"] = self.codalith_graph(node=symbol, version=version, project=project, max_nodes=24)
+        else:
+            warnings.append("Graph neighborhood omitted: missing scope graph:read.")
+        result["examples"] = (
+            self.codalith_examples(
+                symbol_or_api=symbol,
+                version=version,
+                project=project,
+                max_examples=5,
+            )["examples"]
+            if include_examples
+            else []
+        )
+        if warnings:
+            result["warnings"] = warnings
+        return result
 
     def codalith_graph(
         self,
@@ -289,8 +293,7 @@ class CodalithTools:
         depth: int = 1,
         max_nodes: int = 80,
     ) -> dict[str, Any]:
-        if "graph:read" not in self._scopes():
-            return {"error": "Missing required scope: graph:read"}
+        self._require_scope("graph:read")
         resolution = self.runtime.registry.resolve(version, project, include_project_overlay=bool(project))
         self._require_resolution_access(resolution)
         if self.runtime.semantic_store is None:
@@ -366,8 +369,10 @@ class CodalithTools:
         target: str,
         from_version: str,
         to_version: str,
-        diff_type: str = "summary",
+        diff_type: str = "symbols",
     ) -> dict[str, Any]:
+        if diff_type not in ("module_deps", "symbols"):
+            raise ValueError(f"Unsupported diff_type: {diff_type}")
         from_resolution = self.runtime.registry.resolve(from_version)
         to_resolution = self.runtime.registry.resolve(to_version)
         self._require_resolution_access(from_resolution)
@@ -406,6 +411,10 @@ class CodalithTools:
     def _scopes(self) -> set[str]:
         return set(self._auth().scopes)
 
+    def _require_scope(self, scope: str) -> None:
+        if scope not in self._scopes():
+            raise AuthError(f"Missing required scope: {scope}")
+
     def _bounded_read_range(self, resolved: ResolvedURI) -> ResolvedURI:
         # When a caller omits an explicit range, serve a default bounded window.
         start = resolved.start_line if resolved.start_line is not None else 1
@@ -431,10 +440,10 @@ class CodalithTools:
             or self.runtime.registry.generated.get(corpus_id)
         )
         if corpus is None:
-            raise ValueError(f"Unknown corpus: {corpus_id}")
+            raise CorpusNotFoundError(f"Unknown corpus: {corpus_id}")
         missing = sorted(scope for scope in corpus.access_scopes if scope not in self._scopes())
         if missing:
-            raise PermissionError(f"Missing required corpus scope(s) for {corpus_id}: {', '.join(missing)}")
+            raise AuthError(f"Missing required corpus scope(s) for {corpus_id}: {', '.join(missing)}")
 
     def _semantic_diff(
         self,
@@ -504,7 +513,7 @@ def _symbol_key(row: dict[str, Any]) -> tuple[object, ...]:
     return (row["name"], row["kind"], row.get("qualified_name"), row.get("signature"))
 
 
-def tool_schemas() -> list[dict[str, Any]]:
+def _tool_schema_data() -> list[dict[str, Any]]:
     return [
         {
             "name": "codalith_context",
@@ -622,8 +631,8 @@ def tool_schemas() -> list[dict[str, Any]]:
                     "to_version": {"type": "string"},
                     "diff_type": {
                         "type": "string",
-                        "enum": ["summary", "api", "source", "module_deps", "reflection", "behavior"],
-                        "default": "summary",
+                        "enum": ["module_deps", "symbols"],
+                        "default": "symbols",
                     },
                 },
                 "required": ["target", "from_version", "to_version"],
@@ -632,11 +641,35 @@ def tool_schemas() -> list[dict[str, Any]]:
     ]
 
 
-TOOL_NAMES: frozenset[str] = frozenset(schema["name"] for schema in tool_schemas())
+# Single source of truth: tools/list schemas and call_tool dispatch both derive
+# from this registry, so a tool cannot be listed without being callable.
+TOOL_REGISTRY: dict[str, dict[str, Any]] = {
+    schema["name"]: schema for schema in _tool_schema_data()
+}
+
+
+def tool_schemas() -> list[dict[str, Any]]:
+    return list(TOOL_REGISTRY.values())
 
 
 def call_tool(tools: CodalithTools, name: str, arguments: dict[str, Any]) -> Any:
-    if name not in TOOL_NAMES:
+    schema = TOOL_REGISTRY.get(name)
+    if schema is None:
         raise ValueError(f"Unknown tool: {name}")
+    _validate_arguments(name, schema["inputSchema"], arguments)
     method = getattr(tools, name)
     return method(**arguments)
+
+
+def _validate_arguments(name: str, input_schema: dict[str, Any], arguments: dict[str, Any]) -> None:
+    properties = input_schema.get("properties", {})
+    missing = [key for key in input_schema.get("required", []) if key not in arguments]
+    if missing:
+        raise ValueError(f"{name} is missing required argument(s): {', '.join(sorted(missing))}")
+    unknown = [key for key in arguments if key not in properties]
+    if unknown:
+        raise ValueError(f"{name} got unexpected argument(s): {', '.join(sorted(unknown))}")
+    for key, value in arguments.items():
+        allowed = properties[key].get("enum")
+        if allowed is not None and value not in allowed:
+            raise ValueError(f"{name} argument {key!r} must be one of {allowed}, got {value!r}")

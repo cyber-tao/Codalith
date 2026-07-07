@@ -15,7 +15,7 @@ from codalith.coderag.adapter import (
     _native_store_dir,
     _policy_content_hash,
 )
-from codalith.gateway.auth import AuthContext
+from codalith.gateway.auth import AuthContext, AuthError
 from codalith.gateway.mcp_server import handle_request
 
 
@@ -437,7 +437,7 @@ def test_codalith_read_source_requires_corpus_scope(tools):
         tools.codalith_read_source(
             uri="ue://5.7.4/source/Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h#L1-L4"
         )
-    except PermissionError as exc:
+    except AuthError as exc:
         assert "ue-5.7.4" in str(exc)
     else:
         raise AssertionError("read_source should require the engine corpus scope")

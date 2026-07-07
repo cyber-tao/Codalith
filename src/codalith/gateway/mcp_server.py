@@ -6,6 +6,7 @@ import json
 import sys
 from typing import Any
 
+from codalith.errors import CodalithError
 from codalith.gateway.resources import read_resource, resource_templates, resources
 from codalith.gateway.tools import CodalithTools, call_tool, create_runtime, tool_schemas
 
@@ -54,8 +55,7 @@ def handle_request(request: dict[str, Any], tools: CodalithTools) -> dict[str, A
         elif method == "resources/read":
             params = request.get("params", {})
             uri = str(params.get("uri"))
-            semantic_status = _semantic_status_for_uri(uri, tools)
-            structured = read_resource(uri, tools.runtime.registry, semantic_status)
+            structured = read_resource(uri, tools)
             result = {
                 "contents": [
                     {
@@ -68,8 +68,12 @@ def handle_request(request: dict[str, Any], tools: CodalithTools) -> dict[str, A
         else:
             return _error(request_id, -32601, f"Method not found: {method}")
         return {"jsonrpc": "2.0", "id": request_id, "result": result}
-    except Exception as exc:  # noqa: BLE001 - protocol boundary.
+    except (ValueError, TypeError) as exc:
+        return _error(request_id, -32602, str(exc))
+    except CodalithError as exc:
         return _error(request_id, -32000, str(exc))
+    except Exception as exc:  # noqa: BLE001 - protocol boundary.
+        return _error(request_id, -32603, str(exc))
 
 
 def serve(tools: CodalithTools) -> None:
@@ -96,19 +100,6 @@ def main() -> int:
 
 def _error(request_id: object, code: int, message: str) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
-
-
-def _semantic_status_for_uri(uri: str, tools: CodalithTools) -> dict[str, Any] | None:
-    if tools.runtime.semantic_store is None:
-        return None
-    for corpus in tools.runtime.registry.engines.values():
-        version = corpus.ue_version or corpus.corpus_id.removeprefix("ue-")
-        if uri == f"ue://{version}" or uri.startswith(f"ue://{version}/"):
-            return tools.runtime.semantic_store.semantic_status(corpus.corpus_id)
-    for project_id, corpus in tools.runtime.registry.projects.items():
-        if uri == f"ue-project://{project_id}" or uri.startswith(f"ue-project://{project_id}/"):
-            return tools.runtime.semantic_store.semantic_status(corpus.corpus_id)
-    return None
 
 
 if __name__ == "__main__":

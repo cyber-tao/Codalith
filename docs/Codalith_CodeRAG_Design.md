@@ -1521,7 +1521,8 @@ CodeRAG.reindex
       "to_version": { "type": "string" },
       "diff_type": {
         "type": "string",
-        "enum": ["summary", "api", "source", "module_deps", "reflection", "behavior"]
+        "enum": ["module_deps", "symbols"],
+        "default": "symbols"
       }
     },
     "required": ["target", "from_version", "to_version"]
