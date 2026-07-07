@@ -186,4 +186,4 @@ def _uri_for(corpus: Corpus, path: str, start: int, end: int) -> str:
         return f"ue-project://{corpus.corpus_id}/source/{path}#L{start}-L{end}"
     if corpus.kind == "generated":
         return f"ue-generated://{corpus.corpus_id}/source/{path}#L{start}-L{end}"
-    return f"ue://{corpus.version}/source/{path}#L{start}-L{end}"
+    return f"ue://{corpus.version_label}/source/{path}#L{start}-L{end}"

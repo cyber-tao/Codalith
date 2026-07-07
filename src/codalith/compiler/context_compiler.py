@@ -47,7 +47,7 @@ class ContextCompiler:
             include_project_overlay,
             include_generated_overlay=include_generated_overlay,
         )
-        resolved_version = resolution.engine.version
+        resolved_version = resolution.engine.version_label
         intent = detect_intent(query, mode)
         identifiers = detect_identifiers(query)
         modules = detect_modules(query)

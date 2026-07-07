@@ -21,7 +21,7 @@ _SAFE_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$")
 def resources(registry: CorpusRegistry) -> list[dict[str, str]]:
     items: list[dict[str, str]] = []
     for corpus in registry.engines.values():
-        base = f"ue://{corpus.version}"
+        base = f"ue://{corpus.version_label}"
         label = corpus.label
         items.extend(
             [
@@ -97,7 +97,7 @@ def resource_templates() -> list[dict[str, str]]:
 def read_resource(uri: str, tools: CodalithTools) -> dict[str, Any]:
     registry = tools.runtime.registry
     for corpus in registry.engines.values():
-        version = corpus.version
+        version = corpus.version_label
         base = f"ue://{version}"
         if uri != base and not uri.startswith(f"{base}/"):
             continue

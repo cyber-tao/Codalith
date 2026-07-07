@@ -44,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
     summary = extract_semantic_summary(
         root,
         corpus_id=args.corpus_id or corpus.corpus_id,
-        version=corpus.ue_version or args.version,
+        version=corpus.version or args.version,
         project_id=corpus.corpus_id if corpus.kind == "project" else None,
         store=store,
         stop_after_min=args.stop_after_min,

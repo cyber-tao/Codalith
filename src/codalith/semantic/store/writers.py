@@ -81,12 +81,12 @@ class SemanticWriters(SemanticQueries):
         if self.dialect == "postgresql":
             sql = """
                 INSERT INTO codalith_corpora
-                  (corpus_id, kind, ue_version, source_commit, source_root,
+                  (corpus_id, kind, version, source_commit, source_root,
                    indexed_root, semantic_schema, metadata)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (corpus_id)
                 DO UPDATE SET kind = EXCLUDED.kind,
-                              ue_version = EXCLUDED.ue_version,
+                              version = EXCLUDED.version,
                               source_commit = EXCLUDED.source_commit,
                               source_root = EXCLUDED.source_root,
                               indexed_root = EXCLUDED.indexed_root,
@@ -97,7 +97,7 @@ class SemanticWriters(SemanticQueries):
         else:
             sql = """
                 INSERT OR REPLACE INTO codalith_corpora
-                  (corpus_id, kind, ue_version, source_commit, source_root,
+                  (corpus_id, kind, version, source_commit, source_root,
                    indexed_root, semantic_schema, metadata)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """
@@ -106,7 +106,7 @@ class SemanticWriters(SemanticQueries):
             (
                 corpus.corpus_id,
                 corpus.kind,
-                corpus.ue_version,
+                corpus.version,
                 corpus.source_commit,
                 str(corpus.source_root),
                 str(corpus.indexed_root),

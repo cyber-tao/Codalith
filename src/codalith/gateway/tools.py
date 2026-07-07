@@ -297,7 +297,7 @@ class CodalithTools:
         self._require_scope("graph:read")
         resolution = self.runtime.registry.resolve(version, project, include_project_overlay=bool(project))
         self._require_resolution_access(resolution)
-        resolved_version = resolution.engine.version
+        resolved_version = resolution.engine.version_label
         if self.runtime.semantic_store is None:
             return {
                 "node": node,
@@ -664,7 +664,7 @@ def _tool_registry(default_version: str | None) -> dict[str, dict[str, Any]]:
 
 def _default_version(registry: CorpusRegistry) -> str | None:
     try:
-        return registry.get_engine(None).version
+        return registry.get_engine(None).version_label
     except CorpusNotFoundError:
         return None
 

@@ -2,7 +2,7 @@
   "engines": {
     "ue-${CODALITH_ENGINE_VERSION:-5.7.4}": {
       "kind": "engine",
-      "ue_version": "${CODALITH_ENGINE_VERSION:-5.7.4}",
+      "version": "${CODALITH_ENGINE_VERSION:-5.7.4}",
       "display_name": "${CODALITH_ENGINE_DISPLAY_NAME:-Unreal Engine}",
       "description": "${CODALITH_ENGINE_DESCRIPTION:-Unreal Engine full source tree (C++, Build.cs, plugins, generated reflection code)}",
       "keywords": [
@@ -46,7 +46,7 @@
     "generated-ue-${CODALITH_ENGINE_VERSION:-5.7.4}": {
       "kind": "generated",
       "engine_corpus": "ue-${CODALITH_ENGINE_VERSION:-5.7.4}",
-      "ue_version": "${CODALITH_ENGINE_VERSION:-5.7.4}",
+      "version": "${CODALITH_ENGINE_VERSION:-5.7.4}",
       "source_root": "${CODALITH_GENERATED_SOURCE_ROOT:-data/generated/ue-5.7.4}",
       "indexed_root": "${CODALITH_GENERATED_INDEXED_ROOT:-data/generated/ue-5.7.4}",
       "coderag_store": "${CODALITH_GENERATED_CODERAG_STORE_DIR:-data/coderag/generated-ue-5.7.4}",

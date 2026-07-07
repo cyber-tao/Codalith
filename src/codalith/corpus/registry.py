@@ -19,7 +19,7 @@ class Corpus:
     coderag_store: Path
     semantic_schema: str
     card_root: Path
-    ue_version: str | None = None
+    version: str | None = None
     source_commit: str = "UNKNOWN"
     default: bool = False
     access_scopes: frozenset[str] = field(default_factory=frozenset)
@@ -33,7 +33,7 @@ class Corpus:
         return cls(
             corpus_id=corpus_id,
             kind=str(raw["kind"]),
-            ue_version=raw.get("ue_version"),
+            version=raw.get("version"),
             source_commit=str(raw.get("source_commit", "UNKNOWN")),
             source_root=Path(str(raw["source_root"])),
             indexed_root=Path(str(raw["indexed_root"])),
@@ -49,15 +49,15 @@ class Corpus:
         )
 
     @property
-    def version(self) -> str:
-        """Client-facing version label for this corpus."""
-        return self.ue_version or self.corpus_id.removeprefix("ue-")
+    def version_label(self) -> str:
+        """Client-facing version label, falling back to the corpus id."""
+        return self.version or self.corpus_id
 
     @property
     def label(self) -> str:
         """Client-facing display label, falling back to the corpus id."""
         if self.display_name:
-            return f"{self.display_name} {self.version}" if self.ue_version else self.display_name
+            return f"{self.display_name} {self.version}" if self.version else self.display_name
         return self.corpus_id
 
 
@@ -102,12 +102,10 @@ class CorpusRegistry:
 
     def get_engine(self, version: str | None = None) -> Corpus:
         if version:
-            candidates = [version, f"ue-{version}" if not version.startswith("ue-") else version]
-            for corpus_id in candidates:
-                if corpus_id in self.engines:
-                    return self.engines[corpus_id]
+            if version in self.engines:
+                return self.engines[version]
             for corpus in self.engines.values():
-                if corpus.ue_version == version:
+                if corpus.version == version:
                     return corpus
             raise CorpusNotFoundError(f"Unknown engine corpus/version: {version}")
         for corpus in self.engines.values():
@@ -127,7 +125,7 @@ class CorpusRegistry:
             corpus
             for corpus in self.generated.values()
             if corpus.engine_corpus in {None, engine.corpus_id}
-            or corpus.ue_version == engine.ue_version
+            or corpus.version == engine.version
         ]
 
     def resolve(

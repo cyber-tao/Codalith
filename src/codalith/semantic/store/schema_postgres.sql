@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS codalith_corpora (
   corpus_id TEXT PRIMARY KEY,
   kind TEXT NOT NULL,
-  ue_version TEXT,
+  version TEXT,
   source_commit TEXT,
   source_root TEXT,
   indexed_root TEXT,

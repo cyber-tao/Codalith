@@ -177,7 +177,7 @@ def registry_path(tmp_path: Path, fake_engine_root: Path) -> Path:
         "engines": {
             "ue-5.7.4": {
                 "kind": "engine",
-                "ue_version": "5.7.4",
+                "version": "5.7.4",
                 "display_name": "Unreal Engine",
                 "description": "Unreal Engine full source tree",
                 "keywords": ["Unreal Engine", "UE5", "UHT", "GC"],
@@ -192,7 +192,7 @@ def registry_path(tmp_path: Path, fake_engine_root: Path) -> Path:
             },
             "ue-5.7.5": {
                 "kind": "engine",
-                "ue_version": "5.7.5",
+                "version": "5.7.5",
                 "source_commit": "TEST-NEXT",
                 "source_root": str(fake_engine_root),
                 "indexed_root": str(fake_engine_root),
@@ -219,7 +219,7 @@ def registry_path(tmp_path: Path, fake_engine_root: Path) -> Path:
             "generated-ue-5.7.4": {
                 "kind": "generated",
                 "engine_corpus": "ue-5.7.4",
-                "ue_version": "5.7.4",
+                "version": "5.7.4",
                 "source_root": str(fake_engine_root / "Saved" / "Generated"),
                 "indexed_root": str(fake_engine_root / "Saved" / "Generated"),
                 "coderag_store": str(tmp_path / "generated-store"),

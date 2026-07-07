@@ -22,7 +22,7 @@ def main(argv: list[str] | None = None) -> int:
     resolver = URIResolver(registry)
     adapter = CodeRAGAdapter(registry)
     cards = attach_source_hashes(
-        built_in_cards(corpus_id=corpus.corpus_id, version=corpus.ue_version or args.version),
+        built_in_cards(corpus_id=corpus.corpus_id, version=corpus.version or args.version),
         resolver,
         adapter,
     )

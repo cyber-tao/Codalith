@@ -53,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
     cards = [
         card.verified()
         for card in attach_source_hashes(
-            built_in_cards(corpus_id=corpus.corpus_id, version=corpus.ue_version or args.version),
+            built_in_cards(corpus_id=corpus.corpus_id, version=corpus.version or args.version),
             resolver,
             card_adapter,
         )
