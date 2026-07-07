@@ -7,6 +7,7 @@ downloads or external services.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import time
@@ -19,6 +20,8 @@ from typing import Any
 
 from codalith.corpus.registry import Corpus, CorpusRegistry
 from codalith.errors import CodeRAGAdapterError, CorpusNotFoundError
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +70,18 @@ class CodeRAGAdapter:
         self._native: dict[str, Any] = {}
         self._local: dict[str, list[_IndexedFile]] = {}
         self._indexed_at: dict[str, float] = {}
+        self._native_fallbacks: dict[str, int] = {}
+
+    def _record_native_fallback(self, corpus_id: str, operation: str, exc: Exception) -> None:
+        if os.getenv("CODALITH_NATIVE_CODERAG_STRICT"):
+            raise CodeRAGAdapterError(str(exc)) from exc
+        self._native_fallbacks[corpus_id] = self._native_fallbacks.get(corpus_id, 0) + 1
+        logger.warning(
+            "Native CodeRAG %s failed for %s; falling back to local deterministic retrieval: %s",
+            operation,
+            corpus_id,
+            exc,
+        )
 
     def search_code(
         self,
@@ -80,8 +95,7 @@ class CodeRAGAdapter:
             try:
                 return self._native_search(corpus, query, top_k, filters or {})
             except Exception as exc:
-                if os.getenv("CODALITH_NATIVE_CODERAG_STRICT"):
-                    raise CodeRAGAdapterError(str(exc)) from exc
+                self._record_native_fallback(corpus_id, "search_code", exc)
         return self._local_search(corpus, query, top_k, filters or {})
 
     def search_files(
@@ -134,8 +148,7 @@ class CodeRAGAdapter:
                 native = self._native_instance(corpus)
                 return str(native.get_file(path, start_line, end_line))
             except Exception as exc:
-                if os.getenv("CODALITH_NATIVE_CODERAG_STRICT"):
-                    raise CodeRAGAdapterError(str(exc)) from exc
+                self._record_native_fallback(corpus_id, "get_file", exc)
         full = self._root(corpus) / path
         root = self._root(corpus).resolve()
         resolved = full.resolve()
@@ -158,11 +171,11 @@ class CodeRAGAdapter:
             try:
                 status = dict(self._native_instance(corpus).status())
                 status["corpus_id"] = corpus_id
+                status["native_fallbacks"] = self._native_fallbacks.get(corpus_id, 0)
                 self._add_index_timestamps(corpus, status)
                 return status
             except Exception as exc:
-                if os.getenv("CODALITH_NATIVE_CODERAG_STRICT"):
-                    raise CodeRAGAdapterError(str(exc)) from exc
+                self._record_native_fallback(corpus_id, "status", exc)
         files = self._ensure_local_index(corpus)
         indexed_at = self._indexed_at.get(corpus_id)
         return {
@@ -175,6 +188,7 @@ class CodeRAGAdapter:
             "total_chunks": sum(max(1, (len(item.lines) + 79) // 80) for item in files),
             "indexed_at": indexed_at,
             "updated_at": _iso_timestamp(indexed_at),
+            "native_fallbacks": self._native_fallbacks.get(corpus_id, 0),
         }
 
     def reindex(self, corpus_id: str, path: str | None = None, full: bool = False) -> dict[str, Any]:
@@ -198,8 +212,7 @@ class CodeRAGAdapter:
                 self._indexed_at[corpus_id] = time.time()
                 return result
             except Exception as exc:
-                if os.getenv("CODALITH_NATIVE_CODERAG_STRICT"):
-                    raise CodeRAGAdapterError(str(exc)) from exc
+                self._record_native_fallback(corpus_id, "reindex", exc)
         self._local[corpus_id] = self._scan(corpus, path)
         self._indexed_at[corpus_id] = time.time()
         return self.status(corpus_id)
@@ -293,7 +306,7 @@ class CodeRAGAdapter:
                         snippet=text,
                         score=score,
                         kind="window",
-                        language=_language(item.path),
+                        language=language_for_path(item.path),
                         module=_module_from_path(item.path),
                         reason="Local deterministic retrieval hit.",
                         metadata={"local_score": score},
@@ -405,7 +418,7 @@ def _is_text_candidate(path: Path) -> bool:
     return path.suffix.lower() in _TEXT_SUFFIXES or path.name in {"Build.cs", "Target.cs"}
 
 
-def _language(path: str) -> str:
+def language_for_path(path: str) -> str:
     suffix = Path(path).suffix.lower()
     return {
         ".h": "cpp",

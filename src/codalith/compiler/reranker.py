@@ -52,4 +52,7 @@ def _weights(mode: str) -> dict[str, float]:
         base.update({"card": 0.5, "module": 3.0})
     elif mode == "implement":
         base.update({"card": 1.0, "module": 2.0})
+    elif mode == "trace":
+        # Call-path questions want exact source locations over knowledge cards.
+        base.update({"source_prior": 9.0, "exact": 5.0, "path": 3.0, "card": 1.0})
     return base

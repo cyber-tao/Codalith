@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from codalith.coderag.adapter import RetrievalHit
+from codalith.coderag.adapter import RetrievalHit, language_for_path
 from codalith.corpus.registry import Corpus
 
 
@@ -604,19 +604,19 @@ def _score_prior(
 ) -> float:
     score = 0.0
     for trigger in prior.triggers:
-        normalized_trigger = _normalize(trigger)
+        normalized_trigger = _normalize(trigger).strip()
         if not normalized_trigger:
             continue
         if " " in normalized_trigger:
             if normalized_trigger in normalized_query:
                 score += 8.0
             continue
+        # Single-word triggers require exact token matches; substring matching
+        # would let "actor" fire on "factor" or "refactor".
         if normalized_trigger in identifier_terms:
             score += 10.0
         elif normalized_trigger in query_tokens:
             score += 6.0
-        elif normalized_trigger in normalized_query:
-            score += 3.0
     basename = _normalize(Path(prior.path).name)
     if basename and basename in normalized_query:
         score += 10.0
@@ -648,7 +648,7 @@ def _hit_for_prior(corpus: Corpus, prior: SourcePrior, *, query: str, score: flo
         snippet=snippet,
         score=score + 1000.0,
         kind="source-prior",
-        language=_language(prior.path),
+        language=language_for_path(prior.path),
         module=prior.module,
         reason="High-confidence UE source entry point matched from query terms.",
         metadata={"matched_by": "ue-source-locator"},
@@ -656,14 +656,18 @@ def _hit_for_prior(corpus: Corpus, prior: SourcePrior, *, query: str, score: flo
 
 
 def _window(lines: list[str], *, query: str, line_terms: tuple[str, ...]) -> tuple[int, int]:
-    search_terms = [term for term in [*_query_tokens(query), *line_terms] if len(term) >= 3]
-    lowered_terms = [_normalize(term) for term in search_terms]
+    # Curated line_terms are trusted at any length (e.g. "GC", "RPC"); free-form
+    # query tokens below three characters are too noisy to anchor a window.
+    query_terms = [term for term in _query_tokens(query) if len(term) >= 3]
+    lowered_terms = {_normalize(term) for term in [*query_terms, *line_terms] if term}
     best_line = 1
+    best_matches = 0
     for index, line in enumerate(lines, start=1):
         normalized_line = _normalize(line)
-        if any(term and term in normalized_line for term in lowered_terms):
+        matches = sum(1 for term in lowered_terms if term in normalized_line)
+        if matches > best_matches:
             best_line = index
-            break
+            best_matches = matches
     start = max(1, best_line - 4)
     end = min(len(lines), best_line + 15)
     return start, end
@@ -676,17 +680,10 @@ def _root(corpus: Corpus) -> Path:
 def _uri_for(corpus: Corpus, path: str, start: int, end: int) -> str:
     if corpus.kind == "project":
         return f"ue-project://{corpus.corpus_id}/source/{path}#L{start}-L{end}"
+    if corpus.kind == "generated":
+        return f"ue-generated://{corpus.corpus_id}/source/{path}#L{start}-L{end}"
     version = corpus.ue_version or corpus.corpus_id.removeprefix("ue-")
     return f"ue://{version}/source/{path}#L{start}-L{end}"
-
-
-def _language(path: str) -> str:
-    suffix = Path(path).suffix.lower()
-    if suffix in {".h", ".hpp", ".inl", ".cpp", ".c"}:
-        return "cpp"
-    if suffix == ".cs":
-        return "csharp"
-    return "text"
 
 
 def _query_tokens(text: str) -> list[str]:

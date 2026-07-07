@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from codalith.cards.hashing import source_sha256
-from codalith.coderag.adapter import CodeRAGAdapter, RetrievalHit
+from codalith.coderag.adapter import CodeRAGAdapter, RetrievalHit, language_for_path
 from codalith.compiler.context_pack import ContextPack, ContextSummary
 from codalith.compiler.entity_detector import detect_identifiers, detect_modules
 from codalith.compiler.evidence_selector import select_source_spans
@@ -76,7 +77,9 @@ class ContextCompiler:
         )
         inferred_modules = _module_entries(version, modules, hits)
         source_spans = self._enriched_source_spans(hits)
-        source_spans.extend(_card_evidence_spans(hits))
+        source_spans.extend(self._card_evidence_spans(hits))
+        # Card evidence must not let the pack exceed the caller's span budget.
+        source_spans = source_spans[:max_source_spans]
         graph_edges = self._graph_edges(
             [corpus.corpus_id for corpus in resolution.ordered],
             [*identifiers, *(module["name"] for module in inferred_modules)],
@@ -85,6 +88,8 @@ class ContextCompiler:
             {
                 "uri": hit.uri,
                 "title": hit.title,
+                # Cards are only indexed after codalith-generate-cards verifies
+                # them, so a UE_KNOWLEDGE hit implies a verified card.
                 "verification_status": "verified",
             }
             for hit in hits
@@ -96,7 +101,7 @@ class ContextCompiler:
             source_commit=resolution.engine.source_commit,
             project=project,
             intent=intent,
-            confidence="medium" if hits else "low",
+            confidence=_confidence(hits),
             summary=ContextSummary(
                 text="Context pack compiled from CodeRAG retrieval, UE URI resolution, and v0 heuristics."
             ),
@@ -181,6 +186,45 @@ class ContextCompiler:
                     ]
         return spans
 
+    def _card_evidence_spans(self, hits: list[RetrievalHit]) -> list[dict[str, object]]:
+        spans: list[dict[str, object]] = []
+        for hit in hits:
+            if "UE_KNOWLEDGE" not in hit.path:
+                continue
+            for uri in _extract_evidence_uris(hit.snippet):
+                parsed = _parse_source_uri(uri)
+                if parsed is None:
+                    continue
+                version, path, start, end = parsed
+                span: dict[str, object] = {
+                    "uri": uri,
+                    "path": path,
+                    "start_line": start,
+                    "end_line": end,
+                    "reason": f"Evidence linked from verified card {hit.title}.",
+                    "source": "card-evidence",
+                    "language": language_for_path(path),
+                    "guard": None,
+                }
+                span.update(self._card_evidence_provenance(version, path, start, end))
+                spans.append(span)
+        return spans
+
+    def _card_evidence_provenance(
+        self,
+        version: str,
+        path: str,
+        start: int,
+        end: int,
+    ) -> dict[str, object]:
+        try:
+            corpus = self.registry.get_engine(version)
+            snippet = self.adapter.get_file(corpus.corpus_id, path, start, end)
+        except Exception:
+            # Evidence pointing at an unavailable corpus stays cited but unhashed.
+            return {"corpus_id": None, "source_hash": None}
+        return {"corpus_id": corpus.corpus_id, "source_hash": source_sha256(snippet)}
+
     def _symbol_entries(
         self,
         corpus_ids: list[str],
@@ -248,42 +292,31 @@ def _module_entries(
     ]
 
 
-def _card_evidence_spans(hits: list[RetrievalHit]) -> list[dict[str, object]]:
-    spans: list[dict[str, object]] = []
-    for hit in hits:
-        if "UE_KNOWLEDGE" not in hit.path:
-            continue
-        for uri in _extract_evidence_uris(hit.snippet):
-            parsed = _parse_source_uri(uri)
-            if parsed is not None:
-                path, start, end = parsed
-                spans.append(
-                    {
-                        "uri": uri,
-                        "path": path,
-                        "start_line": start,
-                        "end_line": end,
-                        "reason": f"Evidence linked from verified card {hit.title}.",
-                        "source": "card-evidence",
-                        "guard": None,
-                    }
-                )
-    return spans
+def _confidence(hits: list[RetrievalHit]) -> str:
+    if not hits:
+        return "low"
+    if any(hit.source == "ue-source-locator" for hit in hits):
+        return "high"
+    return "medium"
 
 
 def _extract_evidence_uris(text: str) -> list[str]:
-    import re
-
     return re.findall(r"ue://[^\s)]+", text)
 
 
-def _parse_source_uri(uri: str) -> tuple[str, int, int] | None:
-    import re
-
-    match = re.match(r"ue://[^/]+/source/(?P<path>[^#]+)#L(?P<start>\d+)-L(?P<end>\d+)", uri)
+def _parse_source_uri(uri: str) -> tuple[str, str, int, int] | None:
+    match = re.match(
+        r"ue://(?P<version>[^/]+)/source/(?P<path>[^#]+)#L(?P<start>\d+)-L(?P<end>\d+)",
+        uri,
+    )
     if not match:
         return None
-    return match.group("path"), int(match.group("start")), int(match.group("end"))
+    return (
+        match.group("version"),
+        match.group("path"),
+        int(match.group("start")),
+        int(match.group("end")),
+    )
 
 
 def _graph_caveat(graph_edges: list[dict[str, object]], has_store: bool) -> str:
