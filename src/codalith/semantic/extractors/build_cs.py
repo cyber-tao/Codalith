@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
+from codalith.semantic.extractors.common import strip_comments
+
 
 @dataclass(frozen=True, slots=True)
 class ModuleDependency:
@@ -27,7 +29,7 @@ class BuildCsExtractor:
 
     def extract_text(self, text: str, *, module_name: str) -> list[ModuleDependency]:
         deps: list[ModuleDependency] = []
-        clean = _strip_comments(text)
+        clean = strip_comments(text)
         for match in self._DEP_RE.finditer(clean):
             dep_kind = _kind(match.group("kind"))
             for dependency in self._STRING_RE.findall(match.group("body")):
@@ -53,7 +55,10 @@ class ModuleDepStore(Protocol):
         corpus_id: str,
         dependency: ModuleDependency,
         evidence_uri: str,
+        commit: bool = True,
     ) -> None: ...
+
+    def commit(self) -> None: ...
 
 
 def write_module_deps(
@@ -62,13 +67,17 @@ def write_module_deps(
     corpus_id: str,
     evidence_uri: str,
     dependencies: Iterable[ModuleDependency],
+    commit: bool = True,
 ) -> None:
     for dependency in dependencies:
         store.upsert_module_dep(
             corpus_id=corpus_id,
             dependency=dependency,
             evidence_uri=evidence_uri,
+            commit=False,
         )
+    if commit:
+        store.commit()
 
 
 def _kind(raw: str) -> str:
@@ -77,11 +86,6 @@ def _kind(raw: str) -> str:
         "PrivateDependencyModuleNames": "private",
         "DynamicallyLoadedModuleNames": "dynamic",
     }[raw]
-
-
-def _strip_comments(text: str) -> str:
-    text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
-    return re.sub(r"//.*?$", "", text, flags=re.MULTILINE)
 
 
 def _dedupe(deps: list[ModuleDependency]) -> list[ModuleDependency]:

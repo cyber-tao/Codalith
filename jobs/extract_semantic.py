@@ -99,6 +99,7 @@ def extract_semantic_summary(
         build_module_name = build_file.name.removesuffix(".Build.cs")
         modules.add(build_module_name)
         deps += len(extracted)
+        source_files += 1
         if store is not None:
             relative = build_file.relative_to(root).as_posix()
             store.upsert_source_file(
@@ -124,8 +125,9 @@ def extract_semantic_summary(
                 corpus_id=corpus_id,
                 evidence_uri=_source_uri(version, root, build_file, 1, 1, project_id=project_id),
                 dependencies=extracted,
+                commit=False,
             )
-            source_files += 1
+            store.commit()
         if stop_after_min and len(modules) >= min_modules:
             break
 
@@ -138,6 +140,7 @@ def extract_semantic_summary(
         if target is None:
             continue
         targets += 1
+        source_files += 1
         if store is not None:
             relative = target_file.relative_to(root).as_posix()
             store.upsert_source_file(
@@ -153,8 +156,9 @@ def extract_semantic_summary(
                 corpus_id=corpus_id,
                 target=target,
                 evidence_uri=_source_uri(version, root, target_file, 1, max(1, len(text.splitlines())), project_id=project_id),
+                commit=False,
             )
-            source_files += 1
+            store.commit()
 
     for plugin_file in _iter_files(root, ".uplugin"):
         try:
@@ -163,6 +167,7 @@ def extract_semantic_summary(
         except (OSError, ValueError):
             continue
         plugins += 1
+        source_files += 1
         if store is not None:
             relative = plugin_file.relative_to(root).as_posix()
             store.upsert_source_file(
@@ -178,8 +183,9 @@ def extract_semantic_summary(
                 corpus_id=corpus_id,
                 plugin=plugin,
                 evidence_uri=_source_uri(version, root, plugin_file, 1, max(1, len(text.splitlines())), project_id=project_id),
+                commit=False,
             )
-            source_files += 1
+            store.commit()
 
     for project_file in _iter_files(root, ".uproject"):
         try:
@@ -188,6 +194,7 @@ def extract_semantic_summary(
         except (OSError, ValueError):
             continue
         projects += 1
+        source_files += 1
         if store is not None:
             relative = project_file.relative_to(root).as_posix()
             store.upsert_source_file(
@@ -203,8 +210,9 @@ def extract_semantic_summary(
                 corpus_id=corpus_id,
                 project=project,
                 evidence_uri=_source_uri(version, root, project_file, 1, max(1, len(text.splitlines())), project_id=project_id),
+                commit=False,
             )
-            source_files += 1
+            store.commit()
 
     for header in _iter_files(root, ".h"):
         try:
@@ -231,6 +239,7 @@ def extract_semantic_summary(
         guards += len(extracted_guards)
         extracted_symbols = extract_cpp_symbols(text)
         cpp_symbols += len(extracted_symbols)
+        source_files += 1
         if store is not None:
             relative = header.relative_to(root).as_posix()
             store.upsert_source_file(
@@ -243,13 +252,14 @@ def extract_semantic_summary(
                 commit=False,
             )
             for entity in extracted_reflection:
-                store.upsert_reflection_entity(corpus_id=corpus_id, entity=entity)
+                store.upsert_reflection_entity(corpus_id=corpus_id, entity=entity, commit=False)
             for guard in extracted_guards:
                 store.upsert_compile_guard(
                     corpus_id=corpus_id,
                     path=relative,
                     guard=guard,
                     evidence_uri=_source_uri(version, root, header, guard.line, guard.line, project_id=project_id),
+                    commit=False,
                 )
             for symbol in extracted_symbols:
                 store.upsert_cpp_symbol(
@@ -258,8 +268,9 @@ def extract_semantic_summary(
                     symbol=symbol,
                     evidence_uri=_source_uri(version, root, header, symbol.line, symbol.line, project_id=project_id),
                     module_name=module_name,
+                    commit=False,
                 )
-            source_files += 1
+            store.commit()
         if stop_after_min and (
             len(modules) >= min_modules
             and reflection_entities >= min_reflection_entities

@@ -46,6 +46,7 @@ class SemanticStore:
     def initialize(self) -> None:
         schema_name = "schema_postgres.sql" if self.dialect == "postgresql" else "schema.sql"
         schema = (Path(__file__).parent / schema_name).read_text(encoding="utf-8")
+        self._drop_legacy_reflection_table()
         if self.dialect == "postgresql":
             with self.connection.cursor() as cursor:
                 for statement in _split_sql_statements(schema):
@@ -54,6 +55,26 @@ class SemanticStore:
             self.connection.executescript(schema)
             self._migrate_legacy_sqlite_graph_edges()
         self.connection.commit()
+
+    def _drop_legacy_reflection_table(self) -> None:
+        # v0 stored owner names in an owner_symbol_id column. The store holds
+        # derived data, so rebuild the table and re-run extraction instead of
+        # migrating rows in place.
+        if self.dialect == "postgresql":
+            legacy = self.connection.execute(
+                """
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'ue_reflection_entities' AND column_name = 'owner_symbol_id'
+                """
+            ).fetchone()
+        else:
+            columns = self.connection.execute(
+                "PRAGMA table_info(ue_reflection_entities)"
+            ).fetchall()
+            legacy = next((column for column in columns if column["name"] == "owner_symbol_id"), None)
+        if legacy is not None:
+            self.connection.execute("DROP TABLE ue_reflection_entities")
+            self.connection.commit()
 
     def _execute(
         self,
@@ -88,12 +109,16 @@ class SemanticStore:
             """
         )
 
+    def commit(self) -> None:
+        self.connection.commit()
+
     def upsert_module_dep(
         self,
         *,
         corpus_id: str,
         dependency: ModuleDependency,
         evidence_uri: str,
+        commit: bool = True,
     ) -> None:
         self.upsert_module(
             corpus_id=corpus_id,
@@ -143,7 +168,8 @@ class SemanticStore:
             metadata=dependency.metadata,
             commit=False,
         )
-        self.connection.commit()
+        if commit:
+            self.connection.commit()
 
     def upsert_corpus(self, corpus: Corpus) -> None:
         if self.dialect == "postgresql":
@@ -303,18 +329,23 @@ class SemanticStore:
         rows = self._execute(sql, params).fetchall()
         return [_row(row) for row in rows]
 
-    def upsert_reflection_entity(self, *, corpus_id: str, entity: ReflectionEntity) -> None:
+    def upsert_reflection_entity(
+        self,
+        *,
+        corpus_id: str,
+        entity: ReflectionEntity,
+        commit: bool = True,
+    ) -> None:
         if self.dialect == "postgresql":
             sql = """
                 INSERT INTO ue_reflection_entities
-                  (corpus_id, reflection_id, cpp_symbol_id, kind, name, owner_symbol_id,
+                  (corpus_id, reflection_id, kind, name, owner_name,
                    module_name, declaration_uri, generated_uri, specifiers, metadata, confidence)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (reflection_id)
-                DO UPDATE SET cpp_symbol_id = EXCLUDED.cpp_symbol_id,
-                              kind = EXCLUDED.kind,
+                DO UPDATE SET kind = EXCLUDED.kind,
                               name = EXCLUDED.name,
-                              owner_symbol_id = EXCLUDED.owner_symbol_id,
+                              owner_name = EXCLUDED.owner_name,
                               module_name = EXCLUDED.module_name,
                               declaration_uri = EXCLUDED.declaration_uri,
                               generated_uri = EXCLUDED.generated_uri,
@@ -325,16 +356,15 @@ class SemanticStore:
         else:
             sql = """
                 INSERT OR REPLACE INTO ue_reflection_entities
-                  (corpus_id, reflection_id, cpp_symbol_id, kind, name, owner_symbol_id,
+                  (corpus_id, reflection_id, kind, name, owner_name,
                    module_name, declaration_uri, generated_uri, specifiers, metadata, confidence)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """
         self._execute(
             sql,
             (
                 corpus_id,
                 f"{corpus_id}:{entity.kind}:{entity.owner or ''}:{entity.name}",
-                None,
                 entity.kind,
                 entity.name,
                 entity.owner,
@@ -406,7 +436,8 @@ class SemanticStore:
                 confidence=entity.confidence,
                 commit=False,
             )
-        self.connection.commit()
+        if commit:
+            self.connection.commit()
 
     def list_reflection_entities(self, corpus_id: str, kind: str | None = None) -> list[dict[str, Any]]:
         sql = "SELECT * FROM ue_reflection_entities WHERE corpus_id = ?"
@@ -424,6 +455,7 @@ class SemanticStore:
         path: str,
         guard: CompileGuard,
         evidence_uri: str,
+        commit: bool = True,
     ) -> None:
         guard_end = guard.end_line or guard.line
         guard_id = _edge_id(corpus_id, f"source:{path}:{guard.line}", guard.macro, guard.expression, evidence_uri)
@@ -472,7 +504,10 @@ class SemanticStore:
             evidence_uri=evidence_uri,
             extractor="compile_guards",
             metadata={"line": guard.line, "end_line": guard_end, "expression": guard.expression},
+            commit=False,
         )
+        if commit:
+            self.connection.commit()
 
     def upsert_cpp_symbol(
         self,
@@ -482,6 +517,7 @@ class SemanticStore:
         symbol: CppSymbol,
         evidence_uri: str,
         module_name: str | None = None,
+        commit: bool = True,
     ) -> None:
         symbol_node = f"symbol:{symbol.name}"
         symbol_id = f"{corpus_id}:{symbol.kind}:{symbol.qualified_name or symbol.name}:{path}:{symbol.line}"
@@ -549,7 +585,8 @@ class SemanticStore:
                 metadata={"kind": symbol.kind, "path": path},
                 commit=False,
             )
-        self.connection.commit()
+        if commit:
+            self.connection.commit()
 
     def upsert_target(
         self,
@@ -557,6 +594,7 @@ class SemanticStore:
         corpus_id: str,
         target: TargetDefinition,
         evidence_uri: str,
+        commit: bool = True,
     ) -> None:
         if self.dialect == "postgresql":
             sql = """
@@ -604,7 +642,8 @@ class SemanticStore:
                 metadata={"target_type": target.target_type, "build_settings": target.build_settings},
                 commit=False,
             )
-        self.connection.commit()
+        if commit:
+            self.connection.commit()
 
     def upsert_plugin(
         self,
@@ -612,6 +651,7 @@ class SemanticStore:
         corpus_id: str,
         plugin: PluginDescriptor,
         evidence_uri: str,
+        commit: bool = True,
     ) -> None:
         if self.dialect == "postgresql":
             sql = """
@@ -664,7 +704,8 @@ class SemanticStore:
                 metadata=module.as_dict(),
                 commit=False,
             )
-        self.connection.commit()
+        if commit:
+            self.connection.commit()
 
     def upsert_project(
         self,
@@ -672,6 +713,7 @@ class SemanticStore:
         corpus_id: str,
         project: ProjectDescriptor,
         evidence_uri: str,
+        commit: bool = True,
     ) -> None:
         if self.dialect == "postgresql":
             sql = """
@@ -736,7 +778,8 @@ class SemanticStore:
                 metadata={"enabled": enabled},
                 commit=False,
             )
-        self.connection.commit()
+        if commit:
+            self.connection.commit()
 
     def upsert_knowledge_card(self, card: KnowledgeCard) -> None:
         if self.dialect == "postgresql":
@@ -950,13 +993,18 @@ class SemanticStore:
 
     def semantic_status(self, corpus_id: str) -> dict[str, Any]:
         graph = self._execute(
-            """
-            SELECT COUNT(*) AS edge_count,
-                   COUNT(DISTINCT from_node) + COUNT(DISTINCT to_node) AS node_observations
-            FROM codalith_graph_edges
-            WHERE corpus_id = ?
-            """,
+            "SELECT COUNT(*) AS edge_count FROM codalith_graph_edges WHERE corpus_id = ?",
             (corpus_id,),
+        ).fetchone()
+        graph_nodes = self._execute(
+            """
+            SELECT COUNT(*) AS node_count FROM (
+                SELECT from_node AS node FROM codalith_graph_edges WHERE corpus_id = ?
+                UNION
+                SELECT to_node AS node FROM codalith_graph_edges WHERE corpus_id = ?
+            ) AS nodes
+            """,
+            (corpus_id, corpus_id),
         ).fetchone()
         module_deps = self._execute(
             "SELECT COUNT(*) AS count FROM ue_module_deps WHERE corpus_id = ?",
@@ -1002,7 +1050,7 @@ class SemanticStore:
             "module_dependencies": int(module_deps["count"]),
             "reflection_entities": int(reflection["count"]),
             "graph_edges": int(graph["edge_count"]),
-            "graph_node_observations": int(graph["node_observations"] or 0),
+            "graph_nodes": int(graph_nodes["node_count"] or 0),
             "cpp_symbols": int(cpp_symbols["count"]),
             "compile_guards": int(compile_guards["count"]),
             "targets": int(targets["count"]),

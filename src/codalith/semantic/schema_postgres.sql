@@ -63,10 +63,9 @@ CREATE TABLE IF NOT EXISTS ue_symbols (
 CREATE TABLE IF NOT EXISTS ue_reflection_entities (
   corpus_id TEXT NOT NULL,
   reflection_id TEXT PRIMARY KEY,
-  cpp_symbol_id TEXT,
   kind TEXT NOT NULL,
   name TEXT NOT NULL,
-  owner_symbol_id TEXT,
+  owner_name TEXT,
   module_name TEXT,
   declaration_uri TEXT,
   generated_uri TEXT,
@@ -151,6 +150,12 @@ ON codalith_graph_edges(corpus_id, to_node, edge_type);
 
 CREATE INDEX IF NOT EXISTS idx_ue_symbols_name
 ON ue_symbols(corpus_id, name, kind);
+
+CREATE INDEX IF NOT EXISTS idx_ue_symbols_qualified_name
+ON ue_symbols(corpus_id, qualified_name);
+
+CREATE INDEX IF NOT EXISTS idx_ue_reflection_entities_name
+ON ue_reflection_entities(corpus_id, name);
 
 CREATE INDEX IF NOT EXISTS idx_ue_compile_guards_path
 ON ue_compile_guards(corpus_id, path, start_line, end_line);

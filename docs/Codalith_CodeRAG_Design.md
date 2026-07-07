@@ -1911,10 +1911,9 @@ CREATE TABLE ue_symbols (
 CREATE TABLE ue_reflection_entities (
   corpus_id TEXT NOT NULL,
   reflection_id TEXT PRIMARY KEY,
-  cpp_symbol_id TEXT,
   kind TEXT NOT NULL,
   name TEXT NOT NULL,
-  owner_symbol_id TEXT,
+  owner_name TEXT,
   module_name TEXT,
   declaration_uri TEXT,
   generated_uri TEXT,
