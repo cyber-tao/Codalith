@@ -4,8 +4,9 @@ CodeRAG provides broad semantic retrieval. This module adds high-confidence
 source priors for canonical corpus concepts so Context Packs still cite stable
 source evidence when an embedding provider is intentionally low fidelity.
 
-The prior data is domain knowledge that lives in configs/source_priors.json and
-is loaded once per process; set CODALITH_SOURCE_PRIORS to point at an
+All curated retrieval knowledge (source priors, module hints, identifier
+stopwords) is domain data that lives in configs/source_priors.json and is
+loaded once per process; set CODALITH_SOURCE_PRIORS to point at an
 alternative file.
 """
 
@@ -15,6 +16,7 @@ import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 from codalith.coderag.adapter import RetrievalHit, language_for_path
 from codalith.config import load_config
@@ -36,9 +38,34 @@ class SourcePrior:
 
 
 @lru_cache(maxsize=1)
+def _domain_config() -> dict[str, Any]:
+    return load_config(_priors_path())
+
+
+@lru_cache(maxsize=1)
 def source_priors() -> tuple[SourcePrior, ...]:
     """Load and cache the curated source priors."""
-    return _load_priors(_priors_path())
+    return _parse_priors(_priors_path(), _domain_config())
+
+
+@lru_cache(maxsize=1)
+def module_hints() -> frozenset[str]:
+    """Corpus module names the entity detector should recognize in queries."""
+    return frozenset(str(item) for item in _domain_config().get("module_hints", []))
+
+
+@lru_cache(maxsize=1)
+def identifier_stopwords() -> frozenset[str]:
+    """Domain words the identifier detector must not treat as symbols."""
+    return frozenset(str(item) for item in _domain_config().get("identifier_stopwords", []))
+
+
+def reset_domain_config_cache() -> None:
+    """Clear every cached view of the domain config (tests, config reloads)."""
+    _domain_config.cache_clear()
+    source_priors.cache_clear()
+    module_hints.cache_clear()
+    identifier_stopwords.cache_clear()
 
 
 def _priors_path() -> Path:
@@ -51,8 +78,7 @@ def _priors_path() -> Path:
     return Path(__file__).resolve().parents[3] / _DEFAULT_PRIORS_PATH
 
 
-def _load_priors(path: Path) -> tuple[SourcePrior, ...]:
-    raw = load_config(path)
+def _parse_priors(path: Path, raw: dict[str, Any]) -> tuple[SourcePrior, ...]:
     priors = raw.get("priors")
     if not isinstance(priors, list) or not priors:
         raise ConfigurationError(f"{path} must define a non-empty 'priors' list")

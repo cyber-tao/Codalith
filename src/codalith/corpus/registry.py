@@ -27,6 +27,9 @@ class Corpus:
     display_name: str | None = None
     description: str | None = None
     keywords: tuple[str, ...] = ()
+    # Maps a search scope name (e.g. "engine", "plugins") to the path prefixes
+    # that belong to it; scopes without prefixes do not filter by path.
+    scope_prefixes: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
     @classmethod
     def from_config(cls, corpus_id: str, raw: dict[str, Any]) -> Corpus:
@@ -46,6 +49,10 @@ class Corpus:
             display_name=raw.get("display_name"),
             description=raw.get("description"),
             keywords=tuple(str(keyword) for keyword in raw.get("keywords", [])),
+            scope_prefixes={
+                str(scope): tuple(str(prefix) for prefix in prefixes)
+                for scope, prefixes in raw.get("scope_prefixes", {}).items()
+            },
         )
 
     @property

@@ -1,68 +1,97 @@
-"""Built-in Knowledge Card generator."""
+"""Built-in Knowledge Card generator.
+
+Seed card topics are domain data and live in configs/seed_cards.json; set
+CODALITH_SEED_CARDS to point at an alternative file.
+"""
 
 from __future__ import annotations
 
-from dataclasses import replace
+import os
+from dataclasses import dataclass, replace
+from functools import lru_cache
 from pathlib import Path
 
+from codalith.cards import CARDS_DIR
 from codalith.cards.hashing import source_sha256
 from codalith.cards.renderer import render_markdown
 from codalith.cards.schema import CardClaim, CardEvidence, KnowledgeCard
 from codalith.coderag.adapter import CodeRAGAdapter
+from codalith.config import load_config
 from codalith.corpus.uri_resolver import URIResolver
 from codalith.corpus.uris import source_uri
+from codalith.errors import ConfigurationError
 
-TOPICS: tuple[tuple[str, str, str, str], ...] = (
-    ("module-core", "module", "Core Module", "Engine/Source/Runtime/Core/Public/CoreMinimal.h"),
-    ("module-coreuobject", "module", "CoreUObject Module", "Engine/Source/Runtime/CoreUObject/Public/UObject/Object.h"),
-    ("module-engine", "module", "Engine Module", "Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h"),
-    (
-        "module-renderer",
-        "module",
-        "Renderer Module",
-        "Engine/Source/Runtime/Renderer/Private/DeferredShadingRenderer.cpp",
-    ),
-    ("module-netcore", "module", "NetCore Module", "Engine/Source/Runtime/Net/Core/Public/Net/Core/NetHandle/NetHandle.h"),
-    ("mechanism-uobject-gc", "mechanism", "UObject GC", "Engine/Source/Runtime/CoreUObject/Public/UObject/Object.h"),
-    ("mechanism-uht-reflection", "mechanism", "UHT Reflection", "Engine/Source/Runtime/CoreUObject/Public/UObject/ObjectMacros.h"),
-    ("mechanism-uproperty-replication", "mechanism", "UPROPERTY Replication", "Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h"),
-    ("mechanism-actor-replication", "mechanism", "Actor Replication", "Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h"),
-    ("mechanism-rpc-dispatch", "mechanism", "RPC Dispatch", "Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h"),
-    ("symbol-uobject", "symbol", "UObject", "Engine/Source/Runtime/CoreUObject/Public/UObject/Object.h"),
-    ("symbol-uclass", "symbol", "UClass", "Engine/Source/Runtime/CoreUObject/Public/UObject/Class.h"),
-    ("symbol-aactor", "symbol", "AActor", "Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h"),
-    ("symbol-uworld", "symbol", "UWorld", "Engine/Source/Runtime/Engine/Classes/Engine/World.h"),
-    ("symbol-tarray", "symbol", "TArray", "Engine/Source/Runtime/Core/Public/Containers/Array.h"),
-    ("symbol-fname", "symbol", "FName", "Engine/Source/Runtime/Core/Public/UObject/NameTypes.h"),
-    ("build-module-system", "build", "Module System", "Engine/Source/Runtime/Engine/Engine.Build.cs"),
-    ("build-public-private-dep", "build", "Public vs Private Dependency", "Engine/Source/Runtime/Engine/Engine.Build.cs"),
-    ("build-target-rules", "build", "Target Rules", "Engine/Source/Programs/UnrealBuildTool/Configuration/TargetRules.cs"),
-    ("recipe-safe-source-read", "recipe", "Safe Source Read", "Engine/Source/Runtime/Core/Public/CoreMinimal.h"),
-)
+_DEFAULT_SEED_CARDS_PATH = "configs/seed_cards.json"
 
 
-def built_in_cards(*, corpus_id: str = "ue-5.7.4", version: str = "5.7.4") -> list[KnowledgeCard]:
+@dataclass(frozen=True, slots=True)
+class SeedTopic:
+    card_id: str
+    card_type: str
+    title: str
+    path: str
+    related_node: str
+
+
+@lru_cache(maxsize=1)
+def seed_topics() -> tuple[SeedTopic, ...]:
+    """Load and cache the curated seed card topics."""
+    path = _seed_cards_path()
+    raw = load_config(path)
+    topics = raw.get("topics")
+    if not isinstance(topics, list) or not topics:
+        raise ConfigurationError(f"{path} must define a non-empty 'topics' list")
+    loaded: list[SeedTopic] = []
+    for index, item in enumerate(topics):
+        if not isinstance(item, dict):
+            raise ConfigurationError(f"{path} topics[{index}] must be an object")
+        try:
+            loaded.append(
+                SeedTopic(
+                    card_id=str(item["card_id"]),
+                    card_type=str(item["card_type"]),
+                    title=str(item["title"]),
+                    path=str(item["path"]),
+                    related_node=str(item["related_node"]),
+                )
+            )
+        except KeyError as exc:
+            raise ConfigurationError(f"{path} topics[{index}] is missing key {exc}") from exc
+    return tuple(loaded)
+
+
+def _seed_cards_path() -> Path:
+    override = os.getenv("CODALITH_SEED_CARDS")
+    if override:
+        return Path(override)
+    cwd_path = Path(_DEFAULT_SEED_CARDS_PATH)
+    if cwd_path.exists():
+        return cwd_path
+    return Path(__file__).resolve().parents[3] / _DEFAULT_SEED_CARDS_PATH
+
+
+def built_in_cards(*, corpus_id: str, version: str) -> list[KnowledgeCard]:
     cards: list[KnowledgeCard] = []
-    for card_id, card_type, title, path in TOPICS:
-        evidence_uri = source_uri(corpus_id, path, 1, 20)
+    for topic in seed_topics():
+        evidence_uri = source_uri(corpus_id, topic.path, 1, 20)
         cards.append(
             KnowledgeCard(
                 corpus_id=corpus_id,
-                card_id=card_id,
-                card_type=card_type,
-                title=title,
+                card_id=topic.card_id,
+                card_type=topic.card_type,
+                title=topic.title,
                 version=version,
                 body_markdown=(
-                    f"{title} is a seed UE knowledge card. It is verified only when "
+                    f"{topic.title} is a seed knowledge card. It is verified only when "
                     "its evidence URI resolves against the configured corpus."
                 ),
                 claims=[
                     CardClaim(
-                        text=f"{title} must be grounded in UE {version} source evidence.",
+                        text=f"{topic.title} must be grounded in {corpus_id} source evidence.",
                         evidence=[CardEvidence(uri=evidence_uri, reason="seed evidence")],
                     )
                 ],
-                related_nodes=[_related_node(card_id, card_type, title)],
+                related_nodes=[topic.related_node],
             )
         )
     return cards
@@ -72,7 +101,7 @@ def write_cards(cards: list[KnowledgeCard], root: str | Path) -> list[Path]:
     root_path = Path(root)
     written: list[Path] = []
     for card in cards:
-        target = root_path / "UE_KNOWLEDGE" / card.card_type.title() / f"{card.card_id}.md"
+        target = root_path / CARDS_DIR / card.card_type.title() / f"{card.card_id}.md"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(render_markdown(card), encoding="utf-8")
         written.append(target)
@@ -101,13 +130,3 @@ def attach_source_hashes(
                 source_hashes[evidence.uri] = source_sha256(content)
         hashed_cards.append(replace(card, source_hashes=source_hashes))
     return hashed_cards
-
-
-def _related_node(card_id: str, card_type: str, title: str) -> str:
-    if card_type == "module":
-        return f"module:{title.removesuffix(' Module').replace(' ', '')}"
-    if card_type == "symbol":
-        return f"symbol:{title}"
-    if card_id.startswith("build-"):
-        return "module:Engine"
-    return f"mechanism:{title}"

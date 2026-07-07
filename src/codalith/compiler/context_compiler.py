@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from codalith.cards import CARDS_DIR
 from codalith.cards.hashing import source_sha256
 from codalith.coderag.adapter import CodeRAGAdapter, RetrievalHit, language_for_path
 from codalith.coderag.query_builder import build_queries
@@ -93,11 +94,11 @@ class ContextCompiler:
                 "uri": hit.uri,
                 "title": hit.title,
                 # Cards are only indexed after codalith-generate-cards verifies
-                # them, so a UE_KNOWLEDGE hit implies a verified card.
+                # them, so a hit inside CARDS_DIR implies a verified card.
                 "verification_status": "verified",
             }
             for hit in hits
-            if "UE_KNOWLEDGE" in hit.path
+            if _is_card_path(hit.path)
         ]
         return ContextPack(
             query=query,
@@ -201,7 +202,7 @@ class ContextCompiler:
     def _card_evidence_spans(self, hits: list[RetrievalHit]) -> list[dict[str, object]]:
         spans: list[dict[str, object]] = []
         for hit in hits:
-            if "UE_KNOWLEDGE" not in hit.path:
+            if not _is_card_path(hit.path):
                 continue
             for uri in _extract_evidence_uris(hit.snippet):
                 parsed = _parse_source_uri(uri)
@@ -315,6 +316,10 @@ def _confidence(hits: list[RetrievalHit]) -> str:
     if any(hit.source == "source-locator" for hit in hits):
         return "high"
     return "medium"
+
+
+def _is_card_path(path: str) -> bool:
+    return CARDS_DIR in path.split("/")
 
 
 def _extract_evidence_uris(text: str) -> list[str]:

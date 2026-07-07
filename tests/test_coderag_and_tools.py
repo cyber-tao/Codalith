@@ -667,7 +667,7 @@ def test_mcp_resource_templates_resolve_module_symbol_source_and_card(tools):
     assert source["content"]
 
     card_root = tools.runtime.registry.engines["ue-5.7.4"].card_root
-    card_file = card_root / "UE_KNOWLEDGE" / "Module" / "module-core.md"
+    card_file = card_root / "KNOWLEDGE" / "Module" / "module-core.md"
     card_file.parent.mkdir(parents=True, exist_ok=True)
     card_file.write_text("# Core Module\n", encoding="utf-8")
     card = _read_resource_via_rpc(tools, "codalith://ue-5.7.4/card/module/module-core")

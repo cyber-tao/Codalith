@@ -16,7 +16,7 @@ from codalith.semantic.store import SemanticStore
 
 def test_built_in_cards_verify_against_fixture(registry, adapter, tmp_path):
     verifier = KnowledgeCardVerifier(URIResolver(registry), adapter)
-    cards = attach_source_hashes(built_in_cards(), URIResolver(registry), adapter)
+    cards = attach_source_hashes(built_in_cards(corpus_id="ue-5.7.4", version="5.7.4"), URIResolver(registry), adapter)
     assert len(cards) == 20
     assert all(card.source_hashes for card in cards)
     results = [verifier.verify(card) for card in cards]
@@ -27,11 +27,11 @@ def test_built_in_cards_verify_against_fixture(registry, adapter, tmp_path):
 
 
 def test_written_cards_are_searchable_from_indexed_root(registry, adapter, fake_engine_root):
-    cards = [card.verified() for card in built_in_cards()]
+    cards = [card.verified() for card in built_in_cards(corpus_id="ue-5.7.4", version="5.7.4")]
     write_cards(cards, fake_engine_root)
     adapter.reindex("ue-5.7.4")
     hits = adapter.search_code("ue-5.7.4", "UPROPERTY Replication seed knowledge card", top_k=5)
-    assert any("UE_KNOWLEDGE" in hit.path for hit in hits)
+    assert any("KNOWLEDGE" in hit.path for hit in hits)
 
 
 def test_card_without_evidence_fails(registry, adapter):
@@ -51,7 +51,7 @@ def test_card_without_evidence_fails(registry, adapter):
 
 def test_card_hash_mismatch_fails(registry, adapter):
     resolver = URIResolver(registry)
-    card = attach_source_hashes(built_in_cards()[:1], resolver, adapter)[0]
+    card = attach_source_hashes(built_in_cards(corpus_id="ue-5.7.4", version="5.7.4")[:1], resolver, adapter)[0]
     bad_card = KnowledgeCard.from_dict(
         {
             **card.as_dict(),
@@ -69,7 +69,7 @@ def test_card_verifier_checks_related_semantic_nodes(registry, adapter, fake_eng
     store = SemanticStore(tmp_path / "semantic.sqlite")
     extract_semantic_summary(fake_engine_root, corpus_id="ue-5.7.4", store=store)
     resolver = URIResolver(registry)
-    card = attach_source_hashes(built_in_cards()[:1], resolver, adapter)[0]
+    card = attach_source_hashes(built_in_cards(corpus_id="ue-5.7.4", version="5.7.4")[:1], resolver, adapter)[0]
 
     result = KnowledgeCardVerifier(resolver, adapter, store).verify(card)
 

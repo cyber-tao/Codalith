@@ -11,7 +11,7 @@ from typing import Any
 from codalith.cards.hashing import source_sha256
 from codalith.coderag.adapter import CodeRAGAdapter, RetrievalHit
 from codalith.compiler.context_compiler import ContextCompiler
-from codalith.corpus.registry import CorpusRegistry
+from codalith.corpus.registry import Corpus, CorpusRegistry
 from codalith.corpus.source_policy import SourcePolicy, SourceReadRateLimiter
 from codalith.corpus.uri_resolver import ResolvedURI, URIResolver
 from codalith.errors import CorpusNotFoundError, SourcePolicyError
@@ -362,7 +362,7 @@ class CodalithTools:
         hits: list[RetrievalHit] = []
         for corpus in resolution.ordered:
             corpus_hits = self.runtime.adapter.search_code(corpus.corpus_id, symbol_or_api, top_k=max_examples * 2)
-            hits.extend(hit for hit in corpus_hits if _scope_matches(scope, hit.path, corpus.kind))
+            hits.extend(hit for hit in corpus_hits if _scope_matches(scope, hit.path, corpus))
         return {"symbol_or_api": symbol_or_api, "examples": [hit.as_dict() for hit in hits[:max_examples]]}
 
     def codalith_compare_versions(
@@ -486,24 +486,23 @@ class CodalithTools:
         }
 
 
-def _scope_matches(scope: str, path: str, corpus_kind: str) -> bool:
+def _scope_matches(scope: str, path: str, corpus: Corpus) -> bool:
     if scope == "all":
         return True
     if scope == "project":
-        return corpus_kind == "project"
+        return corpus.kind == "project"
     if scope == "generated":
-        return corpus_kind == "generated"
-    if corpus_kind == "project":
+        return corpus.kind == "generated"
+    if corpus.kind in {"project", "generated"}:
         return False
-    if corpus_kind == "generated":
-        return False
-    if scope == "plugins":
-        return path.startswith("Engine/Plugins/")
     if scope == "tests":
         lowered = path.lower()
         return "/test" in lowered or "/tests/" in lowered or "automation" in lowered
-    if scope == "engine":
-        return path.startswith("Engine/Source/")
+    # Path-prefix scopes (e.g. "engine", "plugins") are corpus configuration;
+    # a scope without configured prefixes does not filter by path.
+    prefixes = corpus.scope_prefixes.get(scope)
+    if prefixes:
+        return any(path.startswith(prefix) for prefix in prefixes)
     return True
 
 
@@ -579,19 +578,12 @@ def _tool_schema_data(default_version: str | None) -> list[dict[str, Any]]:
                     "project": {"type": "string"},
                     "kind": {
                         "type": "string",
-                        "enum": [
-                            "any",
-                            "class",
-                            "struct",
-                            "function",
-                            "method",
-                            "macro",
-                            "module",
-                            "uclass",
-                            "ufunction",
-                            "uproperty",
-                        ],
                         "default": "any",
+                        "description": (
+                            "Symbol kind filter: 'any' or a kind emitted by the corpus "
+                            "extractors (e.g. class, struct, function, method, macro, "
+                            "module, or a domain-specific reflection kind)."
+                        ),
                     },
                     "include_examples": {"type": "boolean", "default": True},
                 },

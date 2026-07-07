@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
+from codalith.cards import CARDS_DIR
 from codalith.corpus.registry import CorpusRegistry
 from codalith.corpus.uris import corpus_uri
 from codalith.errors import URIResolutionError
@@ -204,7 +205,7 @@ def _card_resource(
     if len(parts) != 2 or not all(_SAFE_SEGMENT_RE.fullmatch(part) for part in parts):
         raise URIResolutionError(f"Invalid card resource URI: {uri}")
     card_type, card_id = parts
-    card_file = corpus.card_root / "UE_KNOWLEDGE" / card_type.title() / f"{card_id}.md"
+    card_file = corpus.card_root / CARDS_DIR / card_type.title() / f"{card_id}.md"
     if not card_file.is_file():
         raise URIResolutionError(f"Unknown card resource: {uri}")
     return {

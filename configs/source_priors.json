@@ -1,4 +1,16 @@
 {
+  "identifier_stopwords": ["Unreal"],
+  "module_hints": [
+    "Core",
+    "CoreUObject",
+    "EnhancedInput",
+    "Engine",
+    "GameplayAbilities",
+    "Net",
+    "NetCore",
+    "Renderer",
+    "UnrealEd"
+  ],
   "priors": [
     {
       "path": "Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h",

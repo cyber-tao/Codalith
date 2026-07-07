@@ -26,7 +26,11 @@
       "semantic_schema": "${CODALITH_ENGINE_SEMANTIC_SCHEMA:-ue_5_7_4}",
       "card_root": "${CODALITH_ENGINE_CARD_ROOT:-/srv/codalith/cards/ue-5.7.4}",
       "default": true,
-      "access_scopes": ["${CODALITH_ENGINE_ACCESS_SCOPE:-ue:5.7}", "source:read"]
+      "access_scopes": ["${CODALITH_ENGINE_ACCESS_SCOPE:-ue:5.7}", "source:read"],
+      "scope_prefixes": {
+        "engine": ["Engine/Source/"],
+        "plugins": ["Engine/Plugins/"]
+      }
     }
   },
   "projects": {

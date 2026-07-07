@@ -1,16 +1,22 @@
-"""Lightweight UE entity detection from a query string."""
+"""Lightweight entity detection from a query string.
+
+Detection is generic; the corpus-specific vocabulary (module hints and extra
+identifier stopwords) comes from the domain config next to the source priors.
+"""
 
 from __future__ import annotations
 
 import re
 
+from codalith.compiler.source_locator import identifier_stopwords, module_hints
 from codalith.text import camel_words, contains_word
 
 _IDENT_RE = re.compile(r"\b[A-Z][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)?\b")
 
 # Capitalized English question/aux/filler words the identifier regex would
-# otherwise mistake for UE symbols at sentence starts.
-_IDENT_STOPWORDS = frozenset(
+# otherwise mistake for symbols at sentence starts. Domain vocabulary that
+# must also be ignored comes from identifier_stopwords() in the config.
+_ENGLISH_STOPWORDS = frozenset(
     {
         "A",
         "An",
@@ -45,7 +51,6 @@ _IDENT_STOPWORDS = frozenset(
         "This",
         "Those",
         "To",
-        "Unreal",
         "Use",
         "We",
         "What",
@@ -61,29 +66,18 @@ _IDENT_STOPWORDS = frozenset(
     }
 )
 
-_MODULE_HINTS = {
-    "Core",
-    "CoreUObject",
-    "EnhancedInput",
-    "Engine",
-    "GameplayAbilities",
-    "Net",
-    "Renderer",
-    "NetCore",
-    "UnrealEd",
-}
-
 
 def detect_identifiers(query: str) -> list[str]:
+    stopwords = _ENGLISH_STOPWORDS | identifier_stopwords()
     found = dict.fromkeys(_IDENT_RE.findall(query))
-    return [identifier for identifier in found if identifier not in _IDENT_STOPWORDS]
+    return [identifier for identifier in found if identifier not in stopwords]
 
 
 def detect_modules(query: str) -> list[str]:
     lower = query.lower()
     found = [
         module
-        for module in _MODULE_HINTS
+        for module in module_hints()
         if any(contains_word(variant, lower) for variant in _module_variants(module))
     ]
     return sorted(found)

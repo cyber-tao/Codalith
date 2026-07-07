@@ -1,4 +1,4 @@
-"""Render Knowledge Cards into Markdown for UE_KNOWLEDGE."""
+"""Render Knowledge Cards into Markdown for the cards directory."""
 
 from __future__ import annotations
 

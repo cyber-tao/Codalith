@@ -189,6 +189,10 @@ def registry_path(tmp_path: Path, fake_engine_root: Path) -> Path:
                 "card_root": str(tmp_path / "cards"),
                 "default": True,
                 "access_scopes": ["ue:5.7", "source:read"],
+                "scope_prefixes": {
+                    "engine": ["Engine/Source/"],
+                    "plugins": ["Engine/Plugins/"],
+                },
             },
             "ue-5.7.5": {
                 "kind": "engine",

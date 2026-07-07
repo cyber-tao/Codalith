@@ -6,7 +6,12 @@ import pytest
 
 from codalith.compiler.entity_detector import detect_identifiers, detect_modules
 from codalith.compiler.intent_detector import detect_intent
-from codalith.compiler.source_locator import SourcePrior, source_priors
+from codalith.compiler.source_locator import (
+    SourcePrior,
+    module_hints,
+    reset_domain_config_cache,
+    source_priors,
+)
 from codalith.corpus.uris import module_uri, source_uri, symbol_uri
 from codalith.errors import ConfigurationError
 
@@ -67,26 +72,28 @@ def test_source_priors_respect_environment_override(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     monkeypatch.setenv("CODALITH_SOURCE_PRIORS", str(override))
-    source_priors.cache_clear()
+    reset_domain_config_cache()
     try:
         priors = source_priors()
         assert len(priors) == 1
         assert priors[0].title == "Custom"
         assert priors[0].line_terms == ()
+        # Domain vocabulary is optional; an override without hints yields none.
+        assert module_hints() == frozenset()
     finally:
-        source_priors.cache_clear()
+        reset_domain_config_cache()
 
 
 def test_source_priors_reject_empty_dataset(tmp_path, monkeypatch):
     override = tmp_path / "empty.json"
     override.write_text(json.dumps({"priors": []}), encoding="utf-8")
     monkeypatch.setenv("CODALITH_SOURCE_PRIORS", str(override))
-    source_priors.cache_clear()
+    reset_domain_config_cache()
     try:
         with pytest.raises(ConfigurationError):
             source_priors()
     finally:
-        source_priors.cache_clear()
+        reset_domain_config_cache()
 
 
 def test_corpus_uris_are_scheme_uniform_across_corpus_kinds():
