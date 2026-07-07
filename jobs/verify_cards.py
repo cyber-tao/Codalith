@@ -17,7 +17,9 @@ from codalith.semantic.store import SemanticStore
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--registry", default="configs/corpus_registry.json")
-    parser.add_argument("--version", default="5.7.4")
+    parser.add_argument(
+        "--version", default=None, help="Engine version (defaults to the registry default engine)"
+    )
     args = parser.parse_args(argv)
     registry = CorpusRegistry.from_file(args.registry)
     resolver = URIResolver(registry)
@@ -27,7 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     verifier = KnowledgeCardVerifier(resolver, adapter, semantic_store)
     corpus = registry.get_engine(args.version)
     cards = attach_source_hashes(
-        built_in_cards(corpus_id=corpus.corpus_id, version=corpus.version or args.version),
+        built_in_cards(corpus_id=corpus.corpus_id, version=corpus.version_label),
         resolver,
         adapter,
     )

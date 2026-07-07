@@ -49,16 +49,17 @@ class EvalRunner:
         self,
         dataset_path: str | Path,
         *,
-        version: str = "5.7.4",
+        version: str | None = None,
         max_source_spans: int = 8,
     ) -> EvalReport:
         rows: list[dict[str, Any]] = []
         latencies: list[float] = []
         for item in read_jsonl(dataset_path):
+            item_version = str(item["version"]) if item.get("version") else version
             started = time.perf_counter()
             pack = self.compiler.compile(
                 query=str(item["query"]),
-                version=str(item.get("version", version)),
+                version=item_version,
                 mode=str(item.get("mode", "explain")),
                 max_source_spans=max_source_spans,
             ).as_dict()
@@ -100,7 +101,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--registry", default="configs/corpus_registry.json")
     parser.add_argument("--dataset", default="eval/datasets/ue_eval_suite.jsonl")
     parser.add_argument("--output-dir", default="reports/eval")
-    parser.add_argument("--version", default="5.7.4")
+    parser.add_argument(
+        "--version", default=None, help="Engine version (defaults to the registry default engine)"
+    )
     parser.add_argument(
         "--max-source-spans",
         type=int,

@@ -2,15 +2,15 @@
 
 [中文文档](README.zh-CN.md)
 
-Codalith is a Python MCP gateway for Unreal Engine source context. It wraps CodeRAG-style retrieval with UE-aware corpus resolution, source-read policy, audit logging, semantic extraction, knowledge-card verification, and evaluation tooling.
+Codalith is a Python MCP gateway for versioned source-code corpora. It wraps CodeRAG-style retrieval with corpus resolution, source-read policy, audit logging, semantic extraction, knowledge-card verification, and evaluation tooling. Its capabilities are declared to MCP clients from the corpus registry configuration, not hardcoded: the current deployment ships a built-in Unreal domain package and serves Unreal Engine 5 source.
 
 ## Features
 
 - MCP stdio and Streamable HTTP gateways for AI coding tools.
-- Versioned UE corpus registry with configurable source, indexed, CodeRAG, and card paths.
-- Source URI resolution for `ue://...` and `ue-project://...` resources.
+- Versioned corpus registry with configurable source, indexed, CodeRAG, and card paths.
+- Unified source URI resolution for `codalith://<corpus_id>/...` resources.
 - Source-read policy, scopes, and audit log support.
-- Semantic extractors for Build.cs dependencies, UHT reflection, C++ symbols, and compile guards.
+- Pluggable semantic extractor profiles; the built-in `unreal` profile covers Build.cs dependencies, UHT reflection, C++ symbols, and compile guards.
 - CodeRAG acceptance jobs and evaluation reports.
 
 ## Requirements
@@ -19,7 +19,7 @@ Codalith is a Python MCP gateway for Unreal Engine source context. It wraps Code
 - [uv](https://docs.astral.sh/uv/) for local Python workflows.
 - Docker Compose for containerized validation.
 - Git submodules for the pinned CodeRAG checkout.
-- Optional: a local or remote Unreal Engine source checkout.
+- Optional: a local or remote source checkout of the corpus you index (the current deployment uses Unreal Engine).
 - Optional: Claude Code CLI, Codex, VS Code, or Cursor for MCP client setup.
 
 ## Clone With Submodules
@@ -124,10 +124,10 @@ Run default checks:
 docker compose run --rm test
 ```
 
-Run the optional UE source smoke path:
+Run the optional real-corpus smoke path (mounts the UE source tree in the current deployment):
 
 ```bash
-docker compose --profile ue run --rm ue-acceptance
+docker compose --profile acceptance run --rm corpus-acceptance
 ```
 
 Run the fake-provider CodeRAG acceptance path:

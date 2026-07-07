@@ -1,5 +1,7 @@
 # Codalith powered by CodeRAG 项目设计文档
 
+> **历史设计稿**：本文档写于项目以 UE 为唯一目标的阶段，正文中 UE-first 的措辞与 `ue://` 等 scheme 不代表当前定位。Codalith 现为中性的版本化源码语料 MCP 网关，能力由 corpus 配置声明，UE 仅作为内置域包与当前部署数据存在（统一 URI scheme 为 `codalith://<corpus_id>/...`）。当前定位以根 `CLAUDE.md` 与 `README.md` 为准。
+
 > 版本：0.1 Draft  
 > 日期：2026-06-30  
 > 目标读者：技术负责人、AI Coding Agent、本地实现团队、引擎开发工程师  

@@ -10,7 +10,7 @@ from codalith.corpus.registry import CorpusRegistry
 from codalith.semantic.store import SemanticStore
 
 
-@pytest.mark.ue_acceptance
+@pytest.mark.corpus_acceptance
 def test_ue57_source_mount_can_read_actor_header():
     root = Path("/srv/ue/5.7.4")
     if not (root / "Engine/Source").exists():
@@ -27,7 +27,7 @@ def test_ue57_source_mount_can_read_actor_header():
     assert "AActor" in content or "#pragma once" in content
 
 
-@pytest.mark.ue_acceptance
+@pytest.mark.corpus_acceptance
 def test_ue57_semantic_status_meets_v0_floors():
     semantic_target = os.getenv("CODALITH_SEMANTIC_DSN") or os.getenv(
         "CODALITH_SEMANTIC_DB",

@@ -99,9 +99,9 @@ services:
       uv run python -c 'from jobs.coderag_acceptance import ensure_coderag_installed; ensure_coderag_installed(\"openai\")' &&
       uv run codalith-mcp-http"
 
-  ue-acceptance:
+  corpus-acceptance:
     image: ghcr.io/astral-sh/uv:python3.12-bookworm
-    profiles: ["ue"]
+    profiles: ["acceptance"]
     working_dir: ${CODALITH_WORKSPACE_DIR:-/workspace}
     env_file:
       - .env
@@ -119,7 +119,7 @@ services:
       uv run codalith-index-engine --version \"$${CODALITH_ENGINE_VERSION}\" --smoke &&
       uv run codalith-extract-semantic --version \"$${CODALITH_ENGINE_VERSION}\" --semantic-db \"$${CODALITH_SEMANTIC_DSN}\" --min-modules 100 --min-reflection-entities 100 --min-guards 10 --stop-after-min &&
       uv run codalith-verify-cards --version \"$${CODALITH_ENGINE_VERSION}\" &&
-      uv run pytest -m ue_acceptance"
+      uv run pytest -m corpus_acceptance"
 
   coderag-acceptance:
     image: ghcr.io/astral-sh/uv:python3.12-bookworm

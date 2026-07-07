@@ -42,10 +42,15 @@ def pack_metrics(
     item: dict[str, Any],
     *,
     k: int,
-    default_version: str,
+    default_version: str | None = None,
 ) -> dict[str, float]:
-    """Compute the per-item metric set shared by both eval runners."""
-    expected_version = str(item.get("version", default_version))
+    """Compute the per-item metric set shared by both eval runners.
+
+    Without an expected version (dataset item or runner default) the pack's
+    own resolved version is treated as expected, so wrong_version_rate only
+    checks span/corpus consistency.
+    """
+    expected_version = str(item.get("version") or default_version or pack.get("version", ""))
     return {
         f"file_recall@{k}": file_recall_at_k(pack, expected_strings(item, "expected_files"), k=k),
         "module_accuracy": module_accuracy(pack, expected_strings(item, "expected_modules")),

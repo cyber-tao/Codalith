@@ -29,7 +29,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--registry", default="configs/corpus_registry.json")
     parser.add_argument("--dataset", default="eval/datasets/ue_eval_suite.jsonl")
-    parser.add_argument("--version", default="5.7.4")
+    parser.add_argument(
+        "--version", default=None, help="Engine version (defaults to the registry default engine)"
+    )
     parser.add_argument("--output-dir", default="reports/coderag")
     parser.add_argument("--provider", default=os.getenv("CODALITH_CODERAG_PROVIDER", "fake"))
     parser.add_argument("--index-path")
@@ -53,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     cards = [
         card.verified()
         for card in attach_source_hashes(
-            built_in_cards(corpus_id=corpus.corpus_id, version=corpus.version or args.version),
+            built_in_cards(corpus_id=corpus.corpus_id, version=corpus.version_label),
             resolver,
             card_adapter,
         )
@@ -211,13 +213,13 @@ def prepare_indexed_root(corpus: Corpus) -> None:
     if not engine_dir.exists():
         source_engine = corpus.source_root / "Engine"
         if not source_engine.exists():
-            raise FileNotFoundError(f"UE Engine source directory is missing: {source_engine}")
+            raise FileNotFoundError(f"Engine source directory is missing: {source_engine}")
         try:
             engine_dir.symlink_to(source_engine, target_is_directory=True)
         except OSError as exc:
-            # Docker compose mounts Engine directly for the real acceptance profile.
+            # Docker compose mounts the engine source directly for the real acceptance profile.
             raise FileNotFoundError(
-                f"{engine_dir} is missing. Mount UE Engine there or run with an indexed root."
+                f"{engine_dir} is missing. Mount the engine source there or run with an indexed root."
             ) from exc
     if engine_dir.is_symlink():
         raise RuntimeError(

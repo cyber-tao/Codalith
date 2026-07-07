@@ -143,7 +143,7 @@ def run_mcp_eval(
     endpoint: str,
     dataset_path: str | Path,
     label: str,
-    version: str = "5.7.4",
+    version: str | None = None,
     max_source_spans: int = 20,
     metric_k: int = 5,
     timeout_seconds: float = 120.0,
@@ -158,17 +158,16 @@ def run_mcp_eval(
     latencies: list[float] = []
     for item in read_jsonl(dataset_path):
         expected_files = expected_strings(item, "expected_files")
-        expected_version = str(item.get("version", version))
+        expected_version = str(item["version"]) if item.get("version") else version
+        arguments: dict[str, Any] = {
+            "query": str(item["query"]),
+            "mode": str(item.get("mode", "explain")),
+            "max_source_spans": max_source_spans,
+        }
+        if expected_version:
+            arguments["version"] = expected_version
         started = time.perf_counter()
-        pack = client.call_tool(
-            "codalith_context",
-            {
-                "query": str(item["query"]),
-                "version": expected_version,
-                "mode": str(item.get("mode", "explain")),
-                "max_source_spans": max_source_spans,
-            },
-        )
+        pack = client.call_tool("codalith_context", arguments)
         elapsed_ms = (time.perf_counter() - started) * 1000
         latencies.append(elapsed_ms)
         metrics = pack_metrics(pack, item, k=metric_k, default_version=version)
@@ -226,7 +225,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dataset", default="eval/datasets/ue_eval_suite.jsonl")
     parser.add_argument("--output-dir", default="reports/mcp-eval")
     parser.add_argument("--label", default="baseline")
-    parser.add_argument("--version", default="5.7.4")
+    parser.add_argument(
+        "--version", default=None, help="Engine version (defaults to the registry default engine)"
+    )
     parser.add_argument("--max-source-spans", type=int, default=20)
     parser.add_argument("--metric-k", type=int, default=5)
     parser.add_argument("--timeout-seconds", type=float, default=120.0)

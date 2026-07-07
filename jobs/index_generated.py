@@ -12,7 +12,9 @@ from codalith.corpus.registry import CorpusRegistry
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--registry", default="configs/corpus_registry.json")
-    parser.add_argument("--version", default="5.7.4")
+    parser.add_argument(
+        "--version", default=None, help="Engine version (defaults to the registry default engine)"
+    )
     parser.add_argument("--corpus-id")
     args = parser.parse_args(argv)
     registry = CorpusRegistry.from_file(args.registry)

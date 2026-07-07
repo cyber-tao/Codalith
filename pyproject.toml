@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "codalith"
 version = "0.1.0"
-description = "UE-aware source context MCP gateway powered by a CodeRAG adapter."
+description = "Corpus-aware source context MCP gateway powered by a CodeRAG adapter."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -43,7 +43,7 @@ pythonpath = ["src", "."]
 testpaths = ["tests"]
 norecursedirs = ["external", ".venv", "build", "dist"]
 markers = [
-    "ue_acceptance: optional tests that require a mounted Unreal Engine source tree",
+    "corpus_acceptance: optional tests that require a mounted real source corpus",
 ]
 
 [tool.ruff]
