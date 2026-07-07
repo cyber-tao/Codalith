@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import re
 
+from codalith.text import camel_words, contains_word
+
 _IDENT_RE = re.compile(r"\b[A-Z][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)?\b")
-_CAMEL_SPLIT_RE = re.compile(r"[A-Z][a-z0-9]+")
 
 # Capitalized English question/aux/filler words the identifier regex would
 # otherwise mistake for UE symbols at sentence starts.
@@ -83,7 +84,7 @@ def detect_modules(query: str) -> list[str]:
     found = [
         module
         for module in _MODULE_HINTS
-        if any(_phrase_matches(variant, lower) for variant in _module_variants(module))
+        if any(contains_word(variant, lower) for variant in _module_variants(module))
     ]
     return sorted(found)
 
@@ -91,11 +92,7 @@ def detect_modules(query: str) -> list[str]:
 def _module_variants(module: str) -> set[str]:
     # "EnhancedInput" should match both "enhancedinput" and "enhanced input".
     variants = {module.lower()}
-    words = _CAMEL_SPLIT_RE.findall(module)
+    words = camel_words(module)
     if len(words) > 1 and "".join(words) == module:
         variants.add(" ".join(word.lower() for word in words))
     return variants
-
-
-def _phrase_matches(phrase: str, lower_query: str) -> bool:
-    return re.search(rf"\b{re.escape(phrase)}\b", lower_query) is not None

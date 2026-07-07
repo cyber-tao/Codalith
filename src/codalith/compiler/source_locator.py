@@ -11,7 +11,6 @@ process; set CODALITH_SOURCE_PRIORS to point at an alternative file.
 from __future__ import annotations
 
 import os
-import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -20,6 +19,7 @@ from codalith.coderag.adapter import RetrievalHit, language_for_path
 from codalith.config import load_config
 from codalith.corpus.registry import Corpus
 from codalith.errors import ConfigurationError
+from codalith.text import normalize, tokenize
 
 _DEFAULT_PRIORS_PATH = "configs/source_priors.json"
 
@@ -81,9 +81,9 @@ def locate_source_priors(
     max_hits: int,
 ) -> list[RetrievalHit]:
     scored: list[tuple[float, SourcePrior]] = []
-    normalized_query = _normalize(query)
-    identifier_terms = {_normalize(identifier) for identifier in identifiers}
-    query_tokens = set(_query_tokens(normalized_query))
+    normalized_query = normalize(query)
+    identifier_terms = {normalize(identifier) for identifier in identifiers}
+    query_tokens = set(tokenize(normalized_query))
     for prior in source_priors():
         score = _score_prior(prior, normalized_query, identifier_terms, query_tokens)
         if score > 0:
@@ -107,7 +107,7 @@ def _score_prior(
 ) -> float:
     score = 0.0
     for trigger in prior.triggers:
-        normalized_trigger = _normalize(trigger).strip()
+        normalized_trigger = normalize(trigger).strip()
         if not normalized_trigger:
             continue
         if " " in normalized_trigger:
@@ -120,10 +120,10 @@ def _score_prior(
             score += 10.0
         elif normalized_trigger in query_tokens:
             score += 6.0
-    basename = _normalize(Path(prior.path).name)
+    basename = normalize(Path(prior.path).name)
     if basename and basename in normalized_query:
         score += 10.0
-    if prior.module and _normalize(prior.module) in normalized_query:
+    if prior.module and normalize(prior.module) in normalized_query:
         score += 4.0
     return score
 
@@ -161,12 +161,12 @@ def _hit_for_prior(corpus: Corpus, prior: SourcePrior, *, query: str, score: flo
 def _window(lines: list[str], *, query: str, line_terms: tuple[str, ...]) -> tuple[int, int]:
     # Curated line_terms are trusted at any length (e.g. "GC", "RPC"); free-form
     # query tokens below three characters are too noisy to anchor a window.
-    query_terms = [term for term in _query_tokens(query) if len(term) >= 3]
-    lowered_terms = {_normalize(term) for term in [*query_terms, *line_terms] if term}
+    query_terms = tokenize(query, min_length=3)
+    lowered_terms = {normalize(term) for term in [*query_terms, *line_terms] if term}
     best_line = 1
     best_matches = 0
     for index, line in enumerate(lines, start=1):
-        normalized_line = _normalize(line)
+        normalized_line = normalize(line)
         matches = sum(1 for term in lowered_terms if term in normalized_line)
         if matches > best_matches:
             best_line = index
@@ -187,11 +187,3 @@ def _uri_for(corpus: Corpus, path: str, start: int, end: int) -> str:
         return f"ue-generated://{corpus.corpus_id}/source/{path}#L{start}-L{end}"
     version = corpus.ue_version or corpus.corpus_id.removeprefix("ue-")
     return f"ue://{version}/source/{path}#L{start}-L{end}"
-
-
-def _query_tokens(text: str) -> list[str]:
-    return re.findall(r"[a-z0-9_]+", _normalize(text))
-
-
-def _normalize(text: str) -> str:
-    return text.lower().replace("-", " ")

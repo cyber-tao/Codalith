@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import time
 from collections.abc import Iterable, Iterator
 from dataclasses import asdict, dataclass, field, replace
@@ -20,6 +19,7 @@ from typing import Any
 
 from codalith.corpus.registry import Corpus, CorpusRegistry
 from codalith.errors import CodeRAGAdapterError, CorpusNotFoundError
+from codalith.text import tokenize
 
 logger = logging.getLogger(__name__)
 
@@ -246,7 +246,8 @@ class CodeRAGAdapter:
         filters: dict[str, Any],
     ) -> list[RetrievalHit]:
         files = self._ensure_local_index(corpus)
-        tokens = _tokens(query)
+        # Single-character tokens would substring-match almost every window.
+        tokens = tokenize(query, min_length=2)
         scored: list[RetrievalHit] = []
         for item in files:
             if filters.get("path_prefix") and not item.path.startswith(str(filters["path_prefix"])):
@@ -356,10 +357,6 @@ _TEXT_SUFFIXES = {
     ".md",
     ".txt",
 }
-
-
-def _tokens(query: str) -> list[str]:
-    return [token.lower() for token in re.findall(r"[A-Za-z_][A-Za-z0-9_]{1,}", query)]
 
 
 def _iter_text_paths(scan_root: Path) -> Iterator[Path]:
