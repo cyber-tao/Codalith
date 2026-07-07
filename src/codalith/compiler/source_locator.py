@@ -149,7 +149,7 @@ def _hit_for_prior(corpus: Corpus, prior: SourcePrior, *, query: str, score: flo
         end_line=end,
         title=f"{prior.title}: {Path(prior.path).name}",
         snippet=snippet,
-        score=score + 1000.0,
+        score=score,
         kind="source-prior",
         language=language_for_path(prior.path),
         module=prior.module,

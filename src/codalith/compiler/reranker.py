@@ -1,4 +1,11 @@
-"""Simple score normalization and ranking."""
+"""Score normalization and ranking across retrieval sources.
+
+Raw scores are not comparable across sources: native CodeRAG returns hybrid
+similarities near [0, 1], the local fallback counts token occurrences, and the
+source locator sums trigger weights. Each hit's base score is therefore
+normalized against the best score of its own source before mode-dependent
+weights decide how the sources compete.
+"""
 
 from __future__ import annotations
 
@@ -14,8 +21,13 @@ def rerank(
 ) -> list[RetrievalHit]:
     identifier_set = {item.lower() for item in identifiers}
     weights = _weights(mode)
+    peak_by_source: dict[str, float] = {}
+    for hit in hits:
+        peak_by_source[hit.source] = max(peak_by_source.get(hit.source, 0.0), hit.score)
 
     def score(hit: RetrievalHit) -> float:
+        peak = peak_by_source.get(hit.source, 0.0)
+        base = hit.score / peak if peak > 0 else 0.0
         haystack = f"{hit.path}\n{hit.title}\n{hit.snippet}".lower()
         exact = 1.0 if any(identifier in haystack for identifier in identifier_set) else 0.0
         card = 1.0 if "UE_KNOWLEDGE" in hit.path else 0.0
@@ -23,7 +35,7 @@ def rerank(
         source_prior = 1.0 if hit.source == "ue-source-locator" else 0.0
         path_match = 1.0 if any(identifier in hit.path.lower() for identifier in identifier_set) else 0.0
         return (
-            hit.score * weights["base"]
+            base * weights["base"]
             + exact * weights["exact"]
             + card * weights["card"]
             + module * weights["module"]
