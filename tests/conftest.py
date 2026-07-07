@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from jobs.extract_semantic import extract_semantic_summary
 
 from codalith.coderag.adapter import CodeRAGAdapter
 from codalith.compiler.context_compiler import ContextCompiler
@@ -15,6 +14,7 @@ from codalith.corpus.uri_resolver import URIResolver
 from codalith.gateway.audit import AuditLogger
 from codalith.gateway.auth import AuthContext
 from codalith.gateway.tools import CodalithTools, ToolRuntime
+from codalith.semantic.extractors.unreal import extract_semantic_summary
 from codalith.semantic.store import SemanticStore
 
 EVAL_SUITE_DATASET = Path(__file__).parents[1] / "eval" / "datasets" / "ue_eval_suite.jsonl"

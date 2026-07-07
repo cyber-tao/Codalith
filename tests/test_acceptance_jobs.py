@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from jobs.extract_semantic import extract_semantic_summary
+from codalith.semantic.extractors.unreal import extract_semantic_summary
 
 
 def test_extract_semantic_summary_counts_fixture(fake_engine_root):
-    summary = extract_semantic_summary(fake_engine_root)
+    summary = extract_semantic_summary(fake_engine_root, corpus_id="ue-5.7.4")
     assert summary["modules"] >= 2
     assert summary["module_dependencies"] >= 4
     assert summary["reflection_entities"] >= 3
@@ -44,6 +44,7 @@ def test_stop_after_min_prunes_third_party_headers(tmp_path: Path):
 
     summary = extract_semantic_summary(
         root,
+        corpus_id="ue-5.7.4",
         stop_after_min=True,
         min_modules=1,
         min_reflection_entities=1,

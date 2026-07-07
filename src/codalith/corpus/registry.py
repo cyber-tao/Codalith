@@ -30,6 +30,8 @@ class Corpus:
     # Maps a search scope name (e.g. "engine", "plugins") to the path prefixes
     # that belong to it; scopes without prefixes do not filter by path.
     scope_prefixes: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # Name of the domain extractor profile used to build the semantic graph.
+    semantic_profile: str | None = None
 
     @classmethod
     def from_config(cls, corpus_id: str, raw: dict[str, Any]) -> Corpus:
@@ -53,6 +55,7 @@ class Corpus:
                 str(scope): tuple(str(prefix) for prefix in prefixes)
                 for scope, prefixes in raw.get("scope_prefixes", {}).items()
             },
+            semantic_profile=raw.get("semantic_profile"),
         )
 
     @property

@@ -3,14 +3,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from jobs.extract_semantic import extract_semantic_summary
-
 from codalith.cards.generator import attach_source_hashes, built_in_cards, write_cards
 from codalith.cards.schema import CardClaim, KnowledgeCard
 from codalith.cards.verifier import KnowledgeCardVerifier
 from codalith.compiler.context_compiler import ContextCompiler
 from codalith.corpus.uri_resolver import URIResolver
 from codalith.eval.runner import EvalRunner, write_reports
+from codalith.semantic.extractors.unreal import extract_semantic_summary
 from codalith.semantic.store import SemanticStore
 
 

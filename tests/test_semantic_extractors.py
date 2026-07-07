@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from jobs.extract_semantic import extract_semantic_summary
-
 from codalith.semantic.extractors.build_cs import BuildCsExtractor, write_module_deps
 from codalith.semantic.extractors.compile_guards import extract_compile_guards
 from codalith.semantic.extractors.cpp_symbols import extract_cpp_symbols
 from codalith.semantic.extractors.target_cs import extract_target_text
 from codalith.semantic.extractors.uht_reflection import UHTReflectionExtractor
+from codalith.semantic.extractors.unreal import extract_semantic_summary
 from codalith.semantic.graph import query_graph
 from codalith.semantic.store import SemanticStore
 
