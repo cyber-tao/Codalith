@@ -7,6 +7,7 @@
 
 | 时间 | 动作 | 说明 |
 | --- | --- | --- |
+| 2026-07-07 | 检索内核优化 | 新增共享文本原语模块 `codalith/text.py`（normalize/tokenize/contains_word/camel_words），intent/entity/source_locator/local 检索四处 tokenize 统一；reranker 改为按 source 分组归一化 base 分并移除 prior `+1000` 哨兵值；local fallback `_local_search` 由每查询全量扫描改为窗口级倒排索引（含 CamelCase/snake_case 子词展开）。 |
 | 2026-07-07 | 数据集合并 | `ue50.jsonl` + `ue57_common_issues_30.jsonl` 物理合并为 `eval/datasets/ue_eval_suite.jsonl`（80 题，全部带 `version`），判定口径统一为 80/80 全 `pass`；benchmark 测试改名 `test_ue_eval_suite_benchmark.py`，seed/数据集 fixture 上移至 `tests/conftest.py`。 |
 | 2026-07-07 | 全面优化修复 | gateway 安全修复（工具白名单、限流先于读取、session 上限）、compiler/coderag 词边界与 URI 修复、semantic 事务/UHT 解析/schema 修复、cards 先验证后发布、eval 指标口径统一并提取 `eval/common.py`；删除死代码（gateway/errors.py、prompts.py、run_eval.py、publish_corpus.py 等），`SOURCE_PRIORS` 外置为 `configs/source_priors.json`，`db.py` 拆分为 `semantic/store/` 包；工具注册单源化（`TOOL_REGISTRY`）、错误统一为 `CodalithError` 子类、resources 模板（module/symbol/source/card）落地；`configs/*.yaml` 改名 `.json` 并删除未使用的 `mcp_server.yaml`。 |
 | 2026-07-06 | 评估规范 | 合并 UE50 基础集与 UE5.7 高频 30 题为统一 UE Eval Suite，并规定检索/编译/MCP 逻辑变更必须自动跑 eval。 |
