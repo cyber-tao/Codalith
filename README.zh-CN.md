@@ -106,7 +106,7 @@ CODALITH_ENGINE_SOURCE_HOST_ROOT=E:/UnrealEngine_5.7/Engine/Source
 CODALITH_GAMEPLAY_ABILITIES_HOST_ROOT=E:/UnrealEngine_5.7/Engine/Plugins/Runtime/GameplayAbilities
 ```
 
-`configs/corpus_registry.yaml` 和 `configs/mcp_server.yaml` 也支持 `${VAR:-default}` 占位符，所以同一个仓库可以在不同机器上运行，不需要改已提交的配置文件。
+`configs/corpus_registry.json` 和 `configs/source_policy.json` 也支持 `${VAR:-default}` 占位符，所以同一个仓库可以在不同机器上运行，不需要改已提交的配置文件。
 
 ## Docker 工作流
 

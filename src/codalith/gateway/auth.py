@@ -10,6 +10,9 @@ from dataclasses import dataclass
 
 from codalith.errors import CodalithError
 
+# Shared default for AuthContext.local and audit records when no client is known.
+DEFAULT_CLIENT_ID = "codex"
+
 
 @dataclass(frozen=True, slots=True)
 class AuthContext:
@@ -23,7 +26,7 @@ class AuthContext:
         return cls(
             user_id=os.getenv("CODALITH_USER_ID", "local-user"),
             session_id=os.getenv("CODALITH_SESSION_ID", "local-session"),
-            client=os.getenv("CODALITH_CLIENT_ID", "codex"),
+            client=os.getenv("CODALITH_CLIENT_ID", DEFAULT_CLIENT_ID),
             scopes=frozenset(scopes_from_env()),
         )
 

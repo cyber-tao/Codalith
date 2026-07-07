@@ -35,8 +35,8 @@ class ToolRuntime:
 
 def create_runtime(
     *,
-    registry_path: str = "configs/corpus_registry.yaml",
-    source_policy_path: str = "configs/source_policy.yaml",
+    registry_path: str = "configs/corpus_registry.json",
+    source_policy_path: str = "configs/source_policy.json",
     audit_log: str | None = None,
 ) -> ToolRuntime:
     registry = CorpusRegistry.from_file(registry_path)

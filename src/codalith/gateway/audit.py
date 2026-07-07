@@ -8,6 +8,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from codalith.gateway.auth import DEFAULT_CLIENT_ID
+
 
 @dataclass(frozen=True, slots=True)
 class AuditRecord:
@@ -42,7 +44,7 @@ class AuditRecord:
         source_hash: str | None = None,
         user_id: str = "local-user",
         session_id: str = "local-session",
-        client: str = "codex",
+        client: str = DEFAULT_CLIENT_ID,
     ) -> AuditRecord:
         return cls(
             timestamp=datetime.now(UTC).isoformat(),

@@ -113,7 +113,7 @@ def fake_engine_root(tmp_path: Path) -> Path:
 
 @pytest.fixture()
 def registry_path(tmp_path: Path, fake_engine_root: Path) -> Path:
-    path = tmp_path / "corpus_registry.yaml"
+    path = tmp_path / "corpus_registry.json"
     data: dict[str, Any] = {
         "engines": {
             "ue-5.7.4": {
@@ -173,7 +173,7 @@ def registry_path(tmp_path: Path, fake_engine_root: Path) -> Path:
 
 @pytest.fixture()
 def policy_path(tmp_path: Path) -> Path:
-    path = tmp_path / "source_policy.yaml"
+    path = tmp_path / "source_policy.json"
     path.write_text(
         json.dumps(
             {

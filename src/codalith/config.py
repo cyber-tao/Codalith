@@ -1,4 +1,4 @@
-"""Small config loader for JSON-compatible YAML files."""
+"""Small JSON config loader with environment placeholder expansion."""
 
 from __future__ import annotations
 
@@ -21,9 +21,7 @@ def load_config(path: str | Path) -> dict[str, Any]:
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
-        raise ConfigurationError(
-            f"{config_path} must be JSON-compatible YAML for the v0 loader: {exc}"
-        ) from exc
+        raise ConfigurationError(f"{config_path} must be valid JSON: {exc}") from exc
     if not isinstance(data, dict):
         raise ConfigurationError(f"{config_path} must contain a mapping at the top level")
     return cast(dict[str, Any], _expand_env_placeholders(data, config_path=config_path, location="$"))

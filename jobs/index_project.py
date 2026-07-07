@@ -12,7 +12,7 @@ from codalith.corpus.registry import CorpusRegistry
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("project")
-    parser.add_argument("--registry", default="configs/corpus_registry.yaml")
+    parser.add_argument("--registry", default="configs/corpus_registry.json")
     args = parser.parse_args(argv)
     registry = CorpusRegistry.from_file(args.registry)
     corpus = registry.get_project(args.project)

@@ -16,7 +16,7 @@ def test_ue57_source_mount_can_read_actor_header():
     if not (root / "Engine/Source").exists():
         pytest.skip("UE 5.7 source is not mounted at /srv/ue/5.7.4")
     assert (root / "Engine/Source").exists()
-    registry = CorpusRegistry.from_file("configs/corpus_registry.yaml")
+    registry = CorpusRegistry.from_file("configs/corpus_registry.json")
     adapter = CodeRAGAdapter(registry)
     content = adapter.get_file(
         "ue-5.7.4",

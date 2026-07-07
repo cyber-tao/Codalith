@@ -27,7 +27,7 @@ DEFAULT_CODERAG_WORKERS = "4"
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--registry", default="configs/corpus_registry.yaml")
+    parser.add_argument("--registry", default="configs/corpus_registry.json")
     parser.add_argument("--dataset", default="eval/datasets/ue50.jsonl")
     parser.add_argument("--version", default="5.7.4")
     parser.add_argument("--output-dir", default="reports/coderag")

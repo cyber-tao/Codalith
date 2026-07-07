@@ -18,6 +18,7 @@ build/
 *.egg-info/
 data/
 reports/
-.ue-context/
+eval/benchmarks/
+.codalith/
 .local/
 uv.lock

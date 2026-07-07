@@ -483,9 +483,9 @@ codalith/
   docker-compose.yml
 
   configs/
-    corpus_registry.yaml
-    source_policy.yaml
-    mcp_server.yaml
+    corpus_registry.json
+    source_policy.json
+    source_priors.json
 
   src/
     codalith/
@@ -1971,11 +1971,11 @@ CREATE TABLE knowledge_cards (
 
 ## 23. 配置文件
 
-### 23.1 `configs/corpus_registry.yaml`
+### 23.1 `configs/corpus_registry.json`
 
 见第 9 节。
 
-### 23.2 `configs/source_policy.yaml`
+### 23.2 `configs/source_policy.json`
 
 见第 20 节。
 
@@ -1989,26 +1989,9 @@ export CODERAG_MODEL=BAAI/bge-small-en-v1.5
 export CODERAG_RERANK=0
 ```
 
-### 23.4 MCP Server Config
+### 23.4 MCP Server 运行配置
 
-```yaml
-server:
-  name: codalith
-  transport: streamable-http
-  endpoint: /ue/mcp
-  default_version: "5.7.4"
-
-tools:
-  primary:
-    - codalith_context
-  secondary:
-    - codalith_lookup_symbol
-    - codalith_read_source
-    - codalith_graph
-    - codalith_examples
-    - codalith_compare_versions
-    - codalith_index_status
-```
+HTTP 网关不读取独立的 server 配置文件；transport、endpoint、host、port 等运行参数全部来自环境变量（`CODALITH_HTTP_*`，见 `.env.example`）与 CLI 参数。工具列表由 `codalith.gateway.tools.TOOL_REGISTRY` 单源维护。
 
 ---
 
@@ -2442,7 +2425,7 @@ ruff/mypy 可选。
 输入：
 
 ```text
-configs/corpus_registry.yaml
+configs/corpus_registry.json
 ```
 
 实现：
@@ -2813,8 +2796,8 @@ Mixed
 优先创建：
 
 ```text
-configs/corpus_registry.yaml
-configs/source_policy.yaml
+configs/corpus_registry.json
+configs/source_policy.json
 src/codalith/corpus/registry.py
 src/codalith/corpus/uri_resolver.py
 src/codalith/corpus/source_policy.py

@@ -106,7 +106,7 @@ CODALITH_ENGINE_SOURCE_HOST_ROOT=E:/UnrealEngine_5.7/Engine/Source
 CODALITH_GAMEPLAY_ABILITIES_HOST_ROOT=E:/UnrealEngine_5.7/Engine/Plugins/Runtime/GameplayAbilities
 ```
 
-`configs/corpus_registry.yaml` and `configs/mcp_server.yaml` also support `${VAR:-default}` placeholders, so the same repository can run on different machines without rewriting committed config files.
+`configs/corpus_registry.json` and `configs/source_policy.json` also support `${VAR:-default}` placeholders, so the same repository can run on different machines without rewriting committed config files.
 
 ## Docker Workflows
 

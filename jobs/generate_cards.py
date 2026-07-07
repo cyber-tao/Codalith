@@ -14,7 +14,7 @@ from codalith.corpus.uri_resolver import URIResolver
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--registry", default="configs/corpus_registry.yaml")
+    parser.add_argument("--registry", default="configs/corpus_registry.json")
     parser.add_argument("--version", default="5.7.4")
     args = parser.parse_args(argv)
     registry = CorpusRegistry.from_file(args.registry)
