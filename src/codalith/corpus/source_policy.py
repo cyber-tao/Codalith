@@ -61,13 +61,13 @@ class SourcePolicy:
         line_count = resolved.line_count
         if line_count is None:
             raise SourcePolicyError("Source reads must specify a bounded line range")
+        if line_count < 1:
+            raise SourcePolicyError(f"Source reads must cover at least one line: {line_count}")
+        # default_max_lines only sizes the fallback window when a caller omits an
+        # explicit range; hard_max_lines is the single enforcement cap here.
         if line_count > self.hard_max_lines:
             raise SourcePolicyError(
                 f"Line range exceeds hard max of {self.hard_max_lines}: {line_count}"
-            )
-        if line_count > self.default_max_lines:
-            raise SourcePolicyError(
-                f"Line range exceeds default max of {self.default_max_lines}: {line_count}"
             )
         rel = PurePosixPath(resolved.relative_path).as_posix()
         for pattern in self.deny_patterns:
@@ -110,9 +110,6 @@ class SourceReadRateLimiter:
         self.time_func = time_func
         self._events: list[tuple[float, int, str | None, int | None, int | None]] = []
 
-    def check_and_record(self, line_count: int) -> None:
-        self.record_read(line_count=line_count)
-
     def record_read(
         self,
         *,
@@ -121,6 +118,8 @@ class SourceReadRateLimiter:
         start_line: int | None = None,
         end_line: int | None = None,
     ) -> None:
+        if line_count < 1:
+            raise SourcePolicyError(f"Source reads must cover at least one line: {line_count}")
         now = float(self.time_func())
         cutoff = now - self.window_seconds
         self._events = [

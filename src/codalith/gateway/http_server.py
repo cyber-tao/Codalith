@@ -24,6 +24,7 @@ from codalith.gateway.tools import CodalithTools, create_runtime
 
 SUPPORTED_PROTOCOL_VERSIONS = {"2025-11-25", "2025-06-18", "2025-03-26"}
 DEFAULT_PROTOCOL_VERSION = "2025-03-26"
+MAX_SESSIONS = 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,7 +47,13 @@ class MCPHTTPServer(ThreadingHTTPServer):
         super().__init__(server_address, request_handler_class)
         self.tools = tools
         self.config = config
-        self.sessions: set[str] = set()
+        # Insertion-ordered so the oldest session can be evicted at the cap.
+        self.sessions: dict[str, None] = {}
+
+    def register_session(self, session_id: str) -> None:
+        while len(self.sessions) >= MAX_SESSIONS:
+            self.sessions.pop(next(iter(self.sessions)))
+        self.sessions[session_id] = None
 
 
 class StreamableHTTPHandler(BaseHTTPRequestHandler):
@@ -67,11 +74,11 @@ class StreamableHTTPHandler(BaseHTTPRequestHandler):
             return
         if not self._protocol_version_is_valid():
             return
-        length = int(self.headers.get("Content-Length", "0"))
         try:
+            length = int(self.headers.get("Content-Length", "0"))
             body = self.rfile.read(length).decode("utf-8")
             request = json.loads(body)
-        except (UnicodeDecodeError, json.JSONDecodeError):
+        except (ValueError, UnicodeDecodeError):
             self._write_json_error(HTTPStatus.BAD_REQUEST, "Request body must be UTF-8 JSON")
             return
         if not isinstance(request, dict):
@@ -92,7 +99,7 @@ class StreamableHTTPHandler(BaseHTTPRequestHandler):
         headers: dict[str, str] = {}
         if request.get("method") == "initialize":
             session_id = uuid.uuid4().hex
-            self.server.sessions.add(session_id)
+            self.server.register_session(session_id)
             headers["MCP-Session-Id"] = session_id
         self._write_json(HTTPStatus.OK, response, headers=headers)
 
@@ -126,7 +133,7 @@ class StreamableHTTPHandler(BaseHTTPRequestHandler):
             return
         session_id = self.headers.get("MCP-Session-Id")
         if session_id and session_id in self.server.sessions:
-            self.server.sessions.remove(session_id)
+            del self.server.sessions[session_id]
             self.send_response(HTTPStatus.ACCEPTED)
             self.send_header("Content-Length", "0")
             self.end_headers()
@@ -158,10 +165,10 @@ class StreamableHTTPHandler(BaseHTTPRequestHandler):
         return True
 
     def _session_is_valid(self, request: dict[str, Any]) -> bool:
-        if request.get("method") == "initialize" or not self.server.sessions:
+        if request.get("method") == "initialize":
             return True
         session_id = self.headers.get("MCP-Session-Id")
-        if session_id in self.server.sessions:
+        if session_id is not None and session_id in self.server.sessions:
             return True
         self._write_json_error(HTTPStatus.BAD_REQUEST, "Missing or invalid MCP-Session-Id")
         return False

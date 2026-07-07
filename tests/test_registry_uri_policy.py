@@ -57,8 +57,12 @@ def test_source_policy_enforces_limits_and_scope(registry, policy_path):
         "ue://5.7.4/source/Engine/Source/Runtime/Core/Public/CoreMinimal.h#L1-L5"
     )
     policy.check(ok, {"source:read"})
-    too_large = resolver.resolve_source(
+    within_hard_max = resolver.resolve_source(
         "ue://5.7.4/source/Engine/Source/Runtime/Core/Public/CoreMinimal.h#L1-L21"
+    )
+    policy.check(within_hard_max, {"source:read"})
+    too_large = resolver.resolve_source(
+        "ue://5.7.4/source/Engine/Source/Runtime/Core/Public/CoreMinimal.h#L1-L26"
     )
     with pytest.raises(SourcePolicyError):
         policy.check(too_large, {"source:read"})
@@ -73,15 +77,24 @@ def test_source_read_rate_limiter_enforces_read_and_line_budgets():
     )
     limiter = SourceReadRateLimiter(policy, time_func=lambda: 100.0)
 
-    limiter.check_and_record(3)
-    limiter.check_and_record(4)
+    limiter.record_read(line_count=3)
+    limiter.record_read(line_count=4)
     with pytest.raises(SourcePolicyError):
-        limiter.check_and_record(1)
+        limiter.record_read(line_count=1)
 
     line_limiter = SourceReadRateLimiter(policy, time_func=lambda: 100.0)
-    line_limiter.check_and_record(5)
+    line_limiter.record_read(line_count=5)
     with pytest.raises(SourcePolicyError):
-        line_limiter.check_and_record(4)
+        line_limiter.record_read(line_count=4)
+
+
+def test_source_read_rate_limiter_rejects_non_positive_line_counts():
+    limiter = SourceReadRateLimiter(SourcePolicy(), time_func=lambda: 100.0)
+
+    with pytest.raises(SourcePolicyError):
+        limiter.record_read(line_count=0)
+    with pytest.raises(SourcePolicyError):
+        limiter.record_read(line_count=-5)
 
 
 def test_source_read_rate_limiter_expires_old_events():
@@ -89,9 +102,9 @@ def test_source_read_rate_limiter_expires_old_events():
     policy = SourcePolicy(max_source_reads_per_10min=1)
     limiter = SourceReadRateLimiter(policy, window_seconds=10.0, time_func=lambda: now)
 
-    limiter.check_and_record(1)
+    limiter.record_read(line_count=1)
     now = 111.0
-    limiter.check_and_record(1)
+    limiter.record_read(line_count=1)
 
 
 def test_source_read_rate_limiter_detects_adjacent_bulk_reads():

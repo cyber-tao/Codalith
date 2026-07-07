@@ -76,7 +76,13 @@ def serve(tools: CodalithTools) -> None:
     for line in sys.stdin:
         if not line.strip():
             continue
-        response = handle_request(json.loads(line), tools)
+        response: dict[str, Any] | None
+        try:
+            request = json.loads(line)
+        except json.JSONDecodeError as exc:
+            response = _error(None, -32700, f"Parse error: {exc}")
+        else:
+            response = handle_request(request, tools)
         if response is not None:
             sys.stdout.write(json.dumps(response, ensure_ascii=False) + "\n")
             sys.stdout.flush()

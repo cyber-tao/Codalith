@@ -8,7 +8,7 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from codalith.errors import SourcePolicyError
+from codalith.errors import CodalithError
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,7 +28,7 @@ class AuthContext:
         )
 
 
-class AuthError(SourcePolicyError):
+class AuthError(CodalithError):
     """Raised when a request cannot be authenticated."""
 
 

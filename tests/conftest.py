@@ -232,14 +232,6 @@ def tools(
         adapter=adapter,
         compiler=compiler,
         audit=AuditLogger(tmp_path / "audit.jsonl"),
-        scopes={
-            "source:read",
-            "index:status",
-            "cards:read",
-            "graph:read",
-            "ue:5.7",
-            "project:ProjectA",
-        },
         identity=AuthContext(
             user_id="test-user",
             session_id="test-session",

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +12,8 @@ from codalith.coderag.adapter import CodeRAGAdapter, RetrievalHit
 from codalith.compiler.context_compiler import ContextCompiler
 from codalith.corpus.registry import CorpusRegistry
 from codalith.corpus.source_policy import SourcePolicy, SourceReadRateLimiter
-from codalith.corpus.uri_resolver import URIResolver
+from codalith.corpus.uri_resolver import ResolvedURI, URIResolver
+from codalith.errors import SourcePolicyError
 from codalith.gateway.audit import AuditLogger, AuditRecord
 from codalith.gateway.auth import AuthContext, current_auth_context
 from codalith.semantic.db import SemanticStore
@@ -27,7 +28,6 @@ class ToolRuntime:
     adapter: CodeRAGAdapter
     compiler: ContextCompiler
     audit: AuditLogger
-    scopes: set[str]
     identity: AuthContext
     semantic_store: SemanticStore | None = None
     rate_limiter: SourceReadRateLimiter | None = None
@@ -64,7 +64,6 @@ def create_runtime(
         adapter=adapter,
         compiler=compiler,
         audit=audit,
-        scopes=set(AuthContext.local().scopes),
         identity=AuthContext.local(),
         semantic_store=semantic_store,
         rate_limiter=SourceReadRateLimiter(policy),
@@ -114,26 +113,17 @@ class CodalithTools:
     ) -> dict[str, Any]:
         resolved = self.runtime.resolver.resolve_source(uri)
         if start_line is not None or end_line is not None:
-            resolved = type(resolved)(
-                uri=resolved.uri,
-                scheme=resolved.scheme,
-                corpus_id=resolved.corpus_id,
-                relative_path=resolved.relative_path,
-                source_kind=resolved.source_kind,
-                start_line=start_line or resolved.start_line,
-                end_line=end_line or resolved.end_line,
+            resolved = replace(
+                resolved,
+                start_line=start_line if start_line is not None else resolved.start_line,
+                end_line=end_line if end_line is not None else resolved.end_line,
             )
         try:
+            resolved = self._bounded_read_range(resolved)
             self._require_corpus_access(resolved.corpus_id)
             self.runtime.policy.check(resolved, self._scopes())
             assert resolved.start_line is not None
             assert resolved.end_line is not None
-            content = self.runtime.adapter.get_file(
-                resolved.corpus_id,
-                resolved.relative_path,
-                resolved.start_line,
-                resolved.end_line,
-            )
             line_count = resolved.line_count or 0
             if self.runtime.rate_limiter is not None:
                 self.runtime.rate_limiter.record_read(
@@ -142,6 +132,12 @@ class CodalithTools:
                     start_line=resolved.start_line,
                     end_line=resolved.end_line,
                 )
+            content = self.runtime.adapter.get_file(
+                resolved.corpus_id,
+                resolved.relative_path,
+                resolved.start_line,
+                resolved.end_line,
+            )
             source_hash = source_sha256(content)
             auth = self._auth()
             if with_line_numbers:
@@ -410,6 +406,20 @@ class CodalithTools:
     def _scopes(self) -> set[str]:
         return set(self._auth().scopes)
 
+    def _bounded_read_range(self, resolved: ResolvedURI) -> ResolvedURI:
+        # When a caller omits an explicit range, serve a default bounded window.
+        start = resolved.start_line if resolved.start_line is not None else 1
+        end = (
+            resolved.end_line
+            if resolved.end_line is not None
+            else start + self.runtime.policy.default_max_lines - 1
+        )
+        if start < 1:
+            raise SourcePolicyError(f"start_line must be >= 1: {start}")
+        if end < start:
+            raise SourcePolicyError(f"Descending line range: {start}-{end}")
+        return replace(resolved, start_line=start, end_line=end)
+
     def _require_resolution_access(self, resolution: Any) -> None:
         for corpus in resolution.ordered:
             self._require_corpus_access(corpus.corpus_id)
@@ -475,7 +485,7 @@ def _scope_matches(scope: str, path: str, corpus_kind: str) -> bool:
     if corpus_kind == "project":
         return False
     if corpus_kind == "generated":
-        return scope == "all"
+        return False
     if scope == "plugins":
         return path.startswith("Engine/Plugins/")
     if scope == "tests":
@@ -622,8 +632,11 @@ def tool_schemas() -> list[dict[str, Any]]:
     ]
 
 
+TOOL_NAMES: frozenset[str] = frozenset(schema["name"] for schema in tool_schemas())
+
+
 def call_tool(tools: CodalithTools, name: str, arguments: dict[str, Any]) -> Any:
-    if not hasattr(tools, name):
+    if name not in TOOL_NAMES:
         raise ValueError(f"Unknown tool: {name}")
     method = getattr(tools, name)
     return method(**arguments)
