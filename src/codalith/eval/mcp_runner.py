@@ -12,13 +12,15 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from codalith.eval.metrics import (
-    file_recall_at_k,
-    missing_source_citation_rate,
-    module_accuracy,
-    symbol_recall,
-    wrong_version_rate,
+from codalith.eval.common import (
+    average,
+    expected_strings,
+    p95,
+    pack_metrics,
+    read_jsonl,
+    write_report_files,
 )
+from codalith.eval.metrics import file_recall_at_k
 
 PROTOCOL_VERSION = "2025-11-25"
 
@@ -154,10 +156,8 @@ def run_mcp_eval(
     client.initialize()
     rows: list[dict[str, Any]] = []
     latencies: list[float] = []
-    for item in _read_jsonl(dataset_path):
-        expected_files = [str(path) for path in item.get("expected_files", [])]
-        expected_modules = [str(module) for module in item.get("expected_modules", [])]
-        expected_symbols = [str(symbol) for symbol in item.get("expected_symbols", [])]
+    for item in read_jsonl(dataset_path):
+        expected_files = expected_strings(item, "expected_files")
         expected_version = str(item.get("version", version))
         started = time.perf_counter()
         pack = client.call_tool(
@@ -171,27 +171,23 @@ def run_mcp_eval(
         )
         elapsed_ms = (time.perf_counter() - started) * 1000
         latencies.append(elapsed_ms)
-        file_recall = file_recall_at_k(pack, expected_files, k=metric_k)
+        metrics = pack_metrics(pack, item, k=metric_k, default_version=version)
         candidate_recall = file_recall_at_k(pack, expected_files, k=max_source_spans)
-        module_score = module_accuracy(pack, expected_modules)
-        symbol_score = symbol_recall(pack, expected_symbols)
-        missing_citation = missing_source_citation_rate(pack)
-        wrong_version = wrong_version_rate(pack, expected_version)
         source_spans = pack.get("source_spans", [])
         rows.append(
             {
                 "id": item.get("id"),
                 "query": item["query"],
-                f"file_recall@{metric_k}": file_recall,
+                **metrics,
                 f"file_recall@{max_source_spans}": candidate_recall,
-                "module_accuracy": module_score,
-                "symbol_recall": symbol_score,
-                "missing_source_citation_rate": missing_citation,
-                "wrong_version_rate": wrong_version,
                 "latency_ms": elapsed_ms,
-                "failure_class": _failure_class(file_recall, candidate_recall, module_score),
+                "failure_class": _failure_class(
+                    metrics[f"file_recall@{metric_k}"],
+                    candidate_recall,
+                    metrics["module_accuracy"],
+                ),
                 "expected_files": expected_files,
-                "expected_modules": expected_modules,
+                "expected_modules": expected_strings(item, "expected_modules"),
                 "source_paths": [str(span.get("path", "")) for span in source_spans],
                 "modules": [str(module.get("name", "")) for module in pack.get("modules", [])],
             }
@@ -203,25 +199,25 @@ def run_mcp_eval(
         metric_k=metric_k,
         max_source_spans=max_source_spans,
         count=count,
-        file_recall_at_k=_average(rows, f"file_recall@{metric_k}"),
-        candidate_file_recall=_average(rows, f"file_recall@{max_source_spans}"),
-        module_accuracy=_average(rows, "module_accuracy"),
-        symbol_recall=_average(rows, "symbol_recall"),
-        missing_source_citation_rate=_average(rows, "missing_source_citation_rate"),
-        wrong_version_rate=_average(rows, "wrong_version_rate"),
-        latency_p95_ms=_p95(latencies),
+        file_recall_at_k=average(rows, f"file_recall@{metric_k}"),
+        candidate_file_recall=average(rows, f"file_recall@{max_source_spans}"),
+        module_accuracy=average(rows, "module_accuracy"),
+        symbol_recall=average(rows, "symbol_recall"),
+        missing_source_citation_rate=average(rows, "missing_source_citation_rate"),
+        wrong_version_rate=average(rows, "wrong_version_rate"),
+        latency_p95_ms=p95(latencies),
         rows=rows,
     )
 
 
 def write_reports(report: MCPEvalReport, output_dir: str | Path) -> tuple[Path, Path]:
     root = Path(output_dir)
-    root.mkdir(parents=True, exist_ok=True)
-    json_path = root / f"{report.label}_mcp_eval.json"
-    md_path = root / f"{report.label}_mcp_eval.md"
-    json_path.write_text(json.dumps(report.as_dict(), indent=2, sort_keys=True), encoding="utf-8")
-    md_path.write_text(_markdown(report), encoding="utf-8")
-    return json_path, md_path
+    return write_report_files(
+        report.as_dict(),
+        _markdown(report),
+        json_path=root / f"{report.label}_mcp_eval.json",
+        md_path=root / f"{report.label}_mcp_eval.md",
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -249,14 +245,6 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _read_jsonl(path: str | Path) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for line in Path(path).read_text(encoding="utf-8").splitlines():
-        if line.strip():
-            rows.append(json.loads(line))
-    return rows
-
-
 def _failure_class(file_recall: float, candidate_recall: float, module_score: float) -> str:
     if file_recall < 1.0:
         if candidate_recall > file_recall:
@@ -265,18 +253,6 @@ def _failure_class(file_recall: float, candidate_recall: float, module_score: fl
     if module_score < 1.0:
         return "module_mismatch"
     return "pass"
-
-
-def _average(rows: list[dict[str, Any]], key: str) -> float:
-    return sum(float(row[key]) for row in rows) / len(rows) if rows else 0.0
-
-
-def _p95(values: list[float]) -> float:
-    if not values:
-        return 0.0
-    ordered = sorted(values)
-    index = min(len(ordered) - 1, int(round((len(ordered) - 1) * 0.95)))
-    return ordered[index]
 
 
 def _markdown(report: MCPEvalReport) -> str:

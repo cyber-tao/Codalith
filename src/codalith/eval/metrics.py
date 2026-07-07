@@ -9,8 +9,12 @@ def file_recall_at_k(pack: dict[str, Any], expected_files: list[str], k: int = 5
     if not expected_files:
         return 1.0
     spans = pack.get("source_spans", [])[:k]
-    found = {str(span.get("path", "")) for span in spans}
-    hits = sum(1 for expected in expected_files if any(path.endswith(expected) for path in found))
+    found = {str(span.get("path", "")) for span in spans if isinstance(span, dict)}
+    hits = sum(
+        1
+        for expected in expected_files
+        if any(_path_matches(path, expected) for path in found)
+    )
     return hits / len(expected_files)
 
 
@@ -40,6 +44,7 @@ def symbol_recall(pack: dict[str, Any], expected_symbols: list[str]) -> float:
 
 
 def missing_source_citation_rate(pack: dict[str, Any]) -> float:
+    """Fraction of spans without a citation; an empty pack counts as 1.0."""
     spans = pack.get("source_spans", [])
     if not spans:
         return 1.0
@@ -51,9 +56,14 @@ def missing_source_citation_rate(pack: dict[str, Any]) -> float:
 
 
 def wrong_version_rate(pack: dict[str, Any], expected_version: str) -> float:
+    """Fraction of spans not anchored to the expected version.
+
+    Mirrors missing_source_citation_rate for empty packs: no spans means the
+    pack cannot demonstrate version anchoring, so it counts as 1.0.
+    """
     spans = pack.get("source_spans", [])
     if not spans:
-        return 0.0
+        return 1.0
     wrong = 0
     expected_prefix = f"ue://{expected_version}/"
     for span in spans:
@@ -64,3 +74,14 @@ def wrong_version_rate(pack: dict[str, Any], expected_version: str) -> float:
         if uri.startswith("ue://") and not uri.startswith(expected_prefix):
             wrong += 1
     return wrong / len(spans)
+
+
+def _path_matches(path: str, expected: str) -> bool:
+    # Segment-aligned suffix match so "Actor.h" cannot hit "MyActor.h".
+    normalized_path = path.replace("\\", "/")
+    normalized_expected = expected.replace("\\", "/").lstrip("/")
+    if not normalized_expected:
+        return False
+    return normalized_path == normalized_expected or normalized_path.endswith(
+        "/" + normalized_expected
+    )

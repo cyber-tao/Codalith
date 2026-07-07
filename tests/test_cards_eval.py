@@ -115,4 +115,5 @@ def test_source_locator_covers_seed_eval_dataset(registry, adapter):
     compiler = ContextCompiler(registry, adapter)
     dataset = Path(__file__).parents[1] / "eval" / "datasets" / "ue50.jsonl"
     report = EvalRunner(compiler).run(dataset)
-    assert report.file_recall_at_5 >= 0.70
+    assert report.file_recall_at_5 == 1.0
+    assert report.module_accuracy == 1.0

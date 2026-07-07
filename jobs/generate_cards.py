@@ -6,6 +6,7 @@ import argparse
 import json
 
 from codalith.cards.generator import attach_source_hashes, built_in_cards, write_cards
+from codalith.cards.verifier import KnowledgeCardVerifier
 from codalith.coderag.adapter import CodeRAGAdapter
 from codalith.corpus.registry import CorpusRegistry
 from codalith.corpus.uri_resolver import URIResolver
@@ -25,7 +26,21 @@ def main(argv: list[str] | None = None) -> int:
         resolver,
         adapter,
     )
-    verified = [card.verified() for card in cards]
+    # Cards only ship as "verified" after passing evidence verification here.
+    # The context compiler relies on this invariant when it reports card hits
+    # as verified in Context Packs.
+    verifier = KnowledgeCardVerifier(resolver, adapter)
+    failures: dict[str, list[str]] = {}
+    verified = []
+    for card in cards:
+        result = verifier.verify(card)
+        if result.ok:
+            verified.append(card.verified())
+        else:
+            failures[card.card_id] = result.errors
+    if failures:
+        print(json.dumps({"error": "card verification failed", "failures": failures}, indent=2))
+        return 1
     written = write_cards(verified, corpus.card_root)
     if corpus.indexed_root != corpus.card_root:
         written.extend(write_cards(verified, corpus.indexed_root))
