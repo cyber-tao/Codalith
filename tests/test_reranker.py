@@ -8,7 +8,7 @@ def _hit(source: str, path: str, score: float, module: str | None = None) -> Ret
     return RetrievalHit(
         source=source,
         corpus_id="ue-5.7.4",
-        uri=f"ue://5.7.4/source/{path}#L1-L10",
+        uri=f"codalith://ue-5.7.4/source/{path}#L1-L10",
         path=path,
         start_line=1,
         end_line=10,

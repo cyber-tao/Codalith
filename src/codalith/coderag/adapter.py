@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from codalith.corpus.registry import Corpus, CorpusRegistry
+from codalith.corpus.uris import source_uri
 from codalith.errors import CodeRAGAdapterError, CorpusNotFoundError
 from codalith.text import camel_words, tokenize
 
@@ -222,7 +223,7 @@ class CodeRAGAdapter:
                 RetrievalHit(
                     source="coderag",
                     corpus_id=corpus.corpus_id,
-                    uri=_uri_for_hit(corpus, path, int(hit.start_line), int(hit.end_line)),
+                    uri=source_uri(corpus.corpus_id, path, int(hit.start_line), int(hit.end_line)),
                     path=path,
                     start_line=int(hit.start_line),
                     end_line=int(hit.end_line),
@@ -298,7 +299,7 @@ class CodeRAGAdapter:
                 RetrievalHit(
                     source="coderag-local",
                     corpus_id=corpus.corpus_id,
-                    uri=_uri_for_hit(corpus, file.path, window.start_line, window.end_line),
+                    uri=source_uri(corpus.corpus_id, file.path, window.start_line, window.end_line),
                     path=file.path,
                     start_line=window.start_line,
                     end_line=window.end_line,
@@ -474,15 +475,6 @@ def _module_from_path(path: str) -> str | None:
         if index + 1 < len(parts):
             return parts[index + 1]
     return None
-
-
-def _uri_for_hit(corpus: Corpus, path: str, start: int, end: int) -> str:
-    if corpus.kind == "project":
-        return f"ue-project://{corpus.corpus_id}/source/{path}#L{start}-L{end}"
-    if corpus.kind == "generated":
-        return f"ue-generated://{corpus.corpus_id}/source/{path}#L{start}-L{end}"
-    version = corpus.version_label
-    return f"ue://{version}/source/{path}#L{start}-L{end}"
 
 
 def _native_store_dir(corpus: Corpus) -> Path:

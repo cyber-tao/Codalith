@@ -283,7 +283,6 @@ def tools(
     extract_semantic_summary(
         fake_engine_root,
         corpus_id="ue-5.7.4",
-        version="5.7.4",
         store=semantic_store,
     )
     compiler = ContextCompiler(registry, adapter, semantic_store=semantic_store)

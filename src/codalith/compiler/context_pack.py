@@ -23,6 +23,7 @@ class ContextSummary:
 class ContextPack:
     query: str
     version: str
+    corpus_id: str
     source_commit: str
     project: str | None
     intent: str
@@ -34,7 +35,7 @@ class ContextPack:
     graph_edges: list[dict[str, Any]]
     caveats: list[str]
     recommended_next_calls: list[dict[str, Any]]
-    schema_version: str = "0.1"
+    schema_version: str = "0.2"
     answer_policy: AnswerPolicy = field(default_factory=AnswerPolicy)
     summary: ContextSummary | None = None
 

@@ -39,6 +39,10 @@ def build_instructions(registry: CorpusRegistry) -> str:
         "the question does not mention source code. Call codalith_context before answering "
         "implementation, API, behavior, or version-specific questions."
     )
+    parts.append(
+        "Source citations use codalith://<corpus>/source/<path>#L<start>-L<end> URIs; "
+        "read them with codalith_read_source."
+    )
     if keywords:
         parts.append("Trigger topics include: " + ", ".join(keywords) + ".")
     return " ".join(parts)

@@ -11,6 +11,7 @@ from typing import Any
 
 from codalith.cards.hashing import source_sha256
 from codalith.corpus.registry import CorpusRegistry
+from codalith.corpus.uris import source_uri
 from codalith.semantic.extractors.build_cs import BuildCsExtractor, write_module_deps
 from codalith.semantic.extractors.compile_guards import extract_compile_guards
 from codalith.semantic.extractors.cpp_symbols import extract_cpp_symbols
@@ -44,8 +45,6 @@ def main(argv: list[str] | None = None) -> int:
     summary = extract_semantic_summary(
         root,
         corpus_id=args.corpus_id or corpus.corpus_id,
-        version=corpus.version or args.version,
-        project_id=corpus.corpus_id if corpus.kind == "project" else None,
         store=store,
         stop_after_min=args.stop_after_min,
         min_modules=args.min_modules,
@@ -66,8 +65,6 @@ def extract_semantic_summary(
     root: Path,
     *,
     corpus_id: str = "ue-5.7.4",
-    version: str = "5.7.4",
-    project_id: str | None = None,
     store: SemanticStore | None = None,
     stop_after_min: bool = False,
     min_modules: int = 0,
@@ -116,14 +113,14 @@ def extract_semantic_summary(
                 module_name=build_module_name,
                 public_include_paths=_include_paths(text, "PublicIncludePaths"),
                 private_include_paths=_include_paths(text, "PrivateIncludePaths"),
-                source_uri=_source_uri(version, root, build_file, 1, 1, project_id=project_id),
+                source_uri=_source_uri(corpus_id, root, build_file, 1, 1),
                 metadata={"source": "Build.cs"},
                 commit=False,
             )
             write_module_deps(
                 store,
                 corpus_id=corpus_id,
-                evidence_uri=_source_uri(version, root, build_file, 1, 1, project_id=project_id),
+                evidence_uri=_source_uri(corpus_id, root, build_file, 1, 1),
                 dependencies=extracted,
                 commit=False,
             )
@@ -155,7 +152,7 @@ def extract_semantic_summary(
             store.upsert_target(
                 corpus_id=corpus_id,
                 target=target,
-                evidence_uri=_source_uri(version, root, target_file, 1, max(1, len(text.splitlines())), project_id=project_id),
+                evidence_uri=_source_uri(corpus_id, root, target_file, 1, max(1, len(text.splitlines()))),
                 commit=False,
             )
             store.commit()
@@ -182,7 +179,7 @@ def extract_semantic_summary(
             store.upsert_plugin(
                 corpus_id=corpus_id,
                 plugin=plugin,
-                evidence_uri=_source_uri(version, root, plugin_file, 1, max(1, len(text.splitlines())), project_id=project_id),
+                evidence_uri=_source_uri(corpus_id, root, plugin_file, 1, max(1, len(text.splitlines()))),
                 commit=False,
             )
             store.commit()
@@ -209,7 +206,7 @@ def extract_semantic_summary(
             store.upsert_project(
                 corpus_id=corpus_id,
                 project=project,
-                evidence_uri=_source_uri(version, root, project_file, 1, max(1, len(text.splitlines())), project_id=project_id),
+                evidence_uri=_source_uri(corpus_id, root, project_file, 1, max(1, len(text.splitlines()))),
                 commit=False,
             )
             store.commit()
@@ -222,12 +219,11 @@ def extract_semantic_summary(
         headers_scanned += 1
         module_name = _module_from_path(header)
         declaration_uri = _source_uri(
-            version,
+            corpus_id,
             root,
             header,
             1,
             max(1, len(text.splitlines())),
-            project_id=project_id,
         )
         extracted_reflection = reflection_extractor.extract_text(
             text,
@@ -258,7 +254,7 @@ def extract_semantic_summary(
                     corpus_id=corpus_id,
                     path=relative,
                     guard=guard,
-                    evidence_uri=_source_uri(version, root, header, guard.line, guard.line, project_id=project_id),
+                    evidence_uri=_source_uri(corpus_id, root, header, guard.line, guard.line),
                     commit=False,
                 )
             for symbol in extracted_symbols:
@@ -266,7 +262,7 @@ def extract_semantic_summary(
                     corpus_id=corpus_id,
                     path=relative,
                     symbol=symbol,
-                    evidence_uri=_source_uri(version, root, header, symbol.line, symbol.line, project_id=project_id),
+                    evidence_uri=_source_uri(corpus_id, root, header, symbol.line, symbol.line),
                     module_name=module_name,
                     commit=False,
                 )
@@ -349,18 +345,14 @@ def _skip_path(path: Path) -> bool:
 
 
 def _source_uri(
-    version: str,
+    corpus_id: str,
     root: Path,
     path: Path,
     start: int,
     end: int,
-    *,
-    project_id: str | None = None,
 ) -> str:
     relative = path.relative_to(root).as_posix()
-    if project_id:
-        return f"ue-project://{project_id}/source/{relative}#L{start}-L{end}"
-    return f"ue://{version}/source/{relative}#L{start}-L{end}"
+    return source_uri(corpus_id, relative, start, end)
 
 
 def _module_from_path(path: Path) -> str | None:

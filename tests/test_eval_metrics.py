@@ -8,11 +8,24 @@ from codalith.eval.metrics import (
 )
 
 
-def _pack(paths: list[str]) -> dict[str, object]:
+def _pack(
+    paths: list[str],
+    *,
+    version: str = "5.7.4",
+    corpus_id: str = "ue-5.7.4",
+) -> dict[str, object]:
     return {
+        "version": version,
+        "corpus_id": corpus_id,
         "source_spans": [
-            {"path": path, "uri": f"ue://5.7.4/source/{path}#L1-L5"} for path in paths
-        ]
+            {
+                "path": path,
+                "uri": f"codalith://{corpus_id}/source/{path}#L1-L5",
+                "corpus_id": corpus_id,
+                "corpus_kind": "engine",
+            }
+            for path in paths
+        ],
     }
 
 
@@ -46,8 +59,34 @@ def test_citation_and_version_rates_on_populated_packs():
     uncited = {"source_spans": [{"path": "Actor.h"}]}
     assert missing_source_citation_rate(uncited) == 1.0
 
-    project_span = {"source_spans": [{"path": "A.h", "uri": "ue-project://ProjectA/source/A.h#L1-L2"}]}
+    project_span = {
+        "version": "5.7.4",
+        "corpus_id": "ue-5.7.4",
+        "source_spans": [
+            {
+                "path": "A.h",
+                "uri": "codalith://ProjectA/source/A.h#L1-L2",
+                "corpus_id": "ProjectA",
+                "corpus_kind": "project",
+            }
+        ],
+    }
     assert wrong_version_rate(project_span, "5.7.4") == 0.0
+
+
+def test_wrong_version_rate_flags_engine_spans_from_other_corpora():
+    leaked = _pack(["Actor.h"])
+    spans = leaked["source_spans"]
+    assert isinstance(spans, list)
+    spans.append(
+        {
+            "path": "Other.h",
+            "uri": "codalith://ue-5.7.5/source/Other.h#L1-L5",
+            "corpus_id": "ue-5.7.5",
+            "corpus_kind": "engine",
+        }
+    )
+    assert wrong_version_rate(leaked, "5.7.4") == 0.5
 
 
 def test_p95_uses_nearest_rank_definition():

@@ -6,7 +6,8 @@ import pytest
 
 from codalith.compiler.entity_detector import detect_identifiers, detect_modules
 from codalith.compiler.intent_detector import detect_intent
-from codalith.compiler.source_locator import SourcePrior, _uri_for, source_priors
+from codalith.compiler.source_locator import SourcePrior, source_priors
+from codalith.corpus.uris import module_uri, source_uri, symbol_uri
 from codalith.errors import ConfigurationError
 
 
@@ -88,14 +89,12 @@ def test_source_priors_reject_empty_dataset(tmp_path, monkeypatch):
         source_priors.cache_clear()
 
 
-def test_uri_for_covers_engine_project_and_generated_corpora(registry):
-    engine = registry.engines["ue-5.7.4"]
-    project = registry.projects["ProjectA"]
-    generated = registry.generated["generated-ue-5.7.4"]
-
-    assert _uri_for(engine, "A.h", 1, 5) == "ue://5.7.4/source/A.h#L1-L5"
-    assert _uri_for(project, "A.h", 1, 5) == "ue-project://ProjectA/source/A.h#L1-L5"
+def test_corpus_uris_are_scheme_uniform_across_corpus_kinds():
+    assert source_uri("ue-5.7.4", "A.h", 1, 5) == "codalith://ue-5.7.4/source/A.h#L1-L5"
+    assert source_uri("ProjectA", "A.h", 1, 5) == "codalith://ProjectA/source/A.h#L1-L5"
     assert (
-        _uri_for(generated, "Saved/Logs/Editor.log", 1, 5)
-        == "ue-generated://generated-ue-5.7.4/source/Saved/Logs/Editor.log#L1-L5"
+        source_uri("generated-ue-5.7.4", "Saved/Logs/Editor.log", 1, 5)
+        == "codalith://generated-ue-5.7.4/source/Saved/Logs/Editor.log#L1-L5"
     )
+    assert module_uri("ue-5.7.4", "Engine") == "codalith://ue-5.7.4/module/Engine"
+    assert symbol_uri("ue-5.7.4", "AActor") == "codalith://ue-5.7.4/symbol/AActor"

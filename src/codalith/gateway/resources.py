@@ -6,6 +6,7 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from codalith.corpus.registry import CorpusRegistry
+from codalith.corpus.uris import corpus_uri
 from codalith.errors import URIResolutionError
 from codalith.gateway.auth import AuthError
 
@@ -21,7 +22,7 @@ _SAFE_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$")
 def resources(registry: CorpusRegistry) -> list[dict[str, str]]:
     items: list[dict[str, str]] = []
     for corpus in registry.engines.values():
-        base = f"ue://{corpus.version_label}"
+        base = corpus_uri(corpus.corpus_id)
         label = corpus.label
         items.extend(
             [
@@ -60,7 +61,7 @@ def resources(registry: CorpusRegistry) -> list[dict[str, str]]:
     for project_id in registry.projects:
         items.append(
             {
-                "uri": f"ue-project://{project_id}",
+                "uri": corpus_uri(project_id),
                 "name": f"Project overlay {project_id}",
                 "description": "Project overlay corpus summary.",
                 "mimeType": "application/json",
@@ -72,22 +73,22 @@ def resources(registry: CorpusRegistry) -> list[dict[str, str]]:
 def resource_templates() -> list[dict[str, str]]:
     return [
         {
-            "uriTemplate": "ue://{version}/module/{module}",
+            "uriTemplate": "codalith://{corpus}/module/{module}",
             "name": "Module",
             "description": "Version-pinned module within an indexed corpus.",
         },
         {
-            "uriTemplate": "ue://{version}/symbol/{symbol}",
+            "uriTemplate": "codalith://{corpus}/symbol/{symbol}",
             "name": "Symbol",
             "description": "Version-pinned source or reflection symbol.",
         },
         {
-            "uriTemplate": "ue://{version}/source/{path}",
+            "uriTemplate": "codalith://{corpus}/source/{path}",
             "name": "Source file",
             "description": "Version-pinned source file within an indexed corpus.",
         },
         {
-            "uriTemplate": "ue://{version}/card/{card_type}/{card_id}",
+            "uriTemplate": "codalith://{corpus}/card/{card_type}/{card_id}",
             "name": "Knowledge card",
             "description": "Verified source-backed knowledge card.",
         },
@@ -97,8 +98,7 @@ def resource_templates() -> list[dict[str, str]]:
 def read_resource(uri: str, tools: CodalithTools) -> dict[str, Any]:
     registry = tools.runtime.registry
     for corpus in registry.engines.values():
-        version = corpus.version_label
-        base = f"ue://{version}"
+        base = corpus_uri(corpus.corpus_id)
         if uri != base and not uri.startswith(f"{base}/"):
             continue
         tools._require_corpus_access(corpus.corpus_id)
@@ -107,7 +107,7 @@ def read_resource(uri: str, tools: CodalithTools) -> dict[str, Any]:
                 "uri": uri,
                 "corpus_id": corpus.corpus_id,
                 "kind": "engine",
-                "version": version,
+                "version": corpus.version_label,
                 "source_commit": corpus.source_commit,
                 "semantic": _semantic_status(tools, corpus.corpus_id),
             }
@@ -133,7 +133,7 @@ def read_resource(uri: str, tools: CodalithTools) -> dict[str, Any]:
             return _card_resource(tools, corpus, uri, uri.removeprefix(f"{base}/card/"))
         raise URIResolutionError(f"Unknown resource URI: {uri}")
     for project_id, corpus in registry.projects.items():
-        if uri == f"ue-project://{project_id}":
+        if uri == corpus_uri(project_id):
             tools._require_corpus_access(corpus.corpus_id)
             return {
                 "uri": uri,

@@ -10,6 +10,7 @@ from codalith.cards.renderer import render_markdown
 from codalith.cards.schema import CardClaim, CardEvidence, KnowledgeCard
 from codalith.coderag.adapter import CodeRAGAdapter
 from codalith.corpus.uri_resolver import URIResolver
+from codalith.corpus.uris import source_uri
 
 TOPICS: tuple[tuple[str, str, str, str], ...] = (
     ("module-core", "module", "Core Module", "Engine/Source/Runtime/Core/Public/CoreMinimal.h"),
@@ -43,7 +44,7 @@ TOPICS: tuple[tuple[str, str, str, str], ...] = (
 def built_in_cards(*, corpus_id: str = "ue-5.7.4", version: str = "5.7.4") -> list[KnowledgeCard]:
     cards: list[KnowledgeCard] = []
     for card_id, card_type, title, path in TOPICS:
-        evidence_uri = f"ue://{version}/source/{path}#L1-L20"
+        evidence_uri = source_uri(corpus_id, path, 1, 20)
         cards.append(
             KnowledgeCard(
                 corpus_id=corpus_id,

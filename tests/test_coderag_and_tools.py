@@ -445,7 +445,7 @@ def test_configure_native_openai_timeout_patches_provider(monkeypatch):
 
 def test_codalith_read_source_adds_line_numbers_and_audit(tools, tmp_path):
     result = tools.codalith_read_source(
-        uri="ue://5.7.4/source/Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h#L1-L4"
+        uri="codalith://ue-5.7.4/source/Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h#L1-L4"
     )
     assert result["content"].startswith("1|")
     expected_source = (
@@ -474,7 +474,7 @@ def test_codalith_read_source_requires_corpus_scope(tools):
 
     try:
         tools.codalith_read_source(
-            uri="ue://5.7.4/source/Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h#L1-L4"
+            uri="codalith://ue-5.7.4/source/Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h#L1-L4"
         )
     except AuthError as exc:
         assert "ue-5.7.4" in str(exc)
@@ -484,11 +484,17 @@ def test_codalith_read_source_requires_corpus_scope(tools):
 
 def test_codalith_context_returns_context_pack(tools):
     pack = tools.codalith_context(query="UPROPERTY ReplicatedUsing OnRep", version="5.7.4")
-    assert pack["schema_version"] == "0.1"
+    assert pack["schema_version"] == "0.2"
     assert pack["version"] == "5.7.4"
+    assert pack["corpus_id"] == "ue-5.7.4"
     assert pack["source_spans"]
     assert pack["graph_edges"]
     assert any(span["path"].endswith("Actor.h") for span in pack["source_spans"])
+    assert all(
+        span["corpus_kind"] == "engine"
+        for span in pack["source_spans"]
+        if span["source"] != "card-evidence"
+    )
 
 
 def test_ue_graph_returns_semantic_edges(tools):
@@ -514,10 +520,10 @@ def test_project_overlay_context_and_source_read(tools):
     )
 
     assert pack["project"] == "ProjectA"
-    assert any(str(span["uri"]).startswith("ue-project://ProjectA/") for span in pack["source_spans"])
+    assert any(str(span["uri"]).startswith("codalith://ProjectA/") for span in pack["source_spans"])
 
     result = tools.codalith_read_source(
-        uri="ue-project://ProjectA/source/Source/ProjectA/Public/InventoryComponent.h#L1-L8"
+        uri="codalith://ProjectA/source/Source/ProjectA/Public/InventoryComponent.h#L1-L8"
     )
 
     assert result["corpus_id"] == "ProjectA"
@@ -606,7 +612,7 @@ def test_codalith_context_defaults_to_registry_default_engine(tools):
 def test_mcp_resources_list_templates_and_read(tools):
     listed = handle_request({"jsonrpc": "2.0", "id": 1, "method": "resources/list"}, tools)
     assert listed is not None
-    assert any(item["uri"] == "ue://5.7.4/modules" for item in listed["result"]["resources"])
+    assert any(item["uri"] == "codalith://ue-5.7.4/modules" for item in listed["result"]["resources"])
 
     templates = handle_request(
         {"jsonrpc": "2.0", "id": 2, "method": "resources/templates/list"},
@@ -614,7 +620,7 @@ def test_mcp_resources_list_templates_and_read(tools):
     )
     assert templates is not None
     assert any(
-        item["uriTemplate"] == "ue://{version}/symbol/{symbol}"
+        item["uriTemplate"] == "codalith://{corpus}/symbol/{symbol}"
         for item in templates["result"]["resourceTemplates"]
     )
 
@@ -623,7 +629,7 @@ def test_mcp_resources_list_templates_and_read(tools):
             "jsonrpc": "2.0",
             "id": 3,
             "method": "resources/read",
-            "params": {"uri": "ue://5.7.4"},
+            "params": {"uri": "codalith://ue-5.7.4"},
         },
         tools,
     )
@@ -644,18 +650,18 @@ def _read_resource_via_rpc(tools, uri: str) -> dict[str, Any]:
 
 
 def test_mcp_resource_templates_resolve_module_symbol_source_and_card(tools):
-    module = _read_resource_via_rpc(tools, "ue://5.7.4/module/Engine")
+    module = _read_resource_via_rpc(tools, "codalith://ue-5.7.4/module/Engine")
     assert module["kind"] == "module"
     assert module["module"]["module_name"] == "Engine"
     assert module["dependencies"]
 
-    symbol = _read_resource_via_rpc(tools, "ue://5.7.4/symbol/AActor")
+    symbol = _read_resource_via_rpc(tools, "codalith://ue-5.7.4/symbol/AActor")
     assert symbol["kind"] == "symbol"
     assert any(match["name"] == "AActor" for match in symbol["matches"])
 
     source = _read_resource_via_rpc(
         tools,
-        "ue://5.7.4/source/Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h#L1-L4",
+        "codalith://ue-5.7.4/source/Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h#L1-L4",
     )
     assert source["corpus_id"] == "ue-5.7.4"
     assert source["content"]
@@ -664,17 +670,17 @@ def test_mcp_resource_templates_resolve_module_symbol_source_and_card(tools):
     card_file = card_root / "UE_KNOWLEDGE" / "Module" / "module-core.md"
     card_file.parent.mkdir(parents=True, exist_ok=True)
     card_file.write_text("# Core Module\n", encoding="utf-8")
-    card = _read_resource_via_rpc(tools, "ue://5.7.4/card/module/module-core")
+    card = _read_resource_via_rpc(tools, "codalith://ue-5.7.4/card/module/module-core")
     assert card["kind"] == "card"
     assert card["markdown"].startswith("# Core Module")
 
 
 def test_mcp_resource_read_rejects_unknown_and_traversal_uris(tools):
     for uri in (
-        "ue://5.7.4/module/DoesNotExist",
-        "ue://9.9.9",
-        "ue://5.7.4/card/../escape",
-        "ue://5.7.4/card/module/../../escape",
+        "codalith://ue-5.7.4/module/DoesNotExist",
+        "codalith://ue-9.9.9",
+        "codalith://ue-5.7.4/card/../escape",
+        "codalith://ue-5.7.4/card/module/../../escape",
     ):
         response = handle_request(
             {"jsonrpc": "2.0", "id": 1, "method": "resources/read", "params": {"uri": uri}},
@@ -724,7 +730,7 @@ def test_read_source_rate_limit_precedes_file_read(tools):
         SourcePolicy(max_source_reads_per_10min=1),
         time_func=lambda: 100.0,
     )
-    uri = "ue://5.7.4/source/Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h#L1-L4"
+    uri = "codalith://ue-5.7.4/source/Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h#L1-L4"
 
     tools.codalith_read_source(uri=uri)
     assert counting.get_file_calls == 1
@@ -736,20 +742,20 @@ def test_read_source_rate_limit_precedes_file_read(tools):
 
 def test_read_source_fills_default_window_and_validates_ranges(tools):
     result = tools.codalith_read_source(
-        uri="ue://5.7.4/source/Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h"
+        uri="codalith://ue-5.7.4/source/Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h"
     )
     assert result["start_line"] == 1
     assert result["end_line"] == tools.runtime.policy.default_max_lines
 
     with pytest.raises(SourcePolicyError):
         tools.codalith_read_source(
-            uri="ue://5.7.4/source/Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h",
+            uri="codalith://ue-5.7.4/source/Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h",
             start_line=0,
             end_line=4,
         )
     with pytest.raises(SourcePolicyError):
         tools.codalith_read_source(
-            uri="ue://5.7.4/source/Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h",
+            uri="codalith://ue-5.7.4/source/Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h",
             start_line=5,
             end_line=2,
         )

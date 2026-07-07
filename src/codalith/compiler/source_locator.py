@@ -19,6 +19,7 @@ from pathlib import Path
 from codalith.coderag.adapter import RetrievalHit, language_for_path
 from codalith.config import load_config
 from codalith.corpus.registry import Corpus
+from codalith.corpus.uris import source_uri
 from codalith.errors import ConfigurationError
 from codalith.text import normalize, tokenize
 
@@ -144,7 +145,7 @@ def _hit_for_prior(corpus: Corpus, prior: SourcePrior, *, query: str, score: flo
     return RetrievalHit(
         source="source-locator",
         corpus_id=corpus.corpus_id,
-        uri=_uri_for(corpus, prior.path, start, end),
+        uri=source_uri(corpus.corpus_id, prior.path, start, end),
         path=prior.path,
         start_line=start,
         end_line=end,
@@ -179,11 +180,3 @@ def _window(lines: list[str], *, query: str, line_terms: tuple[str, ...]) -> tup
 
 def _root(corpus: Corpus) -> Path:
     return corpus.indexed_root if corpus.indexed_root.exists() else corpus.source_root
-
-
-def _uri_for(corpus: Corpus, path: str, start: int, end: int) -> str:
-    if corpus.kind == "project":
-        return f"ue-project://{corpus.corpus_id}/source/{path}#L{start}-L{end}"
-    if corpus.kind == "generated":
-        return f"ue-generated://{corpus.corpus_id}/source/{path}#L{start}-L{end}"
-    return f"ue://{corpus.version_label}/source/{path}#L{start}-L{end}"

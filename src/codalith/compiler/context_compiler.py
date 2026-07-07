@@ -15,6 +15,7 @@ from codalith.compiler.intent_detector import detect_intent
 from codalith.compiler.reranker import rerank
 from codalith.compiler.source_locator import locate_source_priors
 from codalith.corpus.registry import CorpusRegistry
+from codalith.corpus.uris import SCHEME, module_uri, symbol_uri
 from codalith.semantic.graph import query_graph
 
 
@@ -76,8 +77,10 @@ class ContextCompiler:
             max_hits=max_source_spans,
             mode=intent,
         )
-        inferred_modules = _module_entries(resolved_version, modules, hits)
-        source_spans = self._enriched_source_spans(hits)
+        engine_corpus_id = resolution.engine.corpus_id
+        corpus_kinds = {corpus.corpus_id: corpus.kind for corpus in resolution.ordered}
+        inferred_modules = _module_entries(engine_corpus_id, modules, hits)
+        source_spans = self._enriched_source_spans(hits, corpus_kinds)
         source_spans.extend(self._card_evidence_spans(hits))
         # Card evidence must not let the pack exceed the caller's span budget.
         source_spans = source_spans[:max_source_spans]
@@ -99,6 +102,7 @@ class ContextCompiler:
         return ContextPack(
             query=query,
             version=resolved_version,
+            corpus_id=engine_corpus_id,
             source_commit=resolution.engine.source_commit,
             project=project,
             intent=intent,
@@ -108,7 +112,7 @@ class ContextCompiler:
             ),
             modules=inferred_modules,
             symbols=self._symbol_entries(
-                [corpus.corpus_id for corpus in resolution.ordered], identifiers, resolved_version
+                [corpus.corpus_id for corpus in resolution.ordered], identifiers, engine_corpus_id
             ),
             cards=cards,
             source_spans=source_spans,
@@ -149,10 +153,15 @@ class ContextCompiler:
                         return list(edges.values())
         return list(edges.values())
 
-    def _enriched_source_spans(self, hits: list[RetrievalHit]) -> list[dict[str, object]]:
+    def _enriched_source_spans(
+        self,
+        hits: list[RetrievalHit],
+        corpus_kinds: dict[str, str],
+    ) -> list[dict[str, object]]:
         spans = hits_to_source_spans(hits)
         for span in spans:
             corpus_id = str(span.get("corpus_id", ""))
+            span["corpus_kind"] = corpus_kinds.get(corpus_id)
             path = str(span.get("path", ""))
             raw_start = span.get("start_line", 0)
             raw_end = span.get("end_line", raw_start)
@@ -198,7 +207,7 @@ class ContextCompiler:
                 parsed = _parse_source_uri(uri)
                 if parsed is None:
                     continue
-                version, path, start, end = parsed
+                corpus_id, path, start, end = parsed
                 span: dict[str, object] = {
                     "uri": uri,
                     "path": path,
@@ -209,30 +218,34 @@ class ContextCompiler:
                     "language": language_for_path(path),
                     "guard": None,
                 }
-                span.update(self._card_evidence_provenance(version, path, start, end))
+                span.update(self._card_evidence_provenance(corpus_id, path, start, end))
                 spans.append(span)
         return spans
 
     def _card_evidence_provenance(
         self,
-        version: str,
+        corpus_id: str,
         path: str,
         start: int,
         end: int,
     ) -> dict[str, object]:
         try:
-            corpus = self.registry.get_engine(version)
+            corpus = self.registry.get_corpus(corpus_id)
             snippet = self.adapter.get_file(corpus.corpus_id, path, start, end)
         except Exception:
             # Evidence pointing at an unavailable corpus stays cited but unhashed.
-            return {"corpus_id": None, "source_hash": None}
-        return {"corpus_id": corpus.corpus_id, "source_hash": source_sha256(snippet)}
+            return {"corpus_id": None, "corpus_kind": None, "source_hash": None}
+        return {
+            "corpus_id": corpus.corpus_id,
+            "corpus_kind": corpus.kind,
+            "source_hash": source_sha256(snippet),
+        }
 
     def _symbol_entries(
         self,
         corpus_ids: list[str],
         identifiers: list[str],
-        version: str,
+        engine_corpus_id: str,
     ) -> list[dict[str, object]]:
         entries: list[dict[str, object]] = []
         seen: set[tuple[str, str, str | None]] = set()
@@ -251,7 +264,8 @@ class ContextCompiler:
                                 "qualified_name": row.get("qualified_name"),
                                 "kind": row["kind"],
                                 "module": row.get("module_name"),
-                                "uri": row.get("declaration_uri") or f"ue://{version}/symbol/{identifier}",
+                                "uri": row.get("declaration_uri")
+                                or symbol_uri(engine_corpus_id, identifier),
                                 "reason": "Resolved from semantic symbol table.",
                             }
                         )
@@ -260,7 +274,7 @@ class ContextCompiler:
                 entries.append(
                     {
                         "name": identifier,
-                        "uri": f"ue://{version}/symbol/{identifier}",
+                        "uri": symbol_uri(engine_corpus_id, identifier),
                         "kind": "symbol",
                         "reason": "Identifier detected in the user query.",
                     }
@@ -280,7 +294,7 @@ def _unique_hits(hits: list[RetrievalHit]) -> list[RetrievalHit]:
 
 
 def _module_entries(
-    version: str,
+    engine_corpus_id: str,
     detected_modules: list[str],
     hits: list[RetrievalHit],
 ) -> list[dict[str, str]]:
@@ -288,7 +302,7 @@ def _module_entries(
     return [
         {
             "name": name,
-            "uri": f"ue://{version}/module/{name}",
+            "uri": module_uri(engine_corpus_id, name),
             "reason": "Detected from query or source path.",
         }
         for name in names
@@ -304,18 +318,18 @@ def _confidence(hits: list[RetrievalHit]) -> str:
 
 
 def _extract_evidence_uris(text: str) -> list[str]:
-    return re.findall(r"ue://[^\s)]+", text)
+    return re.findall(rf"{SCHEME}://[^\s)]+", text)
 
 
 def _parse_source_uri(uri: str) -> tuple[str, str, int, int] | None:
     match = re.match(
-        r"ue://(?P<version>[^/]+)/source/(?P<path>[^#]+)#L(?P<start>\d+)-L(?P<end>\d+)",
+        rf"{SCHEME}://(?P<corpus_id>[^/]+)/source/(?P<path>[^#]+)#L(?P<start>\d+)-L(?P<end>\d+)",
         uri,
     )
     if not match:
         return None
     return (
-        match.group("version"),
+        match.group("corpus_id"),
         match.group("path"),
         int(match.group("start")),
         int(match.group("end")),

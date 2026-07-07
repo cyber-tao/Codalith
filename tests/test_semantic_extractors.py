@@ -20,7 +20,7 @@ def test_build_cs_extractor_outputs_dependencies():
     deps = BuildCsExtractor().extract_text(text, module_name="GameplayAbilities")
     assert {dep.to_module for dep in deps} == {"Core", "CoreUObject", "Engine", "Renderer"}
     store = SemanticStore()
-    write_module_deps(store, corpus_id="ue-5.7.4", evidence_uri="ue://5.7.4/source/X#L1-L3", dependencies=deps)
+    write_module_deps(store, corpus_id="ue-5.7.4", evidence_uri="codalith://ue-5.7.4/source/X#L1-L3", dependencies=deps)
     rows = store.list_module_deps("ue-5.7.4", "GameplayAbilities")
     assert len(rows) == 4
     graph = query_graph(store, corpus_id="ue-5.7.4", node="GameplayAbilities")
@@ -84,7 +84,7 @@ def test_upsert_compile_guard_supports_deferred_commit(tmp_path):
         corpus_id="ue-5.7.4",
         path="A.h",
         guard=guard,
-        evidence_uri="ue://5.7.4/source/A.h#L1-L2",
+        evidence_uri="codalith://ue-5.7.4/source/A.h#L1-L2",
         commit=False,
     )
     store.close()  # Uncommitted work must be discarded on close.
@@ -95,7 +95,7 @@ def test_upsert_compile_guard_supports_deferred_commit(tmp_path):
         corpus_id="ue-5.7.4",
         path="A.h",
         guard=guard,
-        evidence_uri="ue://5.7.4/source/A.h#L1-L2",
+        evidence_uri="codalith://ue-5.7.4/source/A.h#L1-L2",
         commit=False,
     )
     store.commit()
@@ -163,7 +163,6 @@ def test_semantic_summary_can_populate_graph_store(fake_engine_root, tmp_path):
     summary = extract_semantic_summary(
         fake_engine_root,
         corpus_id="ue-5.7.4",
-        version="5.7.4",
         store=store,
     )
 

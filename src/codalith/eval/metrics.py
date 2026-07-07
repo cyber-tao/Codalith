@@ -58,20 +58,26 @@ def missing_source_citation_rate(pack: dict[str, Any]) -> float:
 def wrong_version_rate(pack: dict[str, Any], expected_version: str) -> float:
     """Fraction of spans not anchored to the expected version.
 
-    Mirrors missing_source_citation_rate for empty packs: no spans means the
-    pack cannot demonstrate version anchoring, so it counts as 1.0.
+    Engine-corpus spans must come from the pack's own engine corpus, and the
+    pack itself must have resolved to the expected version. Project and
+    generated overlay spans are not version-anchored to the engine, so they
+    never count as wrong. Mirrors missing_source_citation_rate for empty
+    packs: no spans means the pack cannot demonstrate version anchoring, so
+    it counts as 1.0.
     """
     spans = pack.get("source_spans", [])
     if not spans:
         return 1.0
+    pack_version = str(pack.get("version", ""))
+    engine_corpus_id = str(pack.get("corpus_id", ""))
     wrong = 0
-    expected_prefix = f"ue://{expected_version}/"
     for span in spans:
         if not isinstance(span, dict):
             wrong += 1
             continue
-        uri = str(span.get("uri", ""))
-        if uri.startswith("ue://") and not uri.startswith(expected_prefix):
+        if str(span.get("corpus_kind") or "") != "engine":
+            continue
+        if pack_version != expected_version or str(span.get("corpus_id", "")) != engine_corpus_id:
             wrong += 1
     return wrong / len(spans)
 

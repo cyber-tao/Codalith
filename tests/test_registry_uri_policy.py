@@ -27,7 +27,7 @@ def test_registry_resolves_generated_overlay_only_when_requested(registry):
 
 def test_uri_resolver_parses_source_uri(registry):
     resolved = URIResolver(registry).resolve_source(
-        "ue://5.7.4/source/Engine/Source/Runtime/Core/Public/CoreMinimal.h#L2-L4"
+        "codalith://ue-5.7.4/source/Engine/Source/Runtime/Core/Public/CoreMinimal.h#L2-L4"
     )
     assert resolved.corpus_id == "ue-5.7.4"
     assert resolved.relative_path.endswith("CoreMinimal.h")
@@ -37,7 +37,7 @@ def test_uri_resolver_parses_source_uri(registry):
 
 def test_uri_resolver_parses_generated_source_uri(registry):
     resolved = URIResolver(registry).resolve_source(
-        "ue-generated://generated-ue-5.7.4/source/Saved/Logs/Editor.log#L1-L2"
+        "codalith://generated-ue-5.7.4/source/Saved/Logs/Editor.log#L1-L2"
     )
 
     assert resolved.corpus_id == "generated-ue-5.7.4"
@@ -45,24 +45,44 @@ def test_uri_resolver_parses_generated_source_uri(registry):
     assert resolved.relative_path == "Saved/Logs/Editor.log"
 
 
+def test_uri_resolver_accepts_engine_version_alias_authority(registry):
+    resolved = URIResolver(registry).resolve_source(
+        "codalith://5.7.4/source/Engine/Source/Runtime/Core/Public/CoreMinimal.h#L2-L4"
+    )
+    assert resolved.corpus_id == "ue-5.7.4"
+
+
+def test_uri_resolver_resolves_project_corpus(registry):
+    resolved = URIResolver(registry).resolve_source(
+        "codalith://ProjectA/source/Source/ProjectA/Public/InventoryComponent.h#L1-L3"
+    )
+    assert resolved.corpus_id == "ProjectA"
+    assert resolved.source_kind == "project"
+
+
 def test_uri_resolver_rejects_bad_scheme(registry):
     with pytest.raises(URIResolutionError):
         URIResolver(registry).resolve_source("file:///etc/passwd")
+
+
+def test_uri_resolver_rejects_unknown_corpus(registry):
+    with pytest.raises(URIResolutionError):
+        URIResolver(registry).resolve_source("codalith://nope/source/A.h#L1-L2")
 
 
 def test_source_policy_enforces_limits_and_scope(registry, policy_path):
     resolver = URIResolver(registry)
     policy = SourcePolicy.from_file(str(policy_path))
     ok = resolver.resolve_source(
-        "ue://5.7.4/source/Engine/Source/Runtime/Core/Public/CoreMinimal.h#L1-L5"
+        "codalith://ue-5.7.4/source/Engine/Source/Runtime/Core/Public/CoreMinimal.h#L1-L5"
     )
     policy.check(ok, {"source:read"})
     within_hard_max = resolver.resolve_source(
-        "ue://5.7.4/source/Engine/Source/Runtime/Core/Public/CoreMinimal.h#L1-L21"
+        "codalith://ue-5.7.4/source/Engine/Source/Runtime/Core/Public/CoreMinimal.h#L1-L21"
     )
     policy.check(within_hard_max, {"source:read"})
     too_large = resolver.resolve_source(
-        "ue://5.7.4/source/Engine/Source/Runtime/Core/Public/CoreMinimal.h#L1-L26"
+        "codalith://ue-5.7.4/source/Engine/Source/Runtime/Core/Public/CoreMinimal.h#L1-L26"
     )
     with pytest.raises(SourcePolicyError):
         policy.check(too_large, {"source:read"})

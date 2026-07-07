@@ -100,6 +100,16 @@ class CorpusRegistry:
         }
         return cls(engines=engines, projects=projects, generated=generated)
 
+    def get_corpus(self, corpus_id: str) -> Corpus:
+        """Resolve a corpus id (or an engine version label) to its corpus."""
+        for collection in (self.engines, self.projects, self.generated):
+            if corpus_id in collection:
+                return collection[corpus_id]
+        for corpus in self.engines.values():
+            if corpus.version == corpus_id:
+                return corpus
+        raise CorpusNotFoundError(f"Unknown corpus: {corpus_id}")
+
     def get_engine(self, version: str | None = None) -> Corpus:
         if version:
             if version in self.engines:

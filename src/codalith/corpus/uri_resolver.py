@@ -1,13 +1,14 @@
-"""External UE URI resolver."""
+"""Resolve external codalith:// source URIs against the corpus registry."""
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from urllib.parse import ParseResult, unquote, urlparse
+from urllib.parse import unquote, urlparse
 
 from codalith.corpus.registry import CorpusRegistry
-from codalith.errors import URIResolutionError
+from codalith.corpus.uris import SCHEME
+from codalith.errors import CorpusNotFoundError, URIResolutionError
 
 _LINE_RE = re.compile(r"^L(?P<start>[1-9]\d*)(?:-L?(?P<end>[1-9]\d*))?$")
 
@@ -35,61 +36,20 @@ class URIResolver:
 
     def resolve_source(self, uri: str) -> ResolvedURI:
         parsed = urlparse(uri)
-        if parsed.scheme == "ue":
-            return self._resolve_engine(parsed, uri)
-        if parsed.scheme == "ue-project":
-            return self._resolve_project(parsed, uri)
-        if parsed.scheme == "ue-generated":
-            return self._resolve_generated(parsed, uri)
-        raise URIResolutionError(f"Unsupported URI scheme: {parsed.scheme or '<empty>'}")
-
-    def _resolve_engine(self, parsed: ParseResult, uri: str) -> ResolvedURI:
-        netloc = parsed.netloc
-        path = parsed.path
-        fragment = parsed.fragment
-        version = netloc.removeprefix("ue-")
-        corpus = self.registry.get_engine(version)
-        relative_path = self._source_path(path)
-        start_line, end_line = self._line_fragment(fragment)
-        return ResolvedURI(
-            uri=uri,
-            scheme="ue",
-            corpus_id=corpus.corpus_id,
-            relative_path=relative_path,
-            source_kind="engine",
-            start_line=start_line,
-            end_line=end_line,
-        )
-
-    def _resolve_project(self, parsed: ParseResult, uri: str) -> ResolvedURI:
-        project = parsed.netloc
-        path = parsed.path
-        fragment = parsed.fragment
-        corpus = self.registry.get_project(project)
-        relative_path = self._source_path(path)
-        start_line, end_line = self._line_fragment(fragment)
-        return ResolvedURI(
-            uri=uri,
-            scheme="ue-project",
-            corpus_id=corpus.corpus_id,
-            relative_path=relative_path,
-            source_kind="project",
-            start_line=start_line,
-            end_line=end_line,
-        )
-
-    def _resolve_generated(self, parsed: ParseResult, uri: str) -> ResolvedURI:
-        corpus_id = parsed.netloc
-        if corpus_id not in self.registry.generated:
-            raise URIResolutionError(f"Unknown generated corpus: {corpus_id}")
+        if parsed.scheme != SCHEME:
+            raise URIResolutionError(f"Unsupported URI scheme: {parsed.scheme or '<empty>'}")
+        try:
+            corpus = self.registry.get_corpus(parsed.netloc)
+        except CorpusNotFoundError as exc:
+            raise URIResolutionError(str(exc)) from exc
         relative_path = self._source_path(parsed.path)
         start_line, end_line = self._line_fragment(parsed.fragment)
         return ResolvedURI(
             uri=uri,
-            scheme="ue-generated",
-            corpus_id=corpus_id,
+            scheme=SCHEME,
+            corpus_id=corpus.corpus_id,
             relative_path=relative_path,
-            source_kind="generated",
+            source_kind=corpus.kind,
             start_line=start_line,
             end_line=end_line,
         )
