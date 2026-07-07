@@ -13,7 +13,9 @@ if TYPE_CHECKING:
     from codalith.corpus.registry import Corpus
     from codalith.gateway.tools import CodalithTools
 
-_SAFE_SEGMENT_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+# Dots may separate name parts but cannot lead, trail, or repeat, so path
+# segments like ".." can never escape the card root.
+_SAFE_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$")
 
 
 def resources(registry: CorpusRegistry) -> list[dict[str, str]]:

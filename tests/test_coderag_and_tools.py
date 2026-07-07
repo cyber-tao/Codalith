@@ -6,6 +6,9 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from typing import Any
+
+import pytest
 
 from codalith.coderag.adapter import (
     _configure_native_batch_embedding,
@@ -15,8 +18,11 @@ from codalith.coderag.adapter import (
     _native_store_dir,
     _policy_content_hash,
 )
+from codalith.corpus.source_policy import SourcePolicy, SourceReadRateLimiter
+from codalith.errors import SourcePolicyError
 from codalith.gateway.auth import AuthContext, AuthError
 from codalith.gateway.mcp_server import handle_request
+from codalith.gateway.tools import call_tool
 
 
 @dataclass(frozen=True, slots=True)
@@ -562,3 +568,140 @@ def test_mcp_resources_list_templates_and_read(tools):
     assert read is not None
     content = json.loads(read["result"]["contents"][0]["text"])
     assert content["semantic"]["graph_edges"] > 0
+
+
+def _read_resource_via_rpc(tools, uri: str) -> dict[str, Any]:
+    response = handle_request(
+        {"jsonrpc": "2.0", "id": 1, "method": "resources/read", "params": {"uri": uri}},
+        tools,
+    )
+    assert response is not None
+    if "error" in response:
+        raise AssertionError(response["error"]["message"])
+    return json.loads(response["result"]["contents"][0]["text"])
+
+
+def test_mcp_resource_templates_resolve_module_symbol_source_and_card(tools):
+    module = _read_resource_via_rpc(tools, "ue://5.7.4/module/Engine")
+    assert module["kind"] == "module"
+    assert module["module"]["module_name"] == "Engine"
+    assert module["dependencies"]
+
+    symbol = _read_resource_via_rpc(tools, "ue://5.7.4/symbol/AActor")
+    assert symbol["kind"] == "symbol"
+    assert any(match["name"] == "AActor" for match in symbol["matches"])
+
+    source = _read_resource_via_rpc(
+        tools,
+        "ue://5.7.4/source/Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h#L1-L4",
+    )
+    assert source["corpus_id"] == "ue-5.7.4"
+    assert source["content"]
+
+    card_root = tools.runtime.registry.engines["ue-5.7.4"].card_root
+    card_file = card_root / "UE_KNOWLEDGE" / "Module" / "module-core.md"
+    card_file.parent.mkdir(parents=True, exist_ok=True)
+    card_file.write_text("# Core Module\n", encoding="utf-8")
+    card = _read_resource_via_rpc(tools, "ue://5.7.4/card/module/module-core")
+    assert card["kind"] == "card"
+    assert card["markdown"].startswith("# Core Module")
+
+
+def test_mcp_resource_read_rejects_unknown_and_traversal_uris(tools):
+    for uri in (
+        "ue://5.7.4/module/DoesNotExist",
+        "ue://9.9.9",
+        "ue://5.7.4/card/../escape",
+        "ue://5.7.4/card/module/../../escape",
+    ):
+        response = handle_request(
+            {"jsonrpc": "2.0", "id": 1, "method": "resources/read", "params": {"uri": uri}},
+            tools,
+        )
+        assert response is not None
+        assert "error" in response, uri
+
+
+def test_call_tool_rejects_unknown_tools_and_invalid_arguments(tools):
+    with pytest.raises(ValueError, match="Unknown tool"):
+        call_tool(tools, "_scopes", {})
+    with pytest.raises(ValueError, match="missing required"):
+        call_tool(tools, "codalith_context", {})
+    with pytest.raises(ValueError, match="unexpected argument"):
+        call_tool(tools, "codalith_context", {"query": "AActor", "bogus": True})
+    with pytest.raises(ValueError, match="diff_type"):
+        call_tool(
+            tools,
+            "codalith_compare_versions",
+            {
+                "target": "AActor",
+                "from_version": "5.7.4",
+                "to_version": "5.7.5",
+                "diff_type": "summary",
+            },
+        )
+
+
+class _CountingAdapter:
+    def __init__(self, inner) -> None:
+        self._inner = inner
+        self.get_file_calls = 0
+
+    def __getattr__(self, name: str):
+        return getattr(self._inner, name)
+
+    def get_file(self, *args, **kwargs):
+        self.get_file_calls += 1
+        return self._inner.get_file(*args, **kwargs)
+
+
+def test_read_source_rate_limit_precedes_file_read(tools):
+    counting = _CountingAdapter(tools.runtime.adapter)
+    tools.runtime.adapter = counting
+    tools.runtime.rate_limiter = SourceReadRateLimiter(
+        SourcePolicy(max_source_reads_per_10min=1),
+        time_func=lambda: 100.0,
+    )
+    uri = "ue://5.7.4/source/Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h#L1-L4"
+
+    tools.codalith_read_source(uri=uri)
+    assert counting.get_file_calls == 1
+
+    with pytest.raises(SourcePolicyError):
+        tools.codalith_read_source(uri=uri)
+    assert counting.get_file_calls == 1
+
+
+def test_read_source_fills_default_window_and_validates_ranges(tools):
+    result = tools.codalith_read_source(
+        uri="ue://5.7.4/source/Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h"
+    )
+    assert result["start_line"] == 1
+    assert result["end_line"] == tools.runtime.policy.default_max_lines
+
+    with pytest.raises(SourcePolicyError):
+        tools.codalith_read_source(
+            uri="ue://5.7.4/source/Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h",
+            start_line=0,
+            end_line=4,
+        )
+    with pytest.raises(SourcePolicyError):
+        tools.codalith_read_source(
+            uri="ue://5.7.4/source/Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h",
+            start_line=5,
+            end_line=2,
+        )
+
+
+def test_lookup_symbol_omits_graph_without_scope(tools):
+    tools.runtime.identity = AuthContext(
+        user_id="test-user",
+        session_id="test-session",
+        client="pytest",
+        scopes=frozenset({"source:read", "ue:5.7", "project:ProjectA"}),
+    )
+
+    result = tools.codalith_lookup_symbol(symbol="AActor", version="5.7.4")
+
+    assert "graph" not in result
+    assert any("graph:read" in warning for warning in result["warnings"])

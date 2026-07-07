@@ -46,6 +46,63 @@ def test_uht_reflection_extractor_detects_replicated_using():
     assert any(entity.kind == "ufunction" and entity.name == "OnRep_Health" for entity in entities)
 
 
+def test_uht_reflection_extractor_parses_nested_meta_and_skips_control_flow():
+    text = """
+    #include "Thing.generated.h"
+    UCLASS()
+    class AThing : public AActor {
+    GENERATED_BODY()
+    UPROPERTY(EditAnywhere, ReplicatedUsing=OnRep_Health,
+        meta=(ClampMin="0", ClampMax="100", AllowedClasses=(AActor, APawn)))
+    int32 Health;
+    void Helper() {
+      if (Health > 0) { Health = 0; }
+      for (int32 Index = 0; Index < 3; ++Index) {}
+    }
+    UFUNCTION(BlueprintCallable, meta=(ToolTip="Runs (once)"))
+    void DoThing();
+    };
+    """
+    entities = UHTReflectionExtractor().extract_text(text, module_name="Engine")
+
+    prop = next(entity for entity in entities if entity.kind == "uproperty")
+    assert prop.name == "Health"
+    assert prop.metadata["rep_notify"] == "OnRep_Health"
+    assert "ClampMax=\"100\"" in str(prop.specifiers["meta"])
+    assert "AllowedClasses=(AActor, APawn)" in str(prop.specifiers["meta"])
+
+    functions = [entity.name for entity in entities if entity.kind == "ufunction"]
+    assert functions == ["DoThing"]
+
+
+def test_upsert_compile_guard_supports_deferred_commit(tmp_path):
+    db_path = tmp_path / "semantic.sqlite"
+    guard = extract_compile_guards("#if WITH_EDITOR\n#endif\n")[0]
+
+    store = SemanticStore(db_path)
+    store.upsert_compile_guard(
+        corpus_id="ue-5.7.4",
+        path="A.h",
+        guard=guard,
+        evidence_uri="ue://5.7.4/source/A.h#L1-L2",
+        commit=False,
+    )
+    store.close()  # Uncommitted work must be discarded on close.
+    assert SemanticStore(db_path).semantic_status("ue-5.7.4")["compile_guards"] == 0
+
+    store = SemanticStore(db_path)
+    store.upsert_compile_guard(
+        corpus_id="ue-5.7.4",
+        path="A.h",
+        guard=guard,
+        evidence_uri="ue://5.7.4/source/A.h#L1-L2",
+        commit=False,
+    )
+    store.commit()
+    store.close()
+    assert SemanticStore(db_path).semantic_status("ue-5.7.4")["compile_guards"] == 1
+
+
 def test_uht_reflection_extractor_detects_enum_interface_and_generated_macro():
     text = """
     #include "Thing.generated.h"

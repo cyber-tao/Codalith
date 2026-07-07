@@ -79,6 +79,14 @@ def test_streamable_http_post_get_session_and_origin(tools):
         )
         assert missing_session.status == 400
 
+        invalid_session, _ = _post(
+            host,
+            port,
+            {"jsonrpc": "2.0", "id": 5, "method": "tools/list"},
+            session_id="not-a-registered-session",
+        )
+        assert invalid_session.status == 400
+
         get_response, get_body = _get(host, port, session_id=session_id)
         assert get_response.status == 200
         assert get_response.getheader("Content-Type", "").startswith("text/event-stream")

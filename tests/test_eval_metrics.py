@@ -1,0 +1,57 @@
+from __future__ import annotations
+
+from codalith.eval.common import p95
+from codalith.eval.metrics import (
+    file_recall_at_k,
+    missing_source_citation_rate,
+    wrong_version_rate,
+)
+
+
+def _pack(paths: list[str]) -> dict[str, object]:
+    return {
+        "source_spans": [
+            {"path": path, "uri": f"ue://5.7.4/source/{path}#L1-L5"} for path in paths
+        ]
+    }
+
+
+def test_file_recall_requires_segment_aligned_suffix():
+    pack = _pack(["Engine/Source/Runtime/Engine/Classes/GameFramework/MyActor.h"])
+    assert file_recall_at_k(pack, ["Actor.h"]) == 0.0
+
+    pack = _pack(["Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h"])
+    assert file_recall_at_k(pack, ["Actor.h"]) == 1.0
+    assert file_recall_at_k(pack, ["GameFramework/Actor.h"]) == 1.0
+    assert file_recall_at_k(pack, ["Framework/Actor.h"]) == 0.0
+
+
+def test_file_recall_normalizes_backslashes_and_k_window():
+    pack = _pack(["A.h", "B.h", "C.h"])
+    assert file_recall_at_k(pack, ["C.h"], k=2) == 0.0
+    assert file_recall_at_k({"source_spans": [{"path": "Sub\\Dir\\D.h"}]}, ["Dir/D.h"]) == 1.0
+
+
+def test_empty_packs_count_as_worst_case_for_citation_and_version():
+    assert missing_source_citation_rate({}) == 1.0
+    assert wrong_version_rate({}, "5.7.4") == 1.0
+
+
+def test_citation_and_version_rates_on_populated_packs():
+    good = _pack(["Actor.h"])
+    assert missing_source_citation_rate(good) == 0.0
+    assert wrong_version_rate(good, "5.7.4") == 0.0
+    assert wrong_version_rate(good, "5.7.5") == 1.0
+
+    uncited = {"source_spans": [{"path": "Actor.h"}]}
+    assert missing_source_citation_rate(uncited) == 1.0
+
+    project_span = {"source_spans": [{"path": "A.h", "uri": "ue-project://ProjectA/source/A.h#L1-L2"}]}
+    assert wrong_version_rate(project_span, "5.7.4") == 0.0
+
+
+def test_p95_uses_nearest_rank_definition():
+    assert p95([]) == 0.0
+    assert p95([5.0]) == 5.0
+    assert p95([1.0, 2.0, 3.0, 4.0]) == 4.0
+    assert p95([float(value) for value in range(1, 101)]) == 95.0
