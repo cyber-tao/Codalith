@@ -111,9 +111,11 @@ def test_eval_runner_generates_json_and_markdown(registry, adapter, tmp_path):
     assert Path(md_path).read_text(encoding="utf-8").startswith("# Codalith Eval Report")
 
 
-def test_source_locator_covers_seed_eval_dataset(registry, adapter):
+def test_source_locator_covers_eval_suite_dataset(
+    registry, adapter, eval_suite_dataset_path, seeded_eval_sources
+):
     compiler = ContextCompiler(registry, adapter)
-    dataset = Path(__file__).parents[1] / "eval" / "datasets" / "ue50.jsonl"
-    report = EvalRunner(compiler).run(dataset)
+    report = EvalRunner(compiler).run(eval_suite_dataset_path)
+    assert report.count == 80
     assert report.file_recall_at_5 == 1.0
     assert report.module_accuracy == 1.0

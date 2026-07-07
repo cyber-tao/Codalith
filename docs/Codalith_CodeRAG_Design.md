@@ -549,13 +549,7 @@ codalith/
         runner.py
         metrics.py
         datasets/
-          ue50.jsonl
-          ue_core.jsonl
-          ue_reflection.jsonl
-          ue_build.jsonl
-          ue_networking.jsonl
-          ue_rendering.jsonl
-          ue_project_overlay.jsonl
+          ue_eval_suite.jsonl
 
   jobs/
     index_engine.py
@@ -1798,12 +1792,9 @@ python jobs/generate_cards.py \
 python jobs/verify_cards.py \
   --version 5.7.4
 
-python jobs/publish_corpus.py \
-  --version 5.7.4
-
-python jobs/run_eval.py \
+python -m codalith.eval.runner \
   --version 5.7.4 \
-  --dataset eval/datasets/ue50.jsonl
+  --dataset eval/datasets/ue_eval_suite.jsonl
 ```
 
 ---
@@ -2101,7 +2092,7 @@ Layer 4: Agent answer eval
   - editor/runtime distinction
 ```
 
-### 25.2 ue50 数据集示例
+### 25.2 UE Eval Suite（`ue_eval_suite.jsonl`）数据集示例
 
 ```json
 {
@@ -2634,7 +2625,7 @@ related nodes exist
 读取：
 
 ```text
-eval/datasets/ue50.jsonl
+eval/datasets/ue_eval_suite.jsonl
 ```
 
 输出：
@@ -2715,7 +2706,7 @@ latency
 
 ---
 
-## 附录 A：第一版 ue50 问题清单
+## 附录 A：第一版 ue50 问题清单（历史稿，现已并入 `eval/datasets/ue_eval_suite.jsonl`）
 
 ```text
 Core / CoreUObject
@@ -2810,7 +2801,7 @@ src/codalith/semantic/extractors/build_cs.py
 src/codalith/semantic/extractors/uht_reflection.py
 src/codalith/cards/schema.py
 src/codalith/cards/verifier.py
-eval/datasets/ue50.jsonl
+eval/datasets/ue_eval_suite.jsonl
 ```
 
 ---
@@ -2826,7 +2817,7 @@ eval/datasets/ue50.jsonl
 4. codalith_read_source 可以按 ue:// URI 读取受限源码范围。
 5. SourcePolicy 生效，所有 source read 有 audit。
 6. 20 张 verified Knowledge Cards 写入 UE_KNOWLEDGE，并被 CodeRAG 检索。
-7. ue50 eval 能生成报告。
+7. UE Eval Suite eval 能生成报告。
 8. Claude Code / Codex / Cursor 至少一个客户端能完成端到端查询。
 ```
 

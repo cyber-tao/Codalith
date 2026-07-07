@@ -297,6 +297,8 @@
         "module dependencies",
         "publicdependency",
         "privatedependency",
+        "publicdependencymodulenames",
+        "privatedependencymodulenames",
         "public dependencies",
         "private dependencies",
         "dynamically loaded",

@@ -17,6 +17,65 @@ from codalith.gateway.auth import AuthContext
 from codalith.gateway.tools import CodalithTools, ToolRuntime
 from codalith.semantic.store import SemanticStore
 
+EVAL_SUITE_DATASET = Path(__file__).parents[1] / "eval" / "datasets" / "ue_eval_suite.jsonl"
+
+# Files referenced by eval-suite rows that are not named in any verified_sources entry.
+_EXTRA_EXPECTED_SOURCE_PATHS = {
+    "ActorComponent.cpp": "Engine/Source/Runtime/Engine/Private/Components/ActorComponent.cpp",
+    "LevelActor.cpp": "Engine/Source/Runtime/Engine/Private/LevelActor.cpp",
+    "DataReplication.cpp": "Engine/Source/Runtime/Engine/Private/DataReplication.cpp",
+    "NetConnection.cpp": "Engine/Source/Runtime/Engine/Private/NetConnection.cpp",
+}
+
+
+@pytest.fixture()
+def eval_suite_rows() -> list[dict[str, Any]]:
+    return [
+        json.loads(line)
+        for line in EVAL_SUITE_DATASET.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+@pytest.fixture()
+def eval_suite_dataset_path() -> Path:
+    return EVAL_SUITE_DATASET
+
+
+@pytest.fixture()
+def seeded_eval_sources(fake_engine_root: Path, eval_suite_rows: list[dict[str, Any]]) -> Path:
+    """Seed fixture files for eval-suite sources missing from the base engine tree.
+
+    Each seeded file only contains the query text of the rows that reference it, so
+    files stay relevant to their own questions instead of matching every query.
+    """
+    file_paths: dict[str, str] = {}
+    file_texts: dict[str, list[str]] = {}
+    for row in eval_suite_rows:
+        row_files: set[str] = set()
+        for source in row.get("verified_sources", []):
+            relative, _line = str(source).rsplit(":", 1)
+            name = Path(relative).name
+            file_paths[name] = relative
+            row_files.add(name)
+        for expected in row.get("expected_files", []):
+            name = Path(str(expected)).name
+            if name not in file_paths and name in _EXTRA_EXPECTED_SOURCE_PATHS:
+                file_paths[name] = _EXTRA_EXPECTED_SOURCE_PATHS[name]
+            if name in file_paths:
+                row_files.add(name)
+        for name in row_files:
+            file_texts.setdefault(name, []).append(str(row.get("query", "")))
+
+    for name, relative in file_paths.items():
+        path = fake_engine_root / relative
+        if path.exists():
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        body = "\n".join(file_texts.get(name, []))
+        path.write_text(f"{name}\n{body}\n", encoding="utf-8")
+    return fake_engine_root
+
 
 @pytest.fixture()
 def fake_engine_root(tmp_path: Path) -> Path:
