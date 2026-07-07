@@ -16,8 +16,8 @@ from codalith.corpus.uri_resolver import ResolvedURI, URIResolver
 from codalith.errors import SourcePolicyError
 from codalith.gateway.audit import AuditLogger, AuditRecord
 from codalith.gateway.auth import AuthContext, current_auth_context
-from codalith.semantic.db import SemanticStore
 from codalith.semantic.graph import query_graph
+from codalith.semantic.store import SemanticStore
 
 
 @dataclass(slots=True)

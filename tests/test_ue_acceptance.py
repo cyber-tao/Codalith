@@ -7,7 +7,7 @@ import pytest
 
 from codalith.coderag.adapter import CodeRAGAdapter
 from codalith.corpus.registry import CorpusRegistry
-from codalith.semantic.db import SemanticStore
+from codalith.semantic.store import SemanticStore
 
 
 @pytest.mark.ue_acceptance

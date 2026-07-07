@@ -7,12 +7,12 @@ from typing import Any
 
 from codalith.cards.hashing import source_sha256
 from codalith.coderag.adapter import CodeRAGAdapter, RetrievalHit, language_for_path
+from codalith.coderag.query_builder import build_queries
+from codalith.coderag.result_mapper import hits_to_source_spans
 from codalith.compiler.context_pack import ContextPack, ContextSummary
 from codalith.compiler.entity_detector import detect_identifiers, detect_modules
-from codalith.compiler.evidence_selector import select_source_spans
 from codalith.compiler.intent_detector import detect_intent
 from codalith.compiler.reranker import rerank
-from codalith.compiler.retrieval_planner import plan_queries
 from codalith.compiler.source_locator import locate_source_priors
 from codalith.corpus.registry import CorpusRegistry
 from codalith.semantic.graph import query_graph
@@ -61,7 +61,7 @@ class ContextCompiler:
                     max_hits=search_top_k,
                 )
             )
-            for planned_query in plan_queries(query, identifiers):
+            for planned_query in build_queries(query, identifiers):
                 raw_hits.extend(
                     self.adapter.search_code(
                         corpus.corpus_id,
@@ -147,7 +147,7 @@ class ContextCompiler:
         return list(edges.values())
 
     def _enriched_source_spans(self, hits: list[RetrievalHit]) -> list[dict[str, object]]:
-        spans = select_source_spans(hits)
+        spans = hits_to_source_spans(hits)
         for span in spans:
             corpus_id = str(span.get("corpus_id", ""))
             path = str(span.get("path", ""))

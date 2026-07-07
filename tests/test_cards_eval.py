@@ -11,7 +11,7 @@ from codalith.cards.verifier import KnowledgeCardVerifier
 from codalith.compiler.context_compiler import ContextCompiler
 from codalith.corpus.uri_resolver import URIResolver
 from codalith.eval.runner import EvalRunner, write_reports
-from codalith.semantic.db import SemanticStore
+from codalith.semantic.store import SemanticStore
 
 
 def test_built_in_cards_verify_against_fixture(registry, adapter, tmp_path):

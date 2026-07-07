@@ -11,7 +11,6 @@ from typing import Any
 
 from codalith.cards.hashing import source_sha256
 from codalith.corpus.registry import CorpusRegistry
-from codalith.semantic.db import SemanticStore
 from codalith.semantic.extractors.build_cs import BuildCsExtractor, write_module_deps
 from codalith.semantic.extractors.compile_guards import extract_compile_guards
 from codalith.semantic.extractors.cpp_symbols import extract_cpp_symbols
@@ -19,6 +18,7 @@ from codalith.semantic.extractors.target_cs import extract_target_file
 from codalith.semantic.extractors.uht_reflection import UHTReflectionExtractor
 from codalith.semantic.extractors.uplugin import extract_uplugin
 from codalith.semantic.extractors.uproject import extract_uproject
+from codalith.semantic.store import SemanticStore
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -15,7 +15,7 @@ from codalith.corpus.uri_resolver import URIResolver
 from codalith.gateway.audit import AuditLogger
 from codalith.gateway.auth import AuthContext
 from codalith.gateway.tools import CodalithTools, ToolRuntime
-from codalith.semantic.db import SemanticStore
+from codalith.semantic.store import SemanticStore
 
 
 @pytest.fixture()

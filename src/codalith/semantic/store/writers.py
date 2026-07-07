@@ -1,13 +1,8 @@
-"""Lightweight semantic store used by extractors and tests."""
+"""Upsert operations for the semantic store."""
 
 from __future__ import annotations
 
 import hashlib
-import json
-import os
-import sqlite3
-from collections.abc import Iterable
-from pathlib import Path
 from typing import Any
 
 from codalith.cards.schema import KnowledgeCard
@@ -19,99 +14,10 @@ from codalith.semantic.extractors.target_cs import TargetDefinition
 from codalith.semantic.extractors.uht_reflection import ReflectionEntity
 from codalith.semantic.extractors.uplugin import PluginDescriptor
 from codalith.semantic.extractors.uproject import ProjectDescriptor
-from codalith.semantic.graph import GraphEdge, edge_from_row, node_candidates
+from codalith.semantic.store.queries import SemanticQueries
 
 
-class SemanticStore:
-    def __init__(self, path: str | Path | None = ":memory:") -> None:
-        configured = str(path or os.getenv("CODALITH_SEMANTIC_DSN") or ":memory:")
-        self.dialect = "postgresql" if _is_postgres_dsn(configured) else "sqlite"
-        self.connection: Any
-        if self.dialect == "postgresql":
-            try:
-                import psycopg
-                from psycopg.rows import dict_row
-            except ImportError as exc:  # pragma: no cover - exercised in PostgreSQL envs.
-                raise RuntimeError(
-                    "PostgreSQL semantic store requires the psycopg package"
-                ) from exc
-            self.connection = psycopg.connect(configured, row_factory=dict_row)
-        else:
-            if configured != ":memory:":
-                Path(configured).parent.mkdir(parents=True, exist_ok=True)
-            self.connection = sqlite3.connect(configured, check_same_thread=False)
-            self.connection.row_factory = sqlite3.Row
-        self.initialize()
-
-    def initialize(self) -> None:
-        schema_name = "schema_postgres.sql" if self.dialect == "postgresql" else "schema.sql"
-        schema = (Path(__file__).parent / schema_name).read_text(encoding="utf-8")
-        self._drop_legacy_reflection_table()
-        if self.dialect == "postgresql":
-            with self.connection.cursor() as cursor:
-                for statement in _split_sql_statements(schema):
-                    cursor.execute(statement)
-        else:
-            self.connection.executescript(schema)
-            self._migrate_legacy_sqlite_graph_edges()
-        self.connection.commit()
-
-    def _drop_legacy_reflection_table(self) -> None:
-        # v0 stored owner names in an owner_symbol_id column. The store holds
-        # derived data, so rebuild the table and re-run extraction instead of
-        # migrating rows in place.
-        if self.dialect == "postgresql":
-            legacy = self.connection.execute(
-                """
-                SELECT 1 FROM information_schema.columns
-                WHERE table_name = 'ue_reflection_entities' AND column_name = 'owner_symbol_id'
-                """
-            ).fetchone()
-        else:
-            columns = self.connection.execute(
-                "PRAGMA table_info(ue_reflection_entities)"
-            ).fetchall()
-            legacy = next((column for column in columns if column["name"] == "owner_symbol_id"), None)
-        if legacy is not None:
-            self.connection.execute("DROP TABLE ue_reflection_entities")
-            self.connection.commit()
-
-    def _execute(
-        self,
-        sql: str,
-        params: Iterable[Any] = (),
-        *,
-        commit: bool = False,
-    ) -> Any:
-        statement = self._sql(sql)
-        cursor = self.connection.execute(statement, tuple(params))
-        if commit:
-            self.connection.commit()
-        return cursor
-
-    def _sql(self, sql: str) -> str:
-        return sql.replace("?", "%s") if self.dialect == "postgresql" else sql
-
-    def _migrate_legacy_sqlite_graph_edges(self) -> None:
-        legacy = self.connection.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'ue_graph_edges'"
-        ).fetchone()
-        if legacy is None:
-            return
-        self.connection.execute(
-            """
-            INSERT OR IGNORE INTO codalith_graph_edges
-              (corpus_id, edge_id, from_node, to_node, edge_type, evidence_uri,
-               extractor, confidence, metadata)
-            SELECT corpus_id, edge_id, from_node, to_node, edge_type, evidence_uri,
-                   extractor, confidence, metadata
-            FROM ue_graph_edges
-            """
-        )
-
-    def commit(self) -> None:
-        self.connection.commit()
-
+class SemanticWriters(SemanticQueries):
     def upsert_module_dep(
         self,
         *,
@@ -320,15 +226,6 @@ class SemanticStore:
             commit=commit,
         )
 
-    def list_module_deps(self, corpus_id: str, module: str | None = None) -> list[dict[str, Any]]:
-        sql = "SELECT * FROM ue_module_deps WHERE corpus_id = ?"
-        params: list[Any] = [corpus_id]
-        if module:
-            sql += " AND from_module = ?"
-            params.append(module)
-        rows = self._execute(sql, params).fetchall()
-        return [_row(row) for row in rows]
-
     def upsert_reflection_entity(
         self,
         *,
@@ -438,15 +335,6 @@ class SemanticStore:
             )
         if commit:
             self.connection.commit()
-
-    def list_reflection_entities(self, corpus_id: str, kind: str | None = None) -> list[dict[str, Any]]:
-        sql = "SELECT * FROM ue_reflection_entities WHERE corpus_id = ?"
-        params: list[Any] = [corpus_id]
-        if kind:
-            sql += " AND kind = ?"
-            params.append(kind)
-        rows = self._execute(sql, params).fetchall()
-        return [_row(row) for row in rows]
 
     def upsert_compile_guard(
         self,
@@ -872,230 +760,6 @@ class SemanticStore:
         )
         if commit:
             self.connection.commit()
-
-    def list_graph_edges(
-        self,
-        corpus_id: str,
-        *,
-        node: str | None = None,
-        edge_types: Iterable[str] | None = None,
-        limit: int = 200,
-    ) -> list[GraphEdge]:
-        sql = "SELECT * FROM codalith_graph_edges WHERE corpus_id = ?"
-        params: list[Any] = [corpus_id]
-        candidates = node_candidates(node) if node else []
-        if candidates:
-            placeholders = ",".join("?" for _ in candidates)
-            sql += f" AND (from_node IN ({placeholders}) OR to_node IN ({placeholders}))"
-            params.extend(candidates)
-            params.extend(candidates)
-        edge_type_values = list(edge_types or [])
-        if edge_type_values:
-            placeholders = ",".join("?" for _ in edge_type_values)
-            sql += f" AND edge_type IN ({placeholders})"
-            params.extend(edge_type_values)
-        sql += " ORDER BY confidence DESC, edge_type, from_node, to_node LIMIT ?"
-        params.append(limit)
-        rows = self._execute(sql, params).fetchall()
-        return [edge_from_row(_row(row)) for row in rows]
-
-    def get_module(self, corpus_id: str, module_name: str) -> dict[str, Any] | None:
-        row = self._execute(
-            "SELECT * FROM ue_modules WHERE corpus_id = ? AND module_name = ?",
-            (corpus_id, module_name),
-        ).fetchone()
-        return _row(row) if row is not None else None
-
-    def module_exists(self, corpus_id: str, module_name: str) -> bool:
-        row = self._execute(
-            "SELECT 1 AS ok FROM ue_modules WHERE corpus_id = ? AND module_name = ?",
-            (corpus_id, module_name),
-        ).fetchone()
-        return row is not None
-
-    def find_symbols(
-        self,
-        corpus_id: str,
-        name: str,
-        *,
-        kind: str | None = None,
-        limit: int = 20,
-    ) -> list[dict[str, Any]]:
-        normalized = name.split("::")[-1]
-        sql = """
-            SELECT * FROM ue_symbols
-            WHERE corpus_id = ? AND (name = ? OR qualified_name = ? OR qualified_name LIKE ?)
-            """
-        params: list[Any] = [corpus_id, normalized, name, f"%::{normalized}"]
-        if kind and kind != "any":
-            sql += " AND kind = ?"
-            params.append(kind)
-        sql += " ORDER BY confidence DESC, module_name, name LIMIT ?"
-        params.append(limit)
-        return [_row(row) for row in self._execute(sql, params).fetchall()]
-
-    def symbol_or_reflection_exists(self, corpus_id: str, node: str) -> bool:
-        name = node.split(":", maxsplit=2)[-1]
-        if self.find_symbols(corpus_id, name, limit=1):
-            return True
-        row = self._execute(
-            """
-            SELECT 1 AS ok FROM ue_reflection_entities
-            WHERE corpus_id = ? AND (name = ? OR ? = kind || ':' || name)
-            LIMIT 1
-            """,
-            (corpus_id, name, node),
-        ).fetchone()
-        return row is not None
-
-    def guards_for_span(
-        self,
-        corpus_id: str,
-        path: str,
-        start_line: int,
-        end_line: int,
-    ) -> list[dict[str, Any]]:
-        rows = self._execute(
-            """
-            SELECT * FROM ue_compile_guards
-            WHERE corpus_id = ?
-              AND path = ?
-              AND start_line <= ?
-              AND COALESCE(end_line, start_line) >= ?
-            ORDER BY start_line, macro
-            """,
-            (corpus_id, path, end_line, start_line),
-        ).fetchall()
-        return [_row(row) for row in rows]
-
-    def list_source_files(self, corpus_id: str, *, limit: int = 200) -> list[dict[str, Any]]:
-        rows = self._execute(
-            """
-            SELECT * FROM codalith_source_files
-            WHERE corpus_id = ?
-            ORDER BY path
-            LIMIT ?
-            """,
-            (corpus_id, limit),
-        ).fetchall()
-        return [_row(row) for row in rows]
-
-    def source_file_exists(self, corpus_id: str, path: str) -> bool:
-        row = self._execute(
-            """
-            SELECT 1 AS ok FROM codalith_source_files
-            WHERE corpus_id = ? AND path = ?
-            LIMIT 1
-            """,
-            (corpus_id, path),
-        ).fetchone()
-        return row is not None
-
-    def semantic_status(self, corpus_id: str) -> dict[str, Any]:
-        graph = self._execute(
-            "SELECT COUNT(*) AS edge_count FROM codalith_graph_edges WHERE corpus_id = ?",
-            (corpus_id,),
-        ).fetchone()
-        graph_nodes = self._execute(
-            """
-            SELECT COUNT(*) AS node_count FROM (
-                SELECT from_node AS node FROM codalith_graph_edges WHERE corpus_id = ?
-                UNION
-                SELECT to_node AS node FROM codalith_graph_edges WHERE corpus_id = ?
-            ) AS nodes
-            """,
-            (corpus_id, corpus_id),
-        ).fetchone()
-        module_deps = self._execute(
-            "SELECT COUNT(*) AS count FROM ue_module_deps WHERE corpus_id = ?",
-            (corpus_id,),
-        ).fetchone()
-        modules = self._execute(
-            "SELECT COUNT(*) AS count FROM ue_modules WHERE corpus_id = ?",
-            (corpus_id,),
-        ).fetchone()
-        source_files = self._execute(
-            "SELECT COUNT(*) AS count FROM codalith_source_files WHERE corpus_id = ?",
-            (corpus_id,),
-        ).fetchone()
-        reflection = self._execute(
-            "SELECT COUNT(*) AS count FROM ue_reflection_entities WHERE corpus_id = ?",
-            (corpus_id,),
-        ).fetchone()
-        cpp_symbols = self._execute(
-            "SELECT COUNT(*) AS count FROM ue_symbols WHERE corpus_id = ?",
-            (corpus_id,),
-        ).fetchone()
-        compile_guards = self._execute(
-            "SELECT COUNT(*) AS count FROM ue_compile_guards WHERE corpus_id = ?",
-            (corpus_id,),
-        ).fetchone()
-        targets = self._execute(
-            "SELECT COUNT(*) AS count FROM ue_targets WHERE corpus_id = ?",
-            (corpus_id,),
-        ).fetchone()
-        plugins = self._execute(
-            "SELECT COUNT(*) AS count FROM ue_plugins WHERE corpus_id = ?",
-            (corpus_id,),
-        ).fetchone()
-        projects = self._execute(
-            "SELECT COUNT(*) AS count FROM ue_projects WHERE corpus_id = ?",
-            (corpus_id,),
-        ).fetchone()
-        return {
-            "corpus_id": corpus_id,
-            "dialect": self.dialect,
-            "source_files": int(source_files["count"]),
-            "modules": int(modules["count"]),
-            "module_dependencies": int(module_deps["count"]),
-            "reflection_entities": int(reflection["count"]),
-            "graph_edges": int(graph["edge_count"]),
-            "graph_nodes": int(graph_nodes["node_count"] or 0),
-            "cpp_symbols": int(cpp_symbols["count"]),
-            "compile_guards": int(compile_guards["count"]),
-            "targets": int(targets["count"]),
-            "plugins": int(plugins["count"]),
-            "projects": int(projects["count"]),
-        }
-
-    def close(self) -> None:
-        self.connection.close()
-
-    def _json(self, value: Any) -> Any:
-        if self.dialect == "postgresql":
-            try:
-                from psycopg.types.json import Jsonb
-            except ImportError as exc:  # pragma: no cover - exercised in PostgreSQL envs.
-                raise RuntimeError("PostgreSQL semantic store requires psycopg Jsonb") from exc
-            return Jsonb(value)
-        return json.dumps(value, sort_keys=True)
-
-
-def _row(row: Any) -> dict[str, Any]:
-    data = dict(row)
-    for key in (
-        "metadata",
-        "specifiers",
-        "supported_platforms",
-        "public_include_paths",
-        "private_include_paths",
-        "extra_modules",
-        "modules",
-        "plugins",
-        "related_nodes",
-        "source_hashes",
-    ):
-        if key in data and isinstance(data[key], str):
-            data[key] = json.loads(data[key])
-    return data
-
-
-def _is_postgres_dsn(value: str) -> bool:
-    return value.startswith(("postgresql://", "postgres://"))
-
-
-def _split_sql_statements(schema: str) -> list[str]:
-    return [statement.strip() for statement in schema.split(";") if statement.strip()]
 
 
 def _json_list(row: dict[str, Any] | None, key: str) -> list[str]:

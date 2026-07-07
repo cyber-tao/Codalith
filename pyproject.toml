@@ -29,8 +29,8 @@ codalith-verify-cards = "jobs.verify_cards:main"
 codalith-index-engine = "jobs.index_engine:main"
 codalith-index-generated = "jobs.index_generated:main"
 codalith-extract-semantic = "jobs.extract_semantic:main"
+codalith-index-project = "jobs.index_project:main"
 codalith-coderag-acceptance = "jobs.coderag_acceptance:main"
-codalith-run-eval = "jobs.run_eval:main"
 codalith-backup-coderag-store = "jobs.backup_coderag_store:main"
 
 [tool.setuptools.packages.find]

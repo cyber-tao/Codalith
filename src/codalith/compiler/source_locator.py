@@ -3,16 +3,25 @@
 CodeRAG provides broad semantic retrieval. This module adds high-confidence UE
 source priors for canonical engine concepts so Context Packs still cite stable
 source evidence when an embedding provider is intentionally low fidelity.
+
+The prior data lives in configs/source_priors.json and is loaded once per
+process; set CODALITH_SOURCE_PRIORS to point at an alternative file.
 """
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 from codalith.coderag.adapter import RetrievalHit, language_for_path
+from codalith.config import load_config
 from codalith.corpus.registry import Corpus
+from codalith.errors import ConfigurationError
+
+_DEFAULT_PRIORS_PATH = "configs/source_priors.json"
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,550 +33,44 @@ class SourcePrior:
     line_terms: tuple[str, ...] = ()
 
 
-SOURCE_PRIORS: tuple[SourcePrior, ...] = (
-    SourcePrior(
-        path="Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h",
-        title="AActor declarations and replication",
-        module="Engine",
-        triggers=(
-            "aactor",
-            "actor",
-            "replication",
-            "replicatedusing",
-            "onrep",
-            "rpc",
-            "breplicates",
-            "beginplay",
-            "project overlay",
-            "symbol resolution",
-        ),
-        line_terms=("AActor", "ReplicatedUsing", "OnRep", "bReplicates", "BeginPlay"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/CoreUObject/Public/UObject/Object.h",
-        title="UObject base declarations",
-        module="CoreUObject",
-        triggers=("uobject", "garbage collection", " gc", "object flags", "base declarations"),
-        line_terms=("UObject", "EObjectFlags", "Garbage"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/CoreUObject/Public/UObject/ObjectPtr.h",
-        title="TObjectPtr hard reference declarations",
-        module="CoreUObject",
-        triggers=("tobjectptr", "objectptr", "raw pointer", "hard uobject reference", "gc"),
-        line_terms=("TObjectPtr", "ObjectPtr"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/Core/Public/UObject/WeakObjectPtrTemplates.h",
-        title="TWeakObjectPtr weak reference declarations",
-        module="Core",
-        triggers=("tweakobjectptr", "weakobjectptr", "weak pointer", "non-owning", "raw pointer"),
-        line_terms=("TWeakObjectPtr", "WeakObjectPtr"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/CoreUObject/Public/UObject/UObjectGlobals.h",
-        title="UObject construction helpers",
-        module="CoreUObject",
-        triggers=(
-            "createdefaultsubobject",
-            "newobject",
-            "default subobject",
-            "subobject",
-            "constructor helper",
-            "constructor",
-        ),
-        line_terms=("CreateDefaultSubobject", "NewObject"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/CoreUObject/Private/UObject/UObjectGlobals.cpp",
-        title="UObject construction implementation",
-        module="CoreUObject",
-        triggers=(
-            "createdefaultsubobject",
-            "default subobject",
-            "duplicate default subobject",
-            "blueprint component",
-            "subobject name",
-        ),
-        line_terms=("CreateDefaultSubobject", "DefaultSubobject", "Duplicate"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/CoreUObject/Public/UObject/ObjectMacros.h",
-        title="UHT reflection macros and metadata",
-        module="CoreUObject",
-        triggers=(
-            "uht",
-            "reflection",
-            "macro",
-            "uproperty",
-            "ufunction",
-            "ustruct",
-            "uclass",
-            "uenum",
-            "blueprintcallable",
-            "blueprintnativeevent",
-            "generated.h",
-            "reflected header",
-            "metadata declared",
-            "class metadata",
-            "reflection graph",
-        ),
-        line_terms=(
-            "UPROPERTY",
-            "UFUNCTION",
-            "USTRUCT",
-            "UCLASS",
-            "UENUM",
-            "BlueprintCallable",
-            "BlueprintNativeEvent",
-        ),
-    ),
-    SourcePrior(
-        path="Engine/Source/Programs/Shared/EpicGames.UHT/Parsers/UhtHeaderFileParser.cs",
-        title="UHT generated header parser checks",
-        module=None,
-        triggers=(
-            "uht",
-            "unrealheadertool",
-            "generated.h",
-            "generated header",
-            "last include",
-            "reflection parsing",
-            "where does uht enforce",
-        ),
-        line_terms=(".generated.h", "HeaderFileParser", "include"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/CoreUObject/Public/UObject/Class.h",
-        title="UClass declarations",
-        module="CoreUObject",
-        triggers=("uclass declaration", "uclass declarations", "class metadata", "inspect uclass"),
-        line_terms=("UClass", "EClassFlags"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/Core/Public/Containers/Array.h",
-        title="TArray container API",
-        module="Core",
-        triggers=("tarray", "array container", "array.h", "container behavior", "array api"),
-        line_terms=("TArray", "ArrayNum", "Num()"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/Core/Public/UObject/NameTypes.h",
-        title="FName API",
-        module="Core",
-        triggers=("fname", "nametypes", "name api"),
-        line_terms=("FName", "NameTypes"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/Engine/Classes/Engine/World.h",
-        title="UWorld gameplay runtime declarations",
-        module="Engine",
-        triggers=(
-            "uworld",
-            "world.h",
-            "gameplay runtime",
-            "engine world",
-            "spawnactor",
-            "spawn actor",
-            "spawn collision",
-            "spawnactordeferred",
-        ),
-        line_terms=("UWorld", "WorldType", "SpawnActor", "SpawnActorDeferred"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/Engine/Private/LevelActor.cpp",
-        title="Actor spawning implementation",
-        module="Engine",
-        triggers=("spawnactor", "spawn actor", "spawn collision", "spawnactors", "level actor"),
-        line_terms=("SpawnActor", "SpawnCollisionHandlingOverride"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/Engine/Classes/Kismet/GameplayStatics.h",
-        title="GameplayStatics deferred actor spawning",
-        module="Engine",
-        triggers=("finishspawningactor", "finish spawning", "spawnactordeferred", "construction script"),
-        line_terms=("FinishSpawningActor", "BeginDeferredActorSpawnFromClass"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/Renderer/Private/DeferredShadingRenderer.cpp",
-        title="Renderer implementation",
-        module="Renderer",
-        triggers=("renderer", "rendering api", "deferredshadingrenderer", "rendering"),
-        line_terms=("FDeferredShadingSceneRenderer", "Renderer", "Render"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/Net/Core/Public/Net/Core/NetHandle/NetHandle.h",
-        title="NetCore handle declarations",
-        module="NetCore",
-        triggers=("netcore", "net handle", "nethandle", "networking handles", "networking code"),
-        line_terms=("FNetHandle", "NetHandle"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/Engine/Engine.Build.cs",
-        title="Engine module dependencies",
-        module="Engine",
-        triggers=(
-            "build.cs",
-            "module dependency",
-            "module dependencies",
-            "publicdependency",
-            "privatedependency",
-            "public dependencies",
-            "private dependencies",
-            "dynamically loaded",
-            "unrealed",
-            "runtime modules",
-            "module system",
-            "dependency graph",
-        ),
-        line_terms=(
-            "PublicDependencyModuleNames",
-            "PrivateDependencyModuleNames",
-            "DynamicallyLoadedModuleNames",
-        ),
-    ),
-    SourcePrior(
-        path="Engine/Source/Programs/UnrealBuildTool/Configuration/ModuleRules.cs",
-        title="UnrealBuildTool module dependency rules",
-        module=None,
-        triggers=(
-            "modulerules",
-            "publicdependencymodulenames",
-            "privatedependencymodulenames",
-            "build.cs",
-            "unreal build tool",
-            "ubt",
-            "module dependency",
-            "header include errors",
-            "unresolved symbol",
-        ),
-        line_terms=("PublicDependencyModuleNames", "PrivateDependencyModuleNames"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/Core/Public/Misc/Build.h",
-        title="Build configuration and editor guard macros",
-        module="Core",
-        triggers=(
-            "with_editor",
-            "with_editoronly_data",
-            "ue_build_shipping",
-            "ue_build_development",
-            "ue_build_debug",
-            "build configuration",
-            "packaged build",
-            "editor-only",
-            "editor only",
-        ),
-        line_terms=("WITH_EDITOR", "UE_BUILD_SHIPPING", "UE_BUILD_DEVELOPMENT"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/GameplayAbilities/GameplayAbilities.Build.cs",
-        title="GameplayAbilities module dependencies",
-        module="GameplayAbilities",
-        triggers=("gameplayabilities", "gameplay abilities"),
-        line_terms=("GameplayAbilities", "PublicDependencyModuleNames", "PrivateDependencyModuleNames"),
-    ),
-    SourcePrior(
-        path="Engine/Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/GameplayAbilities.Build.cs",
-        title="GameplayAbilities plugin module dependencies",
-        module="GameplayAbilities",
-        triggers=("gameplayabilities", "gameplay abilities"),
-        line_terms=("GameplayAbilities", "PublicDependencyModuleNames", "PrivateDependencyModuleNames"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Programs/UnrealBuildTool/Configuration/TargetRules.cs",
-        title="TargetRules configuration",
-        module=None,
-        triggers=("targetrules", "target rules", "target.cs"),
-        line_terms=("TargetRules",),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/Core/Public/Delegates/DelegateSignatureImpl.inl",
-        title="Dynamic delegate binding helpers",
-        module="Core",
-        triggers=(
-            "adddynamic",
-            "dynamic delegate",
-            "dynamic multicast",
-            "bindufunction",
-            "matching signature",
-            "delegate source",
-        ),
-        line_terms=("AddDynamic", "BindUFunction", "Dynamic"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/Core/Public/UObject/ScriptDelegates.h",
-        title="Script delegate reflection binding",
-        module="Core",
-        triggers=(
-            "adddynamic",
-            "dynamic delegate",
-            "dynamic multicast",
-            "script delegate",
-            "ufunction",
-            "matching signature",
-        ),
-        line_terms=("TScriptDelegate", "FScriptDelegate", "UFunction"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/Engine/Classes/Components/ActorComponent.h",
-        title="ActorComponent tick and registration declarations",
-        module="Engine",
-        triggers=(
-            "actorcomponent",
-            "component",
-            "primarycomponenttick",
-            "registercomponent",
-            "registercomponentwithworld",
-            "tickcomponent",
-            "newobject",
-        ),
-        line_terms=("RegisterComponent", "PrimaryComponentTick", "TickComponent"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/Engine/Private/Components/ActorComponent.cpp",
-        title="ActorComponent registration implementation",
-        module="Engine",
-        triggers=("registercomponent", "registercomponentwithworld", "component created", "render or tick"),
-        line_terms=("RegisterComponent", "RegisterComponentWithWorld"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/Engine/Classes/Components/SceneComponent.h",
-        title="SceneComponent attachment APIs",
-        module="Engine",
-        triggers=("setupattachment", "attachtocomponent", "scenecomponent", "attach to component"),
-        line_terms=("SetupAttachment", "AttachToComponent"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/Engine/Public/TimerManager.h",
-        title="Timer manager API",
-        module="Engine",
-        triggers=(
-            "ftimermanager",
-            "ftimerhandle",
-            "cleartimer",
-            "clearalltimersforobject",
-            "timer",
-            "timers",
-        ),
-        line_terms=("ClearTimer", "ClearAllTimersForObject", "FTimerHandle"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/Engine/Private/TimerManager.cpp",
-        title="Timer manager implementation",
-        module="Engine",
-        triggers=("destroyed uobject", "destroyed actor", "object-bound timer", "timers firing", "timer"),
-        line_terms=("TimerDelegate", "ClearAllTimersForObject", "HasSameObject"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/Engine/Private/Collision/WorldCollision.cpp",
-        title="World collision trace implementation",
-        module="Engine",
-        triggers=("linetrace", "line trace", "linetracesinglebychannel", "trace channel", "collision"),
-        line_terms=("LineTraceSingleByChannel", "Trace", "Collision"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/Engine/Public/CollisionQueryParams.h",
-        title="Collision query params",
-        module="Engine",
-        triggers=("fcollisionqueryparams", "btracecomplex", "addignoredactor", "ignored actor"),
-        line_terms=("FCollisionQueryParams", "bTraceComplex", "AddIgnoredActor"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/Engine/Public/Net/UnrealNetwork.h",
-        title="Replication lifetime property macros",
-        module="Engine",
-        triggers=(
-            "doreplifetime",
-            "getlifetimereplicatedprops",
-            "replicatedusing",
-            "replicated property",
-            "replicate a property",
-        ),
-        line_terms=("DOREPLIFETIME", "GetLifetimeReplicatedProps"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/Net/Iris/Private/Iris/ReplicationSystem/PropertyReplicationFragment.cpp",
-        title="RepNotify state application",
-        module="Net",
-        triggers=("repnotify", "onrep", "replicatedusing", "received state", "property replication"),
-        line_terms=("RepNotify", "CallRepNotifies"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/Engine/Private/DataReplication.cpp",
-        title="Legacy object data replication repnotify dispatch",
-        module="Engine",
-        triggers=("repnotify", "onrep", "datareplication", "received state", "property replication"),
-        line_terms=("CallRepNotifies", "RepNotify", "FObjectReplicator"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/Engine/Private/Actor.cpp",
-        title="Actor RPC callspace implementation",
-        module="Engine",
-        triggers=(
-            "getfunctioncallspace",
-            "owning connection",
-            "client-to-server rpc",
-            "netmulticast",
-            "rpc",
-            "actor rpc",
-        ),
-        line_terms=("GetFunctionCallspace", "RemoteFunction", "NetMulticast"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/Engine/Private/NetDriver.cpp",
-        title="NetDriver RPC processing",
-        module="Engine",
-        triggers=(
-            "processremotefunction",
-            "owning connection",
-            "func_netmulticast",
-            "func_netreliable",
-            "reliable rpc",
-            "unreliable multicast",
-            "netdriver",
-            "rpc",
-        ),
-        line_terms=("ProcessRemoteFunction", "FUNC_NetMulticast", "FUNC_NetReliable"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/Engine/Private/NetConnection.cpp",
-        title="NetConnection reliable bunch handling",
-        module="Engine",
-        triggers=("netconnection", "reliable rpc", "unreliable", "bunch", "channel capacity"),
-        line_terms=("Reliable", "Bunch", "NetConnection"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/Engine/Private/ActorReplication.cpp",
-        title="Actor movement replication implementation",
-        module="Engine",
-        triggers=("breplicatemovement", "replicatedmovement", "onrep_replicatedmovement", "movement replication"),
-        line_terms=("ReplicatedMovement", "OnRep_ReplicatedMovement", "bReplicateMovement"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/Engine/Classes/GameFramework/CharacterMovementComponent.h",
-        title="Character movement network prediction declarations",
-        module="Engine",
-        triggers=("charactermovementcomponent", "character movement", "network prediction", "servermove"),
-        line_terms=("UCharacterMovementComponent", "ServerMove", "NetworkPrediction"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/Engine/Private/Components/CharacterMovementComponent.cpp",
-        title="Character movement network prediction implementation",
-        module="Engine",
-        triggers=("charactermovementcomponent", "character movement", "network prediction", "servermove"),
-        line_terms=("ServerMove", "ClientAdjustPosition", "NetworkPrediction"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/Net/Core/Classes/Net/Serialization/FastArraySerializer.h",
-        title="Fast array dirty tracking",
-        module="Net",
-        triggers=("ffastarrayserializer", "markitemdirty", "markarraydirty", "fast array"),
-        line_terms=("FFastArraySerializer", "MarkItemDirty", "MarkArrayDirty"),
-    ),
-    SourcePrior(
-        path="Engine/Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/AbilitySystemComponent.h",
-        title="Gameplay Ability System component declarations",
-        module="GameplayAbilities",
-        triggers=(
-            "abilitysystemcomponent",
-            "initabilityactorinfo",
-            "setisreplicated",
-            "replication mode",
-            "asc",
-            "gameplay ability system",
-        ),
-        line_terms=("UAbilitySystemComponent", "InitAbilityActorInfo", "SetIsReplicated"),
-    ),
-    SourcePrior(
-        path="Engine/Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Private/AbilitySystemComponent.cpp",
-        title="Gameplay Ability System component implementation",
-        module="GameplayAbilities",
-        triggers=("abilitysystemcomponent", "initabilityactorinfo", "asc", "avatar", "owner"),
-        line_terms=("InitAbilityActorInfo", "AbilityActorInfo"),
-    ),
-    SourcePrior(
-        path="Engine/Plugins/Runtime/GameplayAbilities/Source/GameplayAbilities/Public/AttributeSet.h",
-        title="Gameplay Ability System attribute replication helpers",
-        module="GameplayAbilities",
-        triggers=(
-            "attributeset",
-            "attribute_accessors",
-            "gameplayattribute_repnotify",
-            "attributes replicate",
-            "attribute onrep",
-        ),
-        line_terms=("ATTRIBUTE_ACCESSORS", "GAMEPLAYATTRIBUTE_REPNOTIFY", "FGameplayAttribute"),
-    ),
-    SourcePrior(
-        path="Engine/Plugins/EnhancedInput/Source/EnhancedInput/Public/EnhancedInputSubsystems.h",
-        title="Enhanced Input mapping context subsystem",
-        module="EnhancedInput",
-        triggers=(
-            "enhanced input",
-            "inputmappingcontext",
-            "uinputmappingcontext",
-            "uenhancedinputlocalplayersubsystem",
-            "addmappingcontext",
-            "mapping context",
-        ),
-        line_terms=("UEnhancedInputLocalPlayerSubsystem", "AddMappingContext", "UInputMappingContext"),
-    ),
-    SourcePrior(
-        path="Engine/Plugins/EnhancedInput/Source/EnhancedInput/Public/EnhancedInputComponent.h",
-        title="Enhanced Input action binding component",
-        module="EnhancedInput",
-        triggers=(
-            "enhanced input",
-            "bindaction",
-            "uenhancedinputcomponent",
-            "uinputaction",
-            "setupplayerinputcomponent",
-            "input action",
-        ),
-        line_terms=("UEnhancedInputComponent", "BindAction", "UInputAction"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/CoreUObject/Public/UObject/SoftObjectPtr.h",
-        title="Soft object pointer declarations",
-        module="CoreUObject",
-        triggers=("tsoftobjectptr", "soft reference", "soft object", "hard asset loads"),
-        line_terms=("TSoftObjectPtr", "FSoftObjectPtr"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/Engine/Classes/Engine/StreamableManager.h",
-        title="StreamableManager async loading",
-        module="Engine",
-        triggers=("fstreamablemanager", "requestasyncload", "async load", "streamable"),
-        line_terms=("FStreamableManager", "RequestAsyncLoad"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/CoreUObject/Public/UObject/ConstructorHelpers.h",
-        title="ConstructorHelpers constructor-only asset lookup",
-        module="CoreUObject",
-        triggers=("constructorhelpers", "constructor helpers", "objectfinder", "classfinder", "constructors"),
-        line_terms=("ConstructorHelpers", "CheckIfIsInConstructor", "FObjectFinder"),
-    ),
-    SourcePrior(
-        path="Engine/Source/Runtime/Core/Public/CoreMinimal.h",
-        title="CoreMinimal source-read anchor",
-        module="Core",
-        triggers=(
-            "coreminimal",
-            "codalith_read_source",
-            "read source",
-            "ai read",
-            "source read",
-            "safe source",
-            "bounded source",
-            "source snippets",
-            "audit policy",
-            "source-backed",
-            "ai coding agents",
-        ),
-        line_terms=("CoreMinimal",),
-    ),
-)
+@lru_cache(maxsize=1)
+def source_priors() -> tuple[SourcePrior, ...]:
+    """Load and cache the curated UE source priors."""
+    return _load_priors(_priors_path())
+
+
+def _priors_path() -> Path:
+    override = os.getenv("CODALITH_SOURCE_PRIORS")
+    if override:
+        return Path(override)
+    cwd_path = Path(_DEFAULT_PRIORS_PATH)
+    if cwd_path.exists():
+        return cwd_path
+    return Path(__file__).resolve().parents[3] / _DEFAULT_PRIORS_PATH
+
+
+def _load_priors(path: Path) -> tuple[SourcePrior, ...]:
+    raw = load_config(path)
+    priors = raw.get("priors")
+    if not isinstance(priors, list) or not priors:
+        raise ConfigurationError(f"{path} must define a non-empty 'priors' list")
+    loaded: list[SourcePrior] = []
+    for index, item in enumerate(priors):
+        if not isinstance(item, dict):
+            raise ConfigurationError(f"{path} priors[{index}] must be an object")
+        try:
+            loaded.append(
+                SourcePrior(
+                    path=str(item["path"]),
+                    title=str(item["title"]),
+                    module=str(item["module"]) if item.get("module") is not None else None,
+                    triggers=tuple(str(trigger) for trigger in item["triggers"]),
+                    line_terms=tuple(str(term) for term in item.get("line_terms", [])),
+                )
+            )
+        except KeyError as exc:
+            raise ConfigurationError(f"{path} priors[{index}] is missing key {exc}") from exc
+    return tuple(loaded)
 
 
 def locate_source_priors(
@@ -581,7 +84,7 @@ def locate_source_priors(
     normalized_query = _normalize(query)
     identifier_terms = {_normalize(identifier) for identifier in identifiers}
     query_tokens = set(_query_tokens(normalized_query))
-    for prior in SOURCE_PRIORS:
+    for prior in source_priors():
         score = _score_prior(prior, normalized_query, identifier_terms, query_tokens)
         if score > 0:
             scored.append((score, prior))

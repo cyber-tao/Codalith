@@ -11,7 +11,7 @@ from codalith.cards.verifier import KnowledgeCardVerifier
 from codalith.coderag.adapter import CodeRAGAdapter
 from codalith.corpus.registry import CorpusRegistry
 from codalith.corpus.uri_resolver import URIResolver
-from codalith.semantic.db import SemanticStore
+from codalith.semantic.store import SemanticStore
 
 
 def main(argv: list[str] | None = None) -> int:

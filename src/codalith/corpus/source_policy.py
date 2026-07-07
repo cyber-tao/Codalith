@@ -7,7 +7,6 @@ import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import Any
 
 from codalith.config import load_config
 from codalith.corpus.uri_resolver import ResolvedURI
@@ -78,23 +77,6 @@ class SourcePolicy:
                 raise SourcePolicyError(
                     f"Missing required scope for sensitive path: {sensitive.required_scope}"
                 )
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "limits": {
-                "default_max_lines": self.default_max_lines,
-                "hard_max_lines": self.hard_max_lines,
-                "max_source_reads_per_10min": self.max_source_reads_per_10min,
-                "max_total_lines_per_10min": self.max_total_lines_per_10min,
-                "max_distinct_paths_per_10min": self.max_distinct_paths_per_10min,
-                "max_adjacent_reads_per_path_per_10min": self.max_adjacent_reads_per_path_per_10min,
-            },
-            "deny_patterns": list(self.deny_patterns),
-            "sensitive_patterns": [
-                {"pattern": item.pattern, "required_scope": item.required_scope}
-                for item in self.sensitive_patterns
-            ],
-        }
 
 
 class SourceReadRateLimiter:

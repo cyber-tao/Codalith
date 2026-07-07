@@ -98,43 +98,6 @@ class CodeRAGAdapter:
                 self._record_native_fallback(corpus_id, "search_code", exc)
         return self._local_search(corpus, query, top_k, filters or {})
 
-    def search_files(
-        self,
-        corpus_id: str,
-        pattern: str,
-        *,
-        target: str = "content",
-        file_glob: str | None = None,
-        limit: int = 50,
-        ignore_case: bool = False,
-    ) -> dict[str, Any]:
-        corpus = self._corpus(corpus_id)
-        files = self._ensure_local_index(corpus)
-        if target == "files":
-            matches = [
-                {"path": item.path}
-                for item in files
-                if _glob_match(pattern, item.path) or _glob_match(pattern, Path(item.path).name)
-            ]
-            return {"pattern": pattern, "target": target, "count": len(matches[:limit]), "results": matches[:limit]}
-        flags = re.IGNORECASE if ignore_case else 0
-        regex = re.compile(pattern, flags)
-        results: list[dict[str, Any]] = []
-        for item in files:
-            if file_glob and not _glob_match(file_glob, item.path):
-                continue
-            for number, line in enumerate(item.lines, start=1):
-                if regex.search(line):
-                    results.append({"path": item.path, "line": number, "text": line})
-                    if len(results) >= limit:
-                        return {
-                            "pattern": pattern,
-                            "target": target,
-                            "count": len(results),
-                            "results": results,
-                        }
-        return {"pattern": pattern, "target": target, "count": len(results), "results": results}
-
     def get_file(
         self,
         corpus_id: str,

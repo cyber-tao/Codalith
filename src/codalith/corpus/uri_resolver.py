@@ -116,8 +116,3 @@ class URIResolver:
         if end < start:
             raise URIResolutionError(f"Invalid descending line range: #{fragment}")
         return start, end
-
-
-def make_source_uri(version_or_project: str, path: str, start: int, end: int, *, project: bool = False) -> str:
-    scheme = "ue-project" if project else "ue"
-    return f"{scheme}://{version_or_project}/source/{path}#L{start}-L{end}"
