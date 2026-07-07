@@ -69,6 +69,39 @@ def test_local_coderag_adapter_ignores_third_party_noise(adapter, fake_engine_ro
     assert any(hit.path.endswith("Actor.h") for hit in hits)
 
 
+def test_local_index_matches_camel_and_snake_subwords(adapter):
+    adapter.reindex("ue-5.7.4")
+
+    # "OnRep" only appears inside "OnRep_Health" / "ReplicatedUsing=OnRep_Health".
+    hits = adapter.search_code("ue-5.7.4", "OnRep callback", top_k=5)
+    assert any(hit.path.endswith("Actor.h") for hit in hits)
+
+    # CamelCase word from "ReplicatedUsing".
+    hits = adapter.search_code("ue-5.7.4", "replicated property", top_k=5)
+    assert any(hit.path.endswith("Actor.h") for hit in hits)
+
+
+def test_local_search_honors_path_prefix_filter(adapter):
+    adapter.reindex("ue-5.7.4")
+    hits = adapter.search_code(
+        "ue-5.7.4",
+        "UPROPERTY replication",
+        top_k=10,
+        filters={"path_prefix": "Source/ProjectA"},
+    )
+    assert hits
+    assert all(hit.path.startswith("Source/ProjectA") for hit in hits)
+
+
+def test_local_search_ranks_path_token_matches_higher(adapter):
+    adapter.reindex("ue-5.7.4")
+    hits = adapter.search_code("ue-5.7.4", "InventoryComponent OnRep_Items", top_k=3)
+    assert hits
+    assert hits[0].path.endswith("InventoryComponent.h") or hits[0].path.endswith(
+        "InventoryComponent.cpp"
+    )
+
+
 def test_native_store_dir_prefers_env_override(registry, monkeypatch, tmp_path):
     corpus = registry.get_engine("5.7.4")
     override = tmp_path / "openai-store"

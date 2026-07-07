@@ -2,15 +2,17 @@
 
 The adapter can use the real ``coderag`` package when it is installed, but v0 also ships a
 local deterministic fallback so Docker tests and policy validation do not depend on model
-downloads or external services.
+downloads or external services. The fallback keeps an inverted index over fixed line
+windows instead of rescanning every file per query.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import re
 import time
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -19,9 +21,14 @@ from typing import Any
 
 from codalith.corpus.registry import Corpus, CorpusRegistry
 from codalith.errors import CodeRAGAdapterError, CorpusNotFoundError
-from codalith.text import tokenize
+from codalith.text import camel_words, tokenize
 
 logger = logging.getLogger(__name__)
+
+# Local fallback windows: 80-line spans starting every 70 lines (10-line overlap),
+# mirroring the chunk sizing the native indexer uses for source files.
+_WINDOW_STEP = 70
+_WINDOW_SPAN = 80
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +61,23 @@ class _IndexedFile:
     lines: list[str]
 
 
+@dataclass(slots=True)
+class _Window:
+    file_index: int
+    start_line: int
+    end_line: int
+
+
+@dataclass(slots=True)
+class _LocalIndex:
+    """Inverted index over fixed line windows of the scanned corpus files."""
+
+    files: list[_IndexedFile]
+    windows: list[_Window]
+    # token -> [(window_index, term_frequency), ...] in window order.
+    postings: dict[str, list[tuple[int, int]]]
+
+
 class CodeRAGAdapter:
     def __init__(
         self,
@@ -68,7 +92,7 @@ class CodeRAGAdapter:
             else os.getenv("CODALITH_USE_NATIVE_CODERAG", "").lower() in {"1", "true", "yes"}
         )
         self._native: dict[str, Any] = {}
-        self._local: dict[str, list[_IndexedFile]] = {}
+        self._local: dict[str, _LocalIndex] = {}
         self._indexed_at: dict[str, float] = {}
         self._native_fallbacks: dict[str, int] = {}
 
@@ -139,7 +163,7 @@ class CodeRAGAdapter:
                 return status
             except Exception as exc:
                 self._record_native_fallback(corpus_id, "status", exc)
-        files = self._ensure_local_index(corpus)
+        index = self._ensure_local_index(corpus)
         indexed_at = self._indexed_at.get(corpus_id)
         return {
             "corpus_id": corpus_id,
@@ -147,8 +171,8 @@ class CodeRAGAdapter:
             "model": "deterministic-token-search",
             "watched_dir": str(self._root(corpus)),
             "store_dir": str(corpus.coderag_store),
-            "total_files": len(files),
-            "total_chunks": sum(max(1, (len(item.lines) + 79) // 80) for item in files),
+            "total_files": len(index.files),
+            "total_chunks": len(index.windows),
             "indexed_at": indexed_at,
             "updated_at": _iso_timestamp(indexed_at),
             "native_fallbacks": self._native_fallbacks.get(corpus_id, 0),
@@ -176,7 +200,7 @@ class CodeRAGAdapter:
                 return result
             except Exception as exc:
                 self._record_native_fallback(corpus_id, "reindex", exc)
-        self._local[corpus_id] = self._scan(corpus, path)
+        self._local[corpus_id] = _build_local_index(self._scan(corpus, path))
         self._indexed_at[corpus_id] = time.time()
         return self.status(corpus_id)
 
@@ -245,43 +269,55 @@ class CodeRAGAdapter:
         top_k: int,
         filters: dict[str, Any],
     ) -> list[RetrievalHit]:
-        files = self._ensure_local_index(corpus)
-        # Single-character tokens would substring-match almost every window.
+        index = self._ensure_local_index(corpus)
+        # Single-character tokens would match almost every window.
         tokens = tokenize(query, min_length=2)
-        scored: list[RetrievalHit] = []
-        for item in files:
-            if filters.get("path_prefix") and not item.path.startswith(str(filters["path_prefix"])):
-                continue
-            for start in range(1, len(item.lines) + 1, 70):
-                end = min(len(item.lines), start + 79)
-                text = "\n".join(item.lines[start - 1 : end])
-                score = _score(tokens, text, item.path)
-                if score <= 0:
-                    continue
-                scored.append(
-                    RetrievalHit(
-                        source="coderag-local",
-                        corpus_id=corpus.corpus_id,
-                        uri=_uri_for_hit(corpus, item.path, start, end),
-                        path=item.path,
-                        start_line=start,
-                        end_line=end,
-                        title=f"{item.path}:{start}-{end}",
-                        snippet=text,
-                        score=score,
-                        kind="window",
-                        language=language_for_path(item.path),
-                        module=_module_from_path(item.path),
-                        reason="Local deterministic retrieval hit.",
-                        metadata={"local_score": score},
-                    )
-                )
-        return sorted(scored, key=lambda hit: hit.score, reverse=True)[:top_k]
+        prefix = str(filters["path_prefix"]) if filters.get("path_prefix") else None
+        lowered_paths = [item.path.lower() for item in index.files]
 
-    def _ensure_local_index(self, corpus: Corpus) -> list[_IndexedFile]:
+        totals: dict[int, float] = {}
+        for token in tokens:
+            postings = index.postings.get(token)
+            if not postings:
+                continue
+            for window_index, frequency in postings:
+                window = index.windows[window_index]
+                file = index.files[window.file_index]
+                if prefix and not file.path.startswith(prefix):
+                    continue
+                weight = 2.0 if token in lowered_paths[window.file_index] else 1.0
+                totals[window_index] = totals.get(window_index, 0.0) + frequency * weight
+
+        ranked = sorted(totals.items(), key=lambda item: (-item[1], item[0]))[:top_k]
+        hits: list[RetrievalHit] = []
+        for window_index, score in ranked:
+            window = index.windows[window_index]
+            file = index.files[window.file_index]
+            snippet = "\n".join(file.lines[window.start_line - 1 : window.end_line])
+            hits.append(
+                RetrievalHit(
+                    source="coderag-local",
+                    corpus_id=corpus.corpus_id,
+                    uri=_uri_for_hit(corpus, file.path, window.start_line, window.end_line),
+                    path=file.path,
+                    start_line=window.start_line,
+                    end_line=window.end_line,
+                    title=f"{file.path}:{window.start_line}-{window.end_line}",
+                    snippet=snippet,
+                    score=score,
+                    kind="window",
+                    language=language_for_path(file.path),
+                    module=_module_from_path(file.path),
+                    reason="Local deterministic retrieval hit.",
+                    metadata={"local_score": score},
+                )
+            )
+        return hits
+
+    def _ensure_local_index(self, corpus: Corpus) -> _LocalIndex:
         if corpus.corpus_id not in self._local:
             self.reindex(corpus.corpus_id)
-        return self._local.get(corpus.corpus_id, [])
+        return self._local.get(corpus.corpus_id, _build_local_index([]))
 
     def _scan(self, corpus: Corpus, subpath: str | None = None) -> list[_IndexedFile]:
         root = self._root(corpus)
@@ -366,12 +402,43 @@ def _iter_text_paths(scan_root: Path) -> Iterator[Path]:
             yield Path(dirpath) / filename
 
 
-def _score(tokens: Iterable[str], text: str, path: str) -> float:
-    haystack = f"{path}\n{text}".lower()
-    score = 0.0
-    for token in tokens:
-        score += haystack.count(token) * (2.0 if token in path.lower() else 1.0)
-    return score
+_RAW_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _build_local_index(files: list[_IndexedFile]) -> _LocalIndex:
+    windows: list[_Window] = []
+    postings: dict[str, list[tuple[int, int]]] = {}
+    for file_index, item in enumerate(files):
+        path_terms = list(_index_terms(item.path))
+        for start in range(1, len(item.lines) + 1, _WINDOW_STEP):
+            end = min(len(item.lines), start + _WINDOW_SPAN - 1)
+            window_index = len(windows)
+            windows.append(_Window(file_index=file_index, start_line=start, end_line=end))
+            counts: dict[str, int] = {}
+            text = "\n".join(item.lines[start - 1 : end])
+            for term in [*path_terms, *_index_terms(text)]:
+                counts[term] = counts.get(term, 0) + 1
+            for term, frequency in counts.items():
+                postings.setdefault(term, []).append((window_index, frequency))
+    return _LocalIndex(files=files, windows=windows, postings=postings)
+
+
+def _index_terms(raw_text: str) -> Iterator[str]:
+    """Indexable terms of raw source text.
+
+    Each identifier is indexed as its lowercase whole form plus its snake_case
+    segments and CamelCase words, so a query token like "onrep" still matches
+    "OnRep_Health" without substring scans.
+    """
+    for raw in _RAW_TOKEN_RE.findall(raw_text):
+        terms = {raw.lower()}
+        for segment in raw.split("_"):
+            if segment:
+                terms.add(segment.lower())
+                terms.update(word.lower() for word in camel_words(segment))
+        for term in terms:
+            if len(term) >= 2:
+                yield term
 
 
 def _is_text_candidate(path: Path) -> bool:
