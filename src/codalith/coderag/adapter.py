@@ -481,7 +481,7 @@ def _uri_for_hit(corpus: Corpus, path: str, start: int, end: int) -> str:
         return f"ue-project://{corpus.corpus_id}/source/{path}#L{start}-L{end}"
     if corpus.kind == "generated":
         return f"ue-generated://{corpus.corpus_id}/source/{path}#L{start}-L{end}"
-    version = corpus.ue_version or corpus.corpus_id.removeprefix("ue-")
+    version = corpus.version
     return f"ue://{version}/source/{path}#L{start}-L{end}"
 
 

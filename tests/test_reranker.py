@@ -21,7 +21,7 @@ def _hit(source: str, path: str, score: float, module: str | None = None) -> Ret
 
 def test_source_prior_outranks_high_raw_local_scores():
     local = _hit("coderag-local", "Engine/Source/Runtime/Engine/Private/Big.cpp", 250.0)
-    prior = _hit("ue-source-locator", "Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h", 12.0)
+    prior = _hit("source-locator", "Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h", 12.0)
 
     ordered = rerank([local, prior], identifiers=[], max_hits=2)
 

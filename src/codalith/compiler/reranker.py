@@ -32,7 +32,7 @@ def rerank(
         exact = 1.0 if any(identifier in haystack for identifier in identifier_set) else 0.0
         card = 1.0 if "UE_KNOWLEDGE" in hit.path else 0.0
         module = 1.0 if hit.module and hit.module.lower() in haystack else 0.0
-        source_prior = 1.0 if hit.source == "ue-source-locator" else 0.0
+        source_prior = 1.0 if hit.source == "source-locator" else 0.0
         path_match = 1.0 if any(identifier in hit.path.lower() for identifier in identifier_set) else 0.0
         return (
             base * weights["base"]

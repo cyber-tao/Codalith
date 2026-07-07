@@ -1982,7 +1982,7 @@ export CODERAG_RERANK=0
 
 ### 23.4 MCP Server 运行配置
 
-HTTP 网关不读取独立的 server 配置文件；transport、endpoint、host、port 等运行参数全部来自环境变量（`CODALITH_HTTP_*`，见 `.env.example`）与 CLI 参数。工具列表由 `codalith.gateway.tools.TOOL_REGISTRY` 单源维护。
+HTTP 网关不读取独立的 server 配置文件；transport、endpoint、host、port 等运行参数全部来自环境变量（`CODALITH_HTTP_*`，见 `.env.example`）与 CLI 参数。工具列表由 `codalith.gateway.tools._tool_registry(default_version)` 单源维护（tools/list 与 call_tool 派发共用），`version` 默认值与 `initialize.instructions` 均在运行时从 corpus registry（display_name/description/keywords）组装，代码中不硬编码引擎名或版本。
 
 ---
 

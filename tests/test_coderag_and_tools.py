@@ -574,6 +574,35 @@ def test_mcp_tools_list_and_call(tools):
     assert called["result"]["structuredContent"]["source_spans"]
 
 
+def test_mcp_initialize_instructions_come_from_registry(tools):
+    initialized = handle_request({"jsonrpc": "2.0", "id": 1, "method": "initialize"}, tools)
+    assert initialized is not None
+    instructions = initialized["result"]["instructions"]
+    # Corpus identity and trigger keywords are advertised from configuration,
+    # not hardcoded in the gateway.
+    assert "Unreal Engine 5.7.4 (Unreal Engine full source tree)" in instructions
+    assert "UHT" in instructions
+    assert "ProjectA" in instructions
+    assert "codalith_context" in instructions
+
+
+def test_mcp_tool_schema_version_default_follows_registry_default(tools):
+    listed = handle_request({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, tools)
+    assert listed is not None
+    schemas = {item["name"]: item for item in listed["result"]["tools"]}
+    for name in ("codalith_context", "codalith_lookup_symbol", "codalith_graph", "codalith_examples"):
+        version_property = schemas[name]["inputSchema"]["properties"]["version"]
+        assert version_property["default"] == "5.7.4"
+    descriptions = " ".join(str(schema["description"]) for schema in schemas.values())
+    assert "Unreal" not in descriptions and "UE" not in descriptions
+
+
+def test_codalith_context_defaults_to_registry_default_engine(tools):
+    pack = tools.codalith_context(query="AActor BeginPlay")
+    assert pack["version"] == "5.7.4"
+    assert pack["source_spans"]
+
+
 def test_mcp_resources_list_templates_and_read(tools):
     listed = handle_request({"jsonrpc": "2.0", "id": 1, "method": "resources/list"}, tools)
     assert listed is not None

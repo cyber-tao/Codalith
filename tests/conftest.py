@@ -178,6 +178,9 @@ def registry_path(tmp_path: Path, fake_engine_root: Path) -> Path:
             "ue-5.7.4": {
                 "kind": "engine",
                 "ue_version": "5.7.4",
+                "display_name": "Unreal Engine",
+                "description": "Unreal Engine full source tree",
+                "keywords": ["Unreal Engine", "UE5", "UHT", "GC"],
                 "source_commit": "TEST",
                 "source_root": str(fake_engine_root),
                 "indexed_root": str(fake_engine_root),

@@ -1,9 +1,10 @@
-"""UE-aware MCP tool implementations."""
+"""MCP tool implementations over the configured source corpora."""
 
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass, replace
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -78,7 +79,7 @@ class CodalithTools:
         self,
         *,
         query: str,
-        version: str = "5.7.4",
+        version: str | None = None,
         project: str | None = None,
         mode: str = "explain",
         max_source_spans: int = 8,
@@ -221,7 +222,7 @@ class CodalithTools:
         self,
         *,
         symbol: str,
-        version: str = "5.7.4",
+        version: str | None = None,
         project: str | None = None,
         kind: str = "any",
         include_examples: bool = True,
@@ -287,7 +288,7 @@ class CodalithTools:
         self,
         *,
         node: str,
-        version: str = "5.7.4",
+        version: str | None = None,
         project: str | None = None,
         edge_types: list[str] | None = None,
         depth: int = 1,
@@ -296,10 +297,11 @@ class CodalithTools:
         self._require_scope("graph:read")
         resolution = self.runtime.registry.resolve(version, project, include_project_overlay=bool(project))
         self._require_resolution_access(resolution)
+        resolved_version = resolution.engine.version
         if self.runtime.semantic_store is None:
             return {
                 "node": node,
-                "version": version,
+                "version": resolved_version,
                 "project": project,
                 "edge_types": edge_types or [],
                 "depth": depth,
@@ -328,7 +330,7 @@ class CodalithTools:
                     edges[key] = edge
         return {
             "node": node,
-            "version": version,
+            "version": resolved_version,
             "project": project,
             "edge_types": edge_types or [],
             "depth": depth,
@@ -344,7 +346,7 @@ class CodalithTools:
         self,
         *,
         symbol_or_api: str,
-        version: str = "5.7.4",
+        version: str | None = None,
         project: str | None = None,
         scope: str = "all",
         max_examples: int = 8,
@@ -513,16 +515,27 @@ def _symbol_key(row: dict[str, Any]) -> tuple[object, ...]:
     return (row["name"], row["kind"], row.get("qualified_name"), row.get("signature"))
 
 
-def _tool_schema_data() -> list[dict[str, Any]]:
+def _version_property(default_version: str | None) -> dict[str, Any]:
+    prop: dict[str, Any] = {"type": "string"}
+    if default_version:
+        prop["default"] = default_version
+    return prop
+
+
+def _tool_schema_data(default_version: str | None) -> list[dict[str, Any]]:
     return [
         {
             "name": "codalith_context",
-            "description": "Use first for any Unreal Engine / UE5 source-level question. Returns a version-pinned, source-backed Context Pack using CodeRAG retrieval plus UE semantic graph.",
+            "description": (
+                "Use first for any source-level question about the corpora this server indexes "
+                "(see server instructions). Returns a version-pinned, source-backed Context Pack "
+                "using CodeRAG retrieval plus the semantic graph."
+            ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string"},
-                    "version": {"type": "string", "default": "5.7.4"},
+                    "version": _version_property(default_version),
                     "project": {"type": "string"},
                     "mode": {
                         "type": "string",
@@ -538,7 +551,7 @@ def _tool_schema_data() -> list[dict[str, Any]]:
         },
         {
             "name": "codalith_read_source",
-            "description": "Read a bounded line range from a versioned UE source URI with policy and audit.",
+            "description": "Read a bounded line range from a versioned source URI with policy and audit.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -552,17 +565,17 @@ def _tool_schema_data() -> list[dict[str, Any]]:
         },
         {
             "name": "codalith_index_status",
-            "description": "Report CodeRAG index status plus UE semantic extractor status.",
+            "description": "Report CodeRAG index status plus semantic extractor status per corpus.",
             "inputSchema": {"type": "object", "properties": {"version": {"type": "string"}, "project": {"type": "string"}}},
         },
         {
             "name": "codalith_lookup_symbol",
-            "description": "Resolve a UE C++ or reflection symbol to definitions, declarations, modules, UHT metadata, generated-code relation, references, examples, and source URIs.",
+            "description": "Resolve a source or reflection symbol to definitions, declarations, modules, reflection metadata, generated-code relation, references, examples, and source URIs.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "symbol": {"type": "string"},
-                    "version": {"type": "string", "default": "5.7.4"},
+                    "version": _version_property(default_version),
                     "project": {"type": "string"},
                     "kind": {
                         "type": "string",
@@ -587,12 +600,12 @@ def _tool_schema_data() -> list[dict[str, Any]]:
         },
         {
             "name": "codalith_graph",
-            "description": "Return UE graph neighbors for modules, plugins, C++ symbols, reflection entities, Build.cs dependencies, include edges, overrides, generated-code relations, and usage examples.",
+            "description": "Return semantic graph neighbors for modules, plugins, symbols, reflection entities, build dependencies, include edges, overrides, generated-code relations, and usage examples.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "node": {"type": "string"},
-                    "version": {"type": "string", "default": "5.7.4"},
+                    "version": _version_property(default_version),
                     "project": {"type": "string"},
                     "edge_types": {"type": "array", "items": {"type": "string"}},
                     "depth": {"type": "integer", "default": 1},
@@ -603,12 +616,12 @@ def _tool_schema_data() -> list[dict[str, Any]]:
         },
         {
             "name": "codalith_examples",
-            "description": "Find real usages of a UE API or symbol in Engine source, plugins, tests, samples, and project overlay.",
+            "description": "Find real usages of an API or symbol in engine source, plugins, tests, samples, and project overlay.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "symbol_or_api": {"type": "string"},
-                    "version": {"type": "string", "default": "5.7.4"},
+                    "version": _version_property(default_version),
                     "project": {"type": "string"},
                     "scope": {
                         "type": "string",
@@ -622,7 +635,7 @@ def _tool_schema_data() -> list[dict[str, Any]]:
         },
         {
             "name": "codalith_compare_versions",
-            "description": "Compare a UE symbol, module, file, or mechanism across engine versions.",
+            "description": "Compare a symbol, module, file, or mechanism across corpus versions.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -642,18 +655,26 @@ def _tool_schema_data() -> list[dict[str, Any]]:
 
 
 # Single source of truth: tools/list schemas and call_tool dispatch both derive
-# from this registry, so a tool cannot be listed without being callable.
-TOOL_REGISTRY: dict[str, dict[str, Any]] = {
-    schema["name"]: schema for schema in _tool_schema_data()
-}
+# from this registry, so a tool cannot be listed without being callable. The
+# default version is injected from the corpus registry instead of hardcoded.
+@lru_cache(maxsize=8)
+def _tool_registry(default_version: str | None) -> dict[str, dict[str, Any]]:
+    return {schema["name"]: schema for schema in _tool_schema_data(default_version)}
 
 
-def tool_schemas() -> list[dict[str, Any]]:
-    return list(TOOL_REGISTRY.values())
+def _default_version(registry: CorpusRegistry) -> str | None:
+    try:
+        return registry.get_engine(None).version
+    except CorpusNotFoundError:
+        return None
+
+
+def tool_schemas(registry: CorpusRegistry) -> list[dict[str, Any]]:
+    return list(_tool_registry(_default_version(registry)).values())
 
 
 def call_tool(tools: CodalithTools, name: str, arguments: dict[str, Any]) -> Any:
-    schema = TOOL_REGISTRY.get(name)
+    schema = _tool_registry(_default_version(tools.runtime.registry)).get(name)
     if schema is None:
         raise ValueError(f"Unknown tool: {name}")
     _validate_arguments(name, schema["inputSchema"], arguments)

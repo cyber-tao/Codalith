@@ -6,16 +6,42 @@ import json
 import sys
 from typing import Any
 
+from codalith.corpus.registry import CorpusRegistry
 from codalith.errors import CodalithError
 from codalith.gateway.resources import read_resource, resource_templates, resources
 from codalith.gateway.tools import CodalithTools, call_tool, create_runtime, tool_schemas
 
-INSTRUCTIONS = (
-    "Use this server first for any Unreal Engine / UE5 source-level question. "
-    "Call codalith_context before answering implementation, API, module, UHT, reflection, "
-    "Build.cs, networking, rendering, gameplay framework, editor, asset, GC, "
-    "serialization, or version-specific questions."
-)
+
+def build_instructions(registry: CorpusRegistry) -> str:
+    """Assemble the server self-description from the configured corpus registry.
+
+    Nothing domain-specific is hardcoded here: corpus names, descriptions, and
+    trigger keywords all come from configs/corpus_registry.json, so a deployment
+    that indexes a different codebase advertises that codebase instead.
+    """
+    engine_labels = [
+        f"{corpus.label} ({corpus.description})" if corpus.description else corpus.label
+        for corpus in registry.engines.values()
+    ]
+    project_ids = sorted(registry.projects)
+    keywords = list(
+        dict.fromkeys(
+            keyword for corpus in registry.engines.values() for keyword in corpus.keywords
+        )
+    )
+    parts = ["This server provides version-pinned, source-backed context for indexed code corpora."]
+    if engine_labels:
+        parts.append("Indexed corpora: " + "; ".join(engine_labels) + ".")
+    if project_ids:
+        parts.append("Project overlays: " + ", ".join(project_ids) + ".")
+    parts.append(
+        "Use this server first for any source-level question about these codebases, even when "
+        "the question does not mention source code. Call codalith_context before answering "
+        "implementation, API, behavior, or version-specific questions."
+    )
+    if keywords:
+        parts.append("Trigger topics include: " + ", ".join(keywords) + ".")
+    return " ".join(parts)
 
 
 def handle_request(request: dict[str, Any], tools: CodalithTools) -> dict[str, Any] | None:
@@ -30,10 +56,10 @@ def handle_request(request: dict[str, Any], tools: CodalithTools) -> dict[str, A
                 "protocolVersion": "2025-11-25",
                 "capabilities": {"tools": {}, "resources": {}},
                 "serverInfo": {"name": "codalith", "version": "0.1.0"},
-                "instructions": INSTRUCTIONS,
+                "instructions": build_instructions(tools.runtime.registry),
             }
         elif method == "tools/list":
-            result = {"tools": tool_schemas()}
+            result = {"tools": tool_schemas(tools.runtime.registry)}
         elif method == "tools/call":
             params = request.get("params", {})
             name = str(params.get("name"))

@@ -1,4 +1,4 @@
-"""Compile CodeRAG hits and UE metadata into Context Pack v0."""
+"""Compile CodeRAG hits and semantic metadata into Context Pack v0."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ class ContextCompiler:
         self,
         *,
         query: str,
-        version: str = "5.7.4",
+        version: str | None = None,
         project: str | None = None,
         mode: str | None = None,
         max_source_spans: int = 8,
@@ -47,6 +47,7 @@ class ContextCompiler:
             include_project_overlay,
             include_generated_overlay=include_generated_overlay,
         )
+        resolved_version = resolution.engine.version
         intent = detect_intent(query, mode)
         identifiers = detect_identifiers(query)
         modules = detect_modules(query)
@@ -75,7 +76,7 @@ class ContextCompiler:
             max_hits=max_source_spans,
             mode=intent,
         )
-        inferred_modules = _module_entries(version, modules, hits)
+        inferred_modules = _module_entries(resolved_version, modules, hits)
         source_spans = self._enriched_source_spans(hits)
         source_spans.extend(self._card_evidence_spans(hits))
         # Card evidence must not let the pack exceed the caller's span budget.
@@ -97,22 +98,24 @@ class ContextCompiler:
         ]
         return ContextPack(
             query=query,
-            version=resolution.engine.ue_version or version,
+            version=resolved_version,
             source_commit=resolution.engine.source_commit,
             project=project,
             intent=intent,
             confidence=_confidence(hits),
             summary=ContextSummary(
-                text="Context pack compiled from CodeRAG retrieval, UE URI resolution, and v0 heuristics."
+                text="Context pack compiled from CodeRAG retrieval, corpus URI resolution, and v0 heuristics."
             ),
             modules=inferred_modules,
-            symbols=self._symbol_entries([corpus.corpus_id for corpus in resolution.ordered], identifiers, version),
+            symbols=self._symbol_entries(
+                [corpus.corpus_id for corpus in resolution.ordered], identifiers, resolved_version
+            ),
             cards=cards,
             source_spans=source_spans,
             graph_edges=graph_edges,
             caveats=[
                 _graph_caveat(graph_edges, self.semantic_store is not None),
-                "Exact UE behavior can depend on build target, platform guards, and project overrides.",
+                "Exact behavior can depend on build target, platform guards, and project overrides.",
             ],
             recommended_next_calls=[
                 {
@@ -295,7 +298,7 @@ def _module_entries(
 def _confidence(hits: list[RetrievalHit]) -> str:
     if not hits:
         return "low"
-    if any(hit.source == "ue-source-locator" for hit in hits):
+    if any(hit.source == "source-locator" for hit in hits):
         return "high"
     return "medium"
 

@@ -24,6 +24,9 @@ class Corpus:
     default: bool = False
     access_scopes: frozenset[str] = field(default_factory=frozenset)
     engine_corpus: str | None = None
+    display_name: str | None = None
+    description: str | None = None
+    keywords: tuple[str, ...] = ()
 
     @classmethod
     def from_config(cls, corpus_id: str, raw: dict[str, Any]) -> Corpus:
@@ -40,7 +43,22 @@ class Corpus:
             default=bool(raw.get("default", False)),
             access_scopes=frozenset(str(scope) for scope in raw.get("access_scopes", [])),
             engine_corpus=raw.get("engine_corpus"),
+            display_name=raw.get("display_name"),
+            description=raw.get("description"),
+            keywords=tuple(str(keyword) for keyword in raw.get("keywords", [])),
         )
+
+    @property
+    def version(self) -> str:
+        """Client-facing version label for this corpus."""
+        return self.ue_version or self.corpus_id.removeprefix("ue-")
+
+    @property
+    def label(self) -> str:
+        """Client-facing display label, falling back to the corpus id."""
+        if self.display_name:
+            return f"{self.display_name} {self.version}" if self.ue_version else self.display_name
+        return self.corpus_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,7 +109,7 @@ class CorpusRegistry:
             for corpus in self.engines.values():
                 if corpus.ue_version == version:
                     return corpus
-            raise CorpusNotFoundError(f"Unknown UE engine corpus/version: {version}")
+            raise CorpusNotFoundError(f"Unknown engine corpus/version: {version}")
         for corpus in self.engines.values():
             if corpus.default:
                 return corpus

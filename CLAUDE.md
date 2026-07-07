@@ -7,6 +7,7 @@
 
 | 时间 | 动作 | 说明 |
 | --- | --- | --- |
+| 2026-07-07 | 能力声明配置化 | MCP 客户端可见的自描述不再硬编码 UE5：`Corpus` 新增 `display_name`/`description`/`keywords`（`configs/corpus_registry.json` + `.env` 可覆盖），`initialize.instructions` 由 `build_instructions(registry)` 运行时组装，工具 schema 描述中性化且 `version` 默认值从 registry 默认引擎派生（工具方法 `version` 参数改为 `None` 跟随配置）；resources 名称改用 corpus label；ContextPack summary/caveats/reason 及 `source-locator` 标签去 UE 措辞。`ue://` scheme、`ue_version` 字段、semantic extractors、source priors 等域适配层保持不变。 |
 | 2026-07-07 | 检索内核优化 | 新增共享文本原语模块 `codalith/text.py`（normalize/tokenize/contains_word/camel_words），intent/entity/source_locator/local 检索四处 tokenize 统一；reranker 改为按 source 分组归一化 base 分并移除 prior `+1000` 哨兵值；local fallback `_local_search` 由每查询全量扫描改为窗口级倒排索引（含 CamelCase/snake_case 子词展开）。 |
 | 2026-07-07 | 数据集合并 | `ue50.jsonl` + `ue57_common_issues_30.jsonl` 物理合并为 `eval/datasets/ue_eval_suite.jsonl`（80 题，全部带 `version`），判定口径统一为 80/80 全 `pass`；benchmark 测试改名 `test_ue_eval_suite_benchmark.py`，seed/数据集 fixture 上移至 `tests/conftest.py`。 |
 | 2026-07-07 | 全面优化修复 | gateway 安全修复（工具白名单、限流先于读取、session 上限）、compiler/coderag 词边界与 URI 修复、semantic 事务/UHT 解析/schema 修复、cards 先验证后发布、eval 指标口径统一并提取 `eval/common.py`；删除死代码（gateway/errors.py、prompts.py、run_eval.py、publish_corpus.py 等），`SOURCE_PRIORS` 外置为 `configs/source_priors.json`，`db.py` 拆分为 `semantic/store/` 包；工具注册单源化（`TOOL_REGISTRY`）、错误统一为 `CodalithError` 子类、resources 模板（module/symbol/source/card）落地；`configs/*.yaml` 改名 `.json` 并删除未使用的 `mcp_server.yaml`。 |
@@ -241,7 +242,7 @@ uv run python -m codalith.eval.mcp_runner --endpoint http://127.0.0.1:8765/mcp -
 
 ## AI 使用指引
 
-- 回答任何 UE/UE5 源码级问题时，**优先调用 `codalith_context`**（见 gateway 的 `INSTRUCTIONS`）。
+- 回答任何 UE/UE5 源码级问题时，**优先调用 `codalith_context`**（见 gateway 的 `build_instructions`，内容由 `configs/corpus_registry.json` 的 display_name/keywords 驱动）。
 - 读取源码必须走 `codalith_read_source`，它强制有界行范围 + 策略 + 审计；不要绕过。
 - `codalith_context` 返回的 Context Pack 要求版本锚定 + 源引用，遵循 `answer_policy`（`must_cite_source`、`do_not_answer_from_memory`）。
 - 修改语料/策略时改 `configs/*.json` + `.env`，不要硬编码路径。

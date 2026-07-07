@@ -21,37 +21,37 @@ _SAFE_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$")
 def resources(registry: CorpusRegistry) -> list[dict[str, str]]:
     items: list[dict[str, str]] = []
     for corpus in registry.engines.values():
-        version = corpus.ue_version or corpus.corpus_id.removeprefix("ue-")
-        base = f"ue://{version}"
+        base = f"ue://{corpus.version}"
+        label = corpus.label
         items.extend(
             [
                 {
                     "uri": base,
-                    "name": f"Unreal Engine {version}",
-                    "description": "Version-pinned Unreal Engine corpus summary.",
+                    "name": label,
+                    "description": corpus.description or "Version-pinned corpus summary.",
                     "mimeType": "application/json",
                 },
                 {
                     "uri": f"{base}/modules",
-                    "name": f"Unreal Engine {version} modules",
+                    "name": f"{label} modules",
                     "description": "Module names and dependency graph summary.",
                     "mimeType": "application/json",
                 },
                 {
                     "uri": f"{base}/plugins",
-                    "name": f"Unreal Engine {version} plugins",
+                    "name": f"{label} plugins",
                     "description": "Plugin index summary for the corpus.",
                     "mimeType": "application/json",
                 },
                 {
                     "uri": f"{base}/cards",
-                    "name": f"Unreal Engine {version} knowledge cards",
-                    "description": "Verified UE knowledge card collection summary.",
+                    "name": f"{label} knowledge cards",
+                    "description": "Verified knowledge card collection summary.",
                     "mimeType": "application/json",
                 },
                 {
                     "uri": f"{base}/mechanisms",
-                    "name": f"Unreal Engine {version} mechanisms",
+                    "name": f"{label} mechanisms",
                     "description": "Curated mechanism summaries backed by cards and source evidence.",
                     "mimeType": "application/json",
                 },
@@ -61,7 +61,7 @@ def resources(registry: CorpusRegistry) -> list[dict[str, str]]:
         items.append(
             {
                 "uri": f"ue-project://{project_id}",
-                "name": f"UE project {project_id}",
+                "name": f"Project overlay {project_id}",
                 "description": "Project overlay corpus summary.",
                 "mimeType": "application/json",
             }
@@ -73,23 +73,23 @@ def resource_templates() -> list[dict[str, str]]:
     return [
         {
             "uriTemplate": "ue://{version}/module/{module}",
-            "name": "UE module",
-            "description": "Version-pinned Unreal Engine module.",
+            "name": "Module",
+            "description": "Version-pinned module within an indexed corpus.",
         },
         {
             "uriTemplate": "ue://{version}/symbol/{symbol}",
-            "name": "UE symbol",
-            "description": "Version-pinned UE C++ or reflection symbol.",
+            "name": "Symbol",
+            "description": "Version-pinned source or reflection symbol.",
         },
         {
             "uriTemplate": "ue://{version}/source/{path}",
-            "name": "UE source file",
-            "description": "Version-pinned Unreal Engine source file.",
+            "name": "Source file",
+            "description": "Version-pinned source file within an indexed corpus.",
         },
         {
             "uriTemplate": "ue://{version}/card/{card_type}/{card_id}",
-            "name": "UE knowledge card",
-            "description": "Verified source-backed UE knowledge card.",
+            "name": "Knowledge card",
+            "description": "Verified source-backed knowledge card.",
         },
     ]
 
@@ -97,7 +97,7 @@ def resource_templates() -> list[dict[str, str]]:
 def read_resource(uri: str, tools: CodalithTools) -> dict[str, Any]:
     registry = tools.runtime.registry
     for corpus in registry.engines.values():
-        version = corpus.ue_version or corpus.corpus_id.removeprefix("ue-")
+        version = corpus.version
         base = f"ue://{version}"
         if uri != base and not uri.startswith(f"{base}/"):
             continue

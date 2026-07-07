@@ -3,6 +3,22 @@
     "ue-${CODALITH_ENGINE_VERSION:-5.7.4}": {
       "kind": "engine",
       "ue_version": "${CODALITH_ENGINE_VERSION:-5.7.4}",
+      "display_name": "${CODALITH_ENGINE_DISPLAY_NAME:-Unreal Engine}",
+      "description": "${CODALITH_ENGINE_DESCRIPTION:-Unreal Engine full source tree (C++, Build.cs, plugins, generated reflection code)}",
+      "keywords": [
+        "Unreal Engine",
+        "UE5",
+        "UHT",
+        "reflection",
+        "Build.cs",
+        "networking",
+        "rendering",
+        "gameplay framework",
+        "editor",
+        "asset",
+        "GC",
+        "serialization"
+      ],
       "source_commit": "${CODALITH_ENGINE_SOURCE_COMMIT:-UNKNOWN}",
       "source_root": "${CODALITH_ENGINE_SOURCE_ROOT:-/srv/ue/5.7.4}",
       "indexed_root": "${CODALITH_ENGINE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}",
@@ -16,6 +32,7 @@
   "projects": {
     "${CODALITH_PROJECT_ID:-ProjectA}": {
       "kind": "project",
+      "display_name": "${CODALITH_PROJECT_DISPLAY_NAME:-Game project overlay}",
       "engine_corpus": "ue-${CODALITH_ENGINE_VERSION:-5.7.4}",
       "source_root": "${CODALITH_PROJECT_SOURCE_ROOT:-fixtures/project_overlay/ProjectA}",
       "indexed_root": "${CODALITH_PROJECT_INDEXED_ROOT:-fixtures/project_overlay/ProjectA}",

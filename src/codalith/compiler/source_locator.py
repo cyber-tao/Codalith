@@ -1,11 +1,12 @@
-"""Deterministic UE source entry-point locator.
+"""Deterministic source entry-point locator.
 
-CodeRAG provides broad semantic retrieval. This module adds high-confidence UE
-source priors for canonical engine concepts so Context Packs still cite stable
+CodeRAG provides broad semantic retrieval. This module adds high-confidence
+source priors for canonical corpus concepts so Context Packs still cite stable
 source evidence when an embedding provider is intentionally low fidelity.
 
-The prior data lives in configs/source_priors.json and is loaded once per
-process; set CODALITH_SOURCE_PRIORS to point at an alternative file.
+The prior data is domain knowledge that lives in configs/source_priors.json and
+is loaded once per process; set CODALITH_SOURCE_PRIORS to point at an
+alternative file.
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ class SourcePrior:
 
 @lru_cache(maxsize=1)
 def source_priors() -> tuple[SourcePrior, ...]:
-    """Load and cache the curated UE source priors."""
+    """Load and cache the curated source priors."""
     return _load_priors(_priors_path())
 
 
@@ -141,7 +142,7 @@ def _hit_for_prior(corpus: Corpus, prior: SourcePrior, *, query: str, score: flo
     start, end = _window(lines, query=query, line_terms=prior.line_terms)
     snippet = "\n".join(lines[start - 1 : end])
     return RetrievalHit(
-        source="ue-source-locator",
+        source="source-locator",
         corpus_id=corpus.corpus_id,
         uri=_uri_for(corpus, prior.path, start, end),
         path=prior.path,
@@ -153,8 +154,8 @@ def _hit_for_prior(corpus: Corpus, prior: SourcePrior, *, query: str, score: flo
         kind="source-prior",
         language=language_for_path(prior.path),
         module=prior.module,
-        reason="High-confidence UE source entry point matched from query terms.",
-        metadata={"matched_by": "ue-source-locator"},
+        reason="High-confidence source entry point matched from query terms.",
+        metadata={"matched_by": "source-locator"},
     )
 
 
@@ -185,5 +186,4 @@ def _uri_for(corpus: Corpus, path: str, start: int, end: int) -> str:
         return f"ue-project://{corpus.corpus_id}/source/{path}#L{start}-L{end}"
     if corpus.kind == "generated":
         return f"ue-generated://{corpus.corpus_id}/source/{path}#L{start}-L{end}"
-    version = corpus.ue_version or corpus.corpus_id.removeprefix("ue-")
-    return f"ue://{version}/source/{path}#L{start}-L{end}"
+    return f"ue://{corpus.version}/source/{path}#L{start}-L{end}"
