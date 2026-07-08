@@ -1,5 +1,8 @@
 .git
 .env
+.cursor
+.codex
+.vscode/mcp.json
 .serena
 external
 .venv
@@ -10,4 +13,3 @@ __pycache__
 .mypy_cache
 data
 reports
-.ue-context

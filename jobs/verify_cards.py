@@ -20,6 +20,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--version", default=None, help="Engine version (defaults to the registry default engine)"
     )
+    parser.add_argument("--corpus", help="Explicit corpus id or version alias")
     args = parser.parse_args(argv)
     registry = CorpusRegistry.from_file(args.registry)
     resolver = URIResolver(registry)
@@ -27,9 +28,13 @@ def main(argv: list[str] | None = None) -> int:
     semantic_target = os.getenv("CODALITH_SEMANTIC_DSN") or os.getenv("CODALITH_SEMANTIC_DB")
     semantic_store = SemanticStore(semantic_target) if semantic_target else None
     verifier = KnowledgeCardVerifier(resolver, adapter, semantic_store)
-    corpus = registry.get_engine(args.version)
+    corpus = registry.get_corpus(args.corpus) if args.corpus else registry.get_engine(args.version)
     cards = attach_source_hashes(
-        built_in_cards(corpus_id=corpus.corpus_id, version=corpus.version_label),
+        built_in_cards(
+            corpus_id=corpus.corpus_id,
+            version=corpus.version_label,
+            seed_cards_path=corpus.seed_cards_path,
+        ),
         resolver,
         adapter,
     )

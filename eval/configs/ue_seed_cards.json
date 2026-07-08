@@ -1,0 +1,144 @@
+{
+  "topics": [
+    {
+      "card_id": "module-core",
+      "card_type": "module",
+      "title": "Core Module",
+      "path": "Engine/Source/Runtime/Core/Public/CoreMinimal.h",
+      "related_node": "module:Core"
+    },
+    {
+      "card_id": "module-coreuobject",
+      "card_type": "module",
+      "title": "CoreUObject Module",
+      "path": "Engine/Source/Runtime/CoreUObject/Public/UObject/Object.h",
+      "related_node": "module:CoreUObject"
+    },
+    {
+      "card_id": "module-engine",
+      "card_type": "module",
+      "title": "Engine Module",
+      "path": "Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h",
+      "related_node": "module:Engine"
+    },
+    {
+      "card_id": "module-renderer",
+      "card_type": "module",
+      "title": "Renderer Module",
+      "path": "Engine/Source/Runtime/Renderer/Private/DeferredShadingRenderer.cpp",
+      "related_node": "module:Renderer"
+    },
+    {
+      "card_id": "module-netcore",
+      "card_type": "module",
+      "title": "NetCore Module",
+      "path": "Engine/Source/Runtime/Net/Core/Public/Net/Core/NetHandle/NetHandle.h",
+      "related_node": "module:NetCore"
+    },
+    {
+      "card_id": "mechanism-uobject-gc",
+      "card_type": "mechanism",
+      "title": "UObject GC",
+      "path": "Engine/Source/Runtime/CoreUObject/Public/UObject/Object.h",
+      "related_node": "mechanism:UObject GC"
+    },
+    {
+      "card_id": "mechanism-uht-reflection",
+      "card_type": "mechanism",
+      "title": "UHT Reflection",
+      "path": "Engine/Source/Runtime/CoreUObject/Public/UObject/ObjectMacros.h",
+      "related_node": "mechanism:UHT Reflection"
+    },
+    {
+      "card_id": "mechanism-uproperty-replication",
+      "card_type": "mechanism",
+      "title": "UPROPERTY Replication",
+      "path": "Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h",
+      "related_node": "mechanism:UPROPERTY Replication"
+    },
+    {
+      "card_id": "mechanism-actor-replication",
+      "card_type": "mechanism",
+      "title": "Actor Replication",
+      "path": "Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h",
+      "related_node": "mechanism:Actor Replication"
+    },
+    {
+      "card_id": "mechanism-rpc-dispatch",
+      "card_type": "mechanism",
+      "title": "RPC Dispatch",
+      "path": "Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h",
+      "related_node": "mechanism:RPC Dispatch"
+    },
+    {
+      "card_id": "symbol-uobject",
+      "card_type": "symbol",
+      "title": "UObject",
+      "path": "Engine/Source/Runtime/CoreUObject/Public/UObject/Object.h",
+      "related_node": "symbol:UObject"
+    },
+    {
+      "card_id": "symbol-uclass",
+      "card_type": "symbol",
+      "title": "UClass",
+      "path": "Engine/Source/Runtime/CoreUObject/Public/UObject/Class.h",
+      "related_node": "symbol:UClass"
+    },
+    {
+      "card_id": "symbol-aactor",
+      "card_type": "symbol",
+      "title": "AActor",
+      "path": "Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h",
+      "related_node": "symbol:AActor"
+    },
+    {
+      "card_id": "symbol-uworld",
+      "card_type": "symbol",
+      "title": "UWorld",
+      "path": "Engine/Source/Runtime/Engine/Classes/Engine/World.h",
+      "related_node": "symbol:UWorld"
+    },
+    {
+      "card_id": "symbol-tarray",
+      "card_type": "symbol",
+      "title": "TArray",
+      "path": "Engine/Source/Runtime/Core/Public/Containers/Array.h",
+      "related_node": "symbol:TArray"
+    },
+    {
+      "card_id": "symbol-fname",
+      "card_type": "symbol",
+      "title": "FName",
+      "path": "Engine/Source/Runtime/Core/Public/UObject/NameTypes.h",
+      "related_node": "symbol:FName"
+    },
+    {
+      "card_id": "build-module-system",
+      "card_type": "build",
+      "title": "Module System",
+      "path": "Engine/Source/Runtime/Engine/Engine.Build.cs",
+      "related_node": "module:Engine"
+    },
+    {
+      "card_id": "build-public-private-dep",
+      "card_type": "build",
+      "title": "Public vs Private Dependency",
+      "path": "Engine/Source/Runtime/Engine/Engine.Build.cs",
+      "related_node": "module:Engine"
+    },
+    {
+      "card_id": "build-target-rules",
+      "card_type": "build",
+      "title": "Target Rules",
+      "path": "Engine/Source/Programs/UnrealBuildTool/Configuration/TargetRules.cs",
+      "related_node": "module:Engine"
+    },
+    {
+      "card_id": "recipe-safe-source-read",
+      "card_type": "recipe",
+      "title": "Safe Source Read",
+      "path": "Engine/Source/Runtime/Core/Public/CoreMinimal.h",
+      "related_node": "mechanism:Safe Source Read"
+    }
+  ]
+}

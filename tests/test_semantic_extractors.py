@@ -1,224 +1,84 @@
 from __future__ import annotations
 
-from codalith.semantic.extractors.build_cs import BuildCsExtractor, write_module_deps
-from codalith.semantic.extractors.compile_guards import extract_compile_guards
-from codalith.semantic.extractors.cpp_symbols import extract_cpp_symbols
-from codalith.semantic.extractors.target_cs import extract_target_text
-from codalith.semantic.extractors.uht_reflection import UHTReflectionExtractor
-from codalith.semantic.extractors.unreal import extract_semantic_summary
+from codalith.semantic.extractors import run_profile
 from codalith.semantic.graph import query_graph
 from codalith.semantic.store import SemanticStore
+from codalith.semantic.types import CompileGuard, ModuleDependency, ReflectionEntity, SourceSymbol
 
 
-def test_build_cs_extractor_outputs_dependencies():
-    text = """
-    PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject" });
-    PrivateDependencyModuleNames.Add("Engine");
-    DynamicallyLoadedModuleNames.AddRange(new string[] { "Renderer" });
-    """
-    deps = BuildCsExtractor().extract_text(text, module_name="GameplayAbilities")
-    assert {dep.to_module for dep in deps} == {"Core", "CoreUObject", "Engine", "Renderer"}
+def test_run_profile_without_domain_extractor_is_noop(sample_corpus_root):
+    summary = run_profile(None, sample_corpus_root, corpus_id="sample-codebase")
+
+    assert summary["corpus_id"] == "sample-codebase"
+    assert summary["profile"] is None
+    assert summary["modules"] == 0
+
+
+def test_semantic_store_records_generic_modules_symbols_and_edges():
     store = SemanticStore()
-    write_module_deps(store, corpus_id="ue-5.7.4", evidence_uri="codalith://ue-5.7.4/source/X#L1-L3", dependencies=deps)
-    rows = store.list_module_deps("ue-5.7.4", "GameplayAbilities")
-    assert len(rows) == 4
-    graph = query_graph(store, corpus_id="ue-5.7.4", node="GameplayAbilities")
-    assert any(edge["to"] == "module:Engine" for edge in graph["edges"])
+    dependency = ModuleDependency("core", "shared", "public")
 
-
-def test_initialize_schema_renames_legacy_ue_tables(tmp_path):
-    import sqlite3
-
-    db_path = tmp_path / "legacy.sqlite"
-    legacy = sqlite3.connect(db_path)
-    legacy.executescript(
-        """
-        CREATE TABLE codalith_corpora (
-          corpus_id TEXT PRIMARY KEY,
-          kind TEXT NOT NULL,
-          ue_version TEXT,
-          source_commit TEXT,
-          source_root TEXT,
-          indexed_root TEXT,
-          semantic_schema TEXT,
-          metadata TEXT DEFAULT '{}',
-          updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-        );
-        INSERT INTO codalith_corpora (corpus_id, kind, ue_version) VALUES ('ue-5.7.4', 'engine', '5.7.4');
-        CREATE TABLE ue_modules (
-          corpus_id TEXT NOT NULL,
-          module_name TEXT NOT NULL,
-          module_type TEXT,
-          loading_phase TEXT,
-          supported_platforms TEXT DEFAULT '[]',
-          public_include_paths TEXT DEFAULT '[]',
-          private_include_paths TEXT DEFAULT '[]',
-          source_uri TEXT,
-          metadata TEXT DEFAULT '{}',
-          PRIMARY KEY(corpus_id, module_name)
-        );
-        INSERT INTO ue_modules (corpus_id, module_name) VALUES ('ue-5.7.4', 'Engine');
-        """
+    store.upsert_module_dep(
+        corpus_id="sample-codebase",
+        dependency=dependency,
+        evidence_uri="codalith://sample-codebase/source/src/core/cache.py#L1-L3",
     )
-    legacy.commit()
-    legacy.close()
+    store.upsert_cpp_symbol(
+        corpus_id="sample-codebase",
+        path="src/core/cache.py",
+        symbol=SourceSymbol(name="CachedValue", kind="class", line=4),
+        evidence_uri="codalith://sample-codebase/source/src/core/cache.py#L1-L8",
+        module_name="core",
+    )
 
-    store = SemanticStore(db_path)
-    assert store.module_exists("ue-5.7.4", "Engine")
-    row = store._execute(
-        "SELECT version FROM codalith_corpora WHERE corpus_id = ?", ("ue-5.7.4",)
-    ).fetchone()
-    assert dict(row)["version"] == "5.7.4"
-
-
-def test_uht_reflection_extractor_detects_replicated_using():
-    text = """
-    #include "Thing.generated.h"
-    UCLASS(BlueprintType)
-    class AThing : public AActor {
-    GENERATED_BODY()
-    UPROPERTY(ReplicatedUsing=OnRep_Health, meta=(ClampMin="0"))
-    int32 Health;
-    UFUNCTION(BlueprintCallable)
-    void OnRep_Health();
-    };
-    """
-    entities = UHTReflectionExtractor().extract_text(text, module_name="Engine")
-    assert any(entity.kind == "uclass" and entity.name == "AThing" for entity in entities)
-    prop = next(entity for entity in entities if entity.kind == "uproperty")
-    assert prop.metadata["rep_notify"] == "OnRep_Health"
-    assert any(entity.kind == "ufunction" and entity.name == "OnRep_Health" for entity in entities)
-
-
-def test_uht_reflection_extractor_parses_nested_meta_and_skips_control_flow():
-    text = """
-    #include "Thing.generated.h"
-    UCLASS()
-    class AThing : public AActor {
-    GENERATED_BODY()
-    UPROPERTY(EditAnywhere, ReplicatedUsing=OnRep_Health,
-        meta=(ClampMin="0", ClampMax="100", AllowedClasses=(AActor, APawn)))
-    int32 Health;
-    void Helper() {
-      if (Health > 0) { Health = 0; }
-      for (int32 Index = 0; Index < 3; ++Index) {}
-    }
-    UFUNCTION(BlueprintCallable, meta=(ToolTip="Runs (once)"))
-    void DoThing();
-    };
-    """
-    entities = UHTReflectionExtractor().extract_text(text, module_name="Engine")
-
-    prop = next(entity for entity in entities if entity.kind == "uproperty")
-    assert prop.name == "Health"
-    assert prop.metadata["rep_notify"] == "OnRep_Health"
-    assert "ClampMax=\"100\"" in str(prop.specifiers["meta"])
-    assert "AllowedClasses=(AActor, APawn)" in str(prop.specifiers["meta"])
-
-    functions = [entity.name for entity in entities if entity.kind == "ufunction"]
-    assert functions == ["DoThing"]
+    rows = store.list_module_deps("sample-codebase", "core")
+    assert len(rows) == 1
+    graph = query_graph(store, corpus_id="sample-codebase", node="core")
+    assert any(edge["to"] == "module:shared" for edge in graph["edges"])
+    assert any(edge["to"] == "symbol:CachedValue" for edge in graph["edges"])
 
 
 def test_upsert_compile_guard_supports_deferred_commit(tmp_path):
     db_path = tmp_path / "semantic.sqlite"
-    guard = extract_compile_guards("#if WITH_EDITOR\n#endif\n")[0]
+    guard = CompileGuard(macro="FEATURE_FLAG", line=1, expression="FEATURE_FLAG", end_line=2)
 
     store = SemanticStore(db_path)
     store.upsert_compile_guard(
-        corpus_id="ue-5.7.4",
-        path="A.h",
+        corpus_id="sample-codebase",
+        path="src/core/cache.py",
         guard=guard,
-        evidence_uri="codalith://ue-5.7.4/source/A.h#L1-L2",
+        evidence_uri="codalith://sample-codebase/source/src/core/cache.py#L1-L2",
         commit=False,
     )
-    store.close()  # Uncommitted work must be discarded on close.
-    assert SemanticStore(db_path).semantic_status("ue-5.7.4")["compile_guards"] == 0
+    store.close()
+    assert SemanticStore(db_path).semantic_status("sample-codebase")["compile_guards"] == 0
 
     store = SemanticStore(db_path)
     store.upsert_compile_guard(
-        corpus_id="ue-5.7.4",
-        path="A.h",
+        corpus_id="sample-codebase",
+        path="src/core/cache.py",
         guard=guard,
-        evidence_uri="codalith://ue-5.7.4/source/A.h#L1-L2",
+        evidence_uri="codalith://sample-codebase/source/src/core/cache.py#L1-L2",
         commit=False,
     )
     store.commit()
     store.close()
-    assert SemanticStore(db_path).semantic_status("ue-5.7.4")["compile_guards"] == 1
+    assert SemanticStore(db_path).semantic_status("sample-codebase")["compile_guards"] == 1
 
 
-def test_uht_reflection_extractor_detects_enum_interface_and_generated_macro():
-    text = """
-    #include "Thing.generated.h"
-    UENUM(BlueprintType)
-    enum class EThingState { Ready };
-    UINTERFACE(BlueprintType)
-    class UThingInterface : public UInterface { GENERATED_BODY() };
-    """
-    entities = UHTReflectionExtractor().extract_text(text, module_name="Engine")
-
-    assert any(entity.kind == "uenum" and entity.name == "EThingState" for entity in entities)
-    assert any(entity.kind == "uinterface" and entity.name == "UThingInterface" for entity in entities)
-    assert any(entity.kind == "generated_macro" and entity.owner == "UThingInterface" for entity in entities)
-
-
-def test_compile_guard_extractor_detects_known_guards():
-    guards = extract_compile_guards(
-        "#if WITH_EDITOR\n#endif\n#if !UE_BUILD_SHIPPING\n#endif\n"
-        "#if PLATFORM_WINDOWS && WITH_CHAOS\n#endif\n"
-    )
-    assert {guard.macro for guard in guards} == {"WITH_EDITOR", "UE_BUILD_SHIPPING", "PLATFORM_WINDOWS", "WITH_CHAOS"}
-    assert all(guard.end_line is not None for guard in guards)
-
-
-def test_cpp_symbol_extractor_detects_macros_enums_delegates_and_cvars():
-    symbols = extract_cpp_symbols(
-        "namespace UE { enum class EMode { A }; }\n"
-        "#define UE_SAMPLE 1\n"
-        "DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnDone);\n"
-        "static TAutoConsoleVariable<int32> CVarThing(TEXT(\"thing\"), 1, TEXT(\"help\"));\n"
-    )
-    assert {symbol.kind for symbol in symbols} >= {"enum", "macro", "delegate", "cvar"}
-
-
-def test_target_cs_extractor_detects_type_modules_and_build_settings():
-    target = extract_target_text(
-        """
-        public class ProjectATarget : TargetRules {
-          public ProjectATarget(TargetInfo Target) : base(Target) {
-            Type = TargetType.Game;
-            DefaultBuildSettings = BuildSettingsVersion.V5;
-            ExtraModuleNames.AddRange(new string[] { "ProjectA", "Inventory" });
-          }
-        }
-        """
+def test_reflection_entities_remain_domain_data_not_core_extractors():
+    store = SemanticStore()
+    store.upsert_reflection_entity(
+        corpus_id="sample-codebase",
+        entity=ReflectionEntity(
+            kind="schema",
+            name="CachedValue",
+            owner="Cache",
+            specifiers={"source": "manual"},
+            declaration_uri="codalith://sample-codebase/source/src/core/cache.py#L1-L8",
+            module_name="core",
+        ),
     )
 
-    assert target is not None
-    assert target.name == "ProjectA"
-    assert target.target_type == "Game"
-    assert target.build_settings == "V5"
-    assert target.extra_modules == ["ProjectA", "Inventory"]
-
-
-def test_semantic_summary_can_populate_graph_store(fake_engine_root, tmp_path):
-    store = SemanticStore(tmp_path / "semantic.sqlite")
-
-    summary = extract_semantic_summary(
-        fake_engine_root,
-        corpus_id="ue-5.7.4",
-        store=store,
-    )
-
-    assert summary["semantic_store"]["graph_edges"] > 0
-    actor_graph = query_graph(store, corpus_id="ue-5.7.4", node="AActor", depth=2)
-    assert any(edge["edge_type"] == "replicated_using" for edge in actor_graph["edges"])
-    engine_graph = query_graph(store, corpus_id="ue-5.7.4", node="Engine")
-    assert any(edge["edge_type"] == "module_private_dependency" for edge in engine_graph["edges"])
-    target_graph = query_graph(store, corpus_id="ue-5.7.4", node="target:ProjectA")
-    assert any(edge["edge_type"] == "target_uses_module" for edge in target_graph["edges"])
-    plugin_graph = query_graph(store, corpus_id="ue-5.7.4", node="plugin:Sample")
-    assert any(edge["edge_type"] == "plugin_contains_module" for edge in plugin_graph["edges"])
-    project_graph = query_graph(store, corpus_id="ue-5.7.4", node="project:ProjectA")
-    assert any(edge["edge_type"] == "project_enables_plugin" for edge in project_graph["edges"])
-    assert store.semantic_status("ue-5.7.4")["source_files"] > 0
+    graph = query_graph(store, corpus_id="sample-codebase", node="CachedValue")
+    assert any(edge["edge_type"] == "has_reflection" for edge in graph["edges"])

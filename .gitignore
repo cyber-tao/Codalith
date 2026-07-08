@@ -1,6 +1,9 @@
 .env
 .env.*
 !.env.example
+.cursor/
+.codex/
+.vscode/mcp.json
 .serena/
 external/*
 !external/CodeRAG/
@@ -21,4 +24,3 @@ reports/
 eval/benchmarks/
 .codalith/
 .local/
-uv.lock

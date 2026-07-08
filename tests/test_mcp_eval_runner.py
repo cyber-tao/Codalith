@@ -13,9 +13,10 @@ def test_mcp_eval_runner_calls_streamable_http(tools, tmp_path):
         json.dumps(
             {
                 "id": "case-1",
-                "query": "UPROPERTY ReplicatedUsing OnRep",
-                "expected_files": ["Actor.h"],
-                "expected_modules": ["Engine"],
+                "query": "CachedValue ttl expiration",
+                "version": "sample",
+                "expected_files": ["cache.py"],
+                "expected_modules": ["core"],
             }
         )
         + "\n",

@@ -14,8 +14,9 @@ from codalith.compiler.context_pack import ContextPack, ContextSummary
 from codalith.compiler.entity_detector import detect_identifiers, detect_modules
 from codalith.compiler.intent_detector import detect_intent
 from codalith.compiler.reranker import rerank
-from codalith.compiler.source_locator import locate_source_priors
+from codalith.compiler.source_locator import load_source_domain_config, locate_source_priors
 from codalith.corpus.registry import CorpusRegistry
+from codalith.corpus.source_reader import SourceReader
 from codalith.corpus.uris import SCHEME, module_uri, symbol_uri
 from codalith.semantic.graph import query_graph
 
@@ -27,10 +28,12 @@ class ContextCompiler:
         adapter: CodeRAGAdapter,
         *,
         semantic_store: Any | None = None,
+        source_reader: SourceReader | None = None,
     ) -> None:
         self.registry = registry
         self.adapter = adapter
         self.semantic_store = semantic_store
+        self.source_reader = source_reader or SourceReader(registry)
 
     def compile(
         self,
@@ -51,8 +54,20 @@ class ContextCompiler:
         )
         resolved_version = resolution.engine.version_label
         intent = detect_intent(query, mode)
-        identifiers = detect_identifiers(query)
-        modules = detect_modules(query)
+        domain_configs = {
+            corpus.corpus_id: load_source_domain_config(corpus.source_priors_path)
+            for corpus in resolution.ordered
+        }
+        stopwords = frozenset(
+            item
+            for config in domain_configs.values()
+            for item in config.identifier_stopwords
+        )
+        module_hint_values = frozenset(
+            item for config in domain_configs.values() for item in config.module_hints
+        )
+        identifiers = detect_identifiers(query, stopwords=stopwords)
+        modules = detect_modules(query, module_hints=module_hint_values)
         search_top_k = max_source_spans
         raw_hits: list[RetrievalHit] = []
         for corpus in resolution.ordered:
@@ -62,6 +77,8 @@ class ContextCompiler:
                     query=query,
                     identifiers=identifiers,
                     max_hits=search_top_k,
+                    priors=domain_configs[corpus.corpus_id].priors,
+                    source_reader=self.source_reader,
                 )
             )
             for planned_query in build_queries(query, identifiers):
@@ -235,7 +252,7 @@ class ContextCompiler:
     ) -> dict[str, object]:
         try:
             corpus = self.registry.get_corpus(corpus_id)
-            snippet = self.adapter.get_file(corpus.corpus_id, path, start, end)
+            snippet = self.source_reader.read_source(corpus.corpus_id, path, start, end)
         except Exception:
             # Evidence pointing at an unavailable corpus stays cited but unhashed.
             return {"corpus_id": None, "corpus_kind": None, "source_hash": None}

@@ -9,37 +9,55 @@ from codalith.cards.verifier import KnowledgeCardVerifier
 from codalith.compiler.context_compiler import ContextCompiler
 from codalith.corpus.uri_resolver import URIResolver
 from codalith.eval.runner import EvalRunner, write_reports
-from codalith.semantic.extractors.unreal import extract_semantic_summary
 from codalith.semantic.store import SemanticStore
 
 
-def test_built_in_cards_verify_against_fixture(registry, adapter, tmp_path):
-    verifier = KnowledgeCardVerifier(URIResolver(registry), adapter)
-    cards = attach_source_hashes(built_in_cards(corpus_id="ue-5.7.4", version="5.7.4"), URIResolver(registry), adapter)
-    assert len(cards) == 20
+def test_built_in_cards_verify_against_sample_fixture(registry, adapter, tmp_path):
+    corpus = registry.get_engine()
+    resolver = URIResolver(registry)
+    verifier = KnowledgeCardVerifier(resolver, adapter)
+    cards = attach_source_hashes(
+        built_in_cards(
+            corpus_id=corpus.corpus_id,
+            version=corpus.version_label,
+            seed_cards_path=corpus.seed_cards_path,
+        ),
+        resolver,
+        adapter,
+    )
+
+    assert len(cards) == 2
     assert all(card.source_hashes for card in cards)
     results = [verifier.verify(card) for card in cards]
     assert all(result.ok for result in results), [result.errors for result in results if not result.ok]
     written = write_cards([card.verified() for card in cards], tmp_path)
-    assert len(written) == 20
+    assert len(written) == 2
     assert all(path.exists() for path in written)
 
 
-def test_written_cards_are_searchable_from_indexed_root(registry, adapter, fake_engine_root):
-    cards = [card.verified() for card in built_in_cards(corpus_id="ue-5.7.4", version="5.7.4")]
-    write_cards(cards, fake_engine_root)
-    adapter.reindex("ue-5.7.4")
-    hits = adapter.search_code("ue-5.7.4", "UPROPERTY Replication seed knowledge card", top_k=5)
+def test_written_cards_are_searchable_from_indexed_root(registry, adapter, sample_corpus_root):
+    corpus = registry.get_engine()
+    cards = [
+        card.verified()
+        for card in built_in_cards(
+            corpus_id=corpus.corpus_id,
+            version=corpus.version_label,
+            seed_cards_path=corpus.seed_cards_path,
+        )
+    ]
+    write_cards(cards, sample_corpus_root)
+    adapter.reindex(corpus.corpus_id)
+    hits = adapter.search_code(corpus.corpus_id, "Core Cache API seed knowledge card", top_k=5)
     assert any("KNOWLEDGE" in hit.path for hit in hits)
 
 
 def test_card_without_evidence_fails(registry, adapter):
     card = KnowledgeCard(
-        corpus_id="ue-5.7.4",
+        corpus_id="sample-codebase",
         card_id="bad",
         card_type="mechanism",
         title="Bad",
-        version="5.7.4",
+        version="sample",
         body_markdown="No evidence.",
         claims=[CardClaim(text="Unsupported claim", evidence=[])],
     )
@@ -49,8 +67,17 @@ def test_card_without_evidence_fails(registry, adapter):
 
 
 def test_card_hash_mismatch_fails(registry, adapter):
+    corpus = registry.get_engine()
     resolver = URIResolver(registry)
-    card = attach_source_hashes(built_in_cards(corpus_id="ue-5.7.4", version="5.7.4")[:1], resolver, adapter)[0]
+    card = attach_source_hashes(
+        built_in_cards(
+            corpus_id=corpus.corpus_id,
+            version=corpus.version_label,
+            seed_cards_path=corpus.seed_cards_path,
+        )[:1],
+        resolver,
+        adapter,
+    )[0]
     bad_card = KnowledgeCard.from_dict(
         {
             **card.as_dict(),
@@ -64,22 +91,26 @@ def test_card_hash_mismatch_fails(registry, adapter):
     assert any("hash mismatch" in error for error in result.errors)
 
 
-def test_card_verifier_checks_related_semantic_nodes(registry, adapter, fake_engine_root, tmp_path):
+def test_card_verifier_checks_related_semantic_nodes(registry, adapter, tmp_path):
+    corpus = registry.get_engine()
     store = SemanticStore(tmp_path / "semantic.sqlite")
-    extract_semantic_summary(fake_engine_root, corpus_id="ue-5.7.4", store=store)
+    store.upsert_module(corpus_id=corpus.corpus_id, module_name="core")
     resolver = URIResolver(registry)
-    card = attach_source_hashes(built_in_cards(corpus_id="ue-5.7.4", version="5.7.4")[:1], resolver, adapter)[0]
+    card = attach_source_hashes(
+        built_in_cards(
+            corpus_id=corpus.corpus_id,
+            version=corpus.version_label,
+            seed_cards_path=corpus.seed_cards_path,
+        )[:1],
+        resolver,
+        adapter,
+    )[0]
 
     result = KnowledgeCardVerifier(resolver, adapter, store).verify(card)
 
     assert result.ok
 
-    bad_card = KnowledgeCard.from_dict(
-        {
-            **card.as_dict(),
-            "related_nodes": ["module:MissingModule"],
-        }
-    )
+    bad_card = KnowledgeCard.from_dict({**card.as_dict(), "related_nodes": ["module:MissingModule"]})
     bad_result = KnowledgeCardVerifier(resolver, adapter, store).verify(bad_card)
     assert not bad_result.ok
     assert any("MissingModule" in error for error in bad_result.errors)
@@ -91,10 +122,11 @@ def test_eval_runner_generates_json_and_markdown(registry, adapter, tmp_path):
         json.dumps(
             {
                 "id": "case-1",
-                "query": "AActor UPROPERTY ReplicatedUsing OnRep",
-                "expected_files": ["Actor.h"],
-                "expected_modules": ["Engine"],
-                "expected_symbols": ["AActor"],
+                "query": "How does CachedValue handle ttl expiration?",
+                "version": "sample",
+                "expected_files": ["cache.py"],
+                "expected_modules": ["core"],
+                "expected_symbols": ["CachedValue"],
             }
         )
         + "\n",
@@ -108,13 +140,3 @@ def test_eval_runner_generates_json_and_markdown(registry, adapter, tmp_path):
     json_path, md_path = write_reports(report, tmp_path / "reports")
     assert json.loads(json_path.read_text(encoding="utf-8"))["count"] == 1
     assert Path(md_path).read_text(encoding="utf-8").startswith("# Codalith Eval Report")
-
-
-def test_source_locator_covers_eval_suite_dataset(
-    registry, adapter, eval_suite_dataset_path, seeded_eval_sources
-):
-    compiler = ContextCompiler(registry, adapter)
-    report = EvalRunner(compiler).run(eval_suite_dataset_path)
-    assert report.count == 80
-    assert report.file_recall_at_5 == 1.0
-    assert report.module_accuracy == 1.0

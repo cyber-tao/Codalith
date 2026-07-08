@@ -7,14 +7,16 @@ from typing import Any
 
 from codalith.cards.schema import KnowledgeCard
 from codalith.corpus.registry import Corpus
-from codalith.semantic.extractors.build_cs import ModuleDependency
-from codalith.semantic.extractors.compile_guards import CompileGuard
-from codalith.semantic.extractors.cpp_symbols import CppSymbol
-from codalith.semantic.extractors.target_cs import TargetDefinition
-from codalith.semantic.extractors.uht_reflection import ReflectionEntity
-from codalith.semantic.extractors.uplugin import PluginDescriptor
-from codalith.semantic.extractors.uproject import ProjectDescriptor
 from codalith.semantic.store.queries import SemanticQueries
+from codalith.semantic.types import (
+    CompileGuard,
+    ModuleDependency,
+    PluginDescriptor,
+    ProjectDescriptor,
+    ReflectionEntity,
+    SourceSymbol,
+    TargetDefinition,
+)
 
 
 class SemanticWriters(SemanticQueries):
@@ -404,7 +406,7 @@ class SemanticWriters(SemanticQueries):
         *,
         corpus_id: str,
         path: str,
-        symbol: CppSymbol,
+        symbol: SourceSymbol,
         evidence_uri: str,
         module_name: str | None = None,
         commit: bool = True,
@@ -590,7 +592,7 @@ class SemanticWriters(SemanticQueries):
                 edge_type="plugin_contains_module",
                 to_node=f"module:{module.name}",
                 evidence_uri=evidence_uri,
-                extractor="uplugin",
+                extractor="plugin_descriptor",
                 metadata=module.as_dict(),
                 commit=False,
             )
@@ -652,7 +654,7 @@ class SemanticWriters(SemanticQueries):
                 edge_type="project_contains_module",
                 to_node=f"module:{module.name}",
                 evidence_uri=evidence_uri,
-                extractor="uproject",
+                extractor="project_descriptor",
                 metadata=module.as_dict(),
                 commit=False,
             )
@@ -664,7 +666,7 @@ class SemanticWriters(SemanticQueries):
                 edge_type=edge_type,
                 to_node=f"plugin:{plugin_name}",
                 evidence_uri=evidence_uri,
-                extractor="uproject",
+                extractor="project_descriptor",
                 metadata={"enabled": enabled},
                 commit=False,
             )

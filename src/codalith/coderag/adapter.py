@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from codalith.corpus.registry import Corpus, CorpusRegistry
+from codalith.corpus.source_reader import SourceReader
 from codalith.corpus.uris import source_uri
 from codalith.errors import CodeRAGAdapterError, CorpusNotFoundError
 from codalith.text import camel_words, tokenize
@@ -96,6 +97,7 @@ class CodeRAGAdapter:
         self._local: dict[str, _LocalIndex] = {}
         self._indexed_at: dict[str, float] = {}
         self._native_fallbacks: dict[str, int] = {}
+        self._source_reader = SourceReader(registry)
 
     def _record_native_fallback(self, corpus_id: str, operation: str, exc: Exception) -> None:
         if os.getenv("CODALITH_NATIVE_CODERAG_STRICT"):
@@ -130,28 +132,7 @@ class CodeRAGAdapter:
         start_line: int | None = None,
         end_line: int | None = None,
     ) -> str:
-        corpus = self._corpus(corpus_id)
-        if self.prefer_native:
-            try:
-                native = self._native_instance(corpus)
-                return str(native.get_file(path, start_line, end_line))
-            except Exception as exc:
-                self._record_native_fallback(corpus_id, "get_file", exc)
-        full = self._root(corpus) / path
-        root = self._root(corpus).resolve()
-        resolved = full.resolve()
-        if root not in resolved.parents and resolved != root:
-            raise CodeRAGAdapterError(f"Path escapes corpus root: {path}")
-        if not resolved.exists() or not resolved.is_file():
-            raise FileNotFoundError(f"Source file does not exist: {path}")
-        lines = resolved.read_text(encoding="utf-8", errors="replace").splitlines()
-        if start_line is None and end_line is None:
-            return "\n".join(lines)
-        start = max(1, start_line or 1)
-        end = min(len(lines), end_line or len(lines))
-        if end < start:
-            return ""
-        return "\n".join(lines[start - 1 : end])
+        return self._source_reader.read_source(corpus_id, path, start_line, end_line)
 
     def status(self, corpus_id: str) -> dict[str, Any]:
         corpus = self._corpus(corpus_id)
@@ -321,11 +302,11 @@ class CodeRAGAdapter:
         return self._local.get(corpus.corpus_id, _build_local_index([]))
 
     def _scan(self, corpus: Corpus, subpath: str | None = None) -> list[_IndexedFile]:
-        root = self._root(corpus)
+        root = self._root(corpus).resolve()
         if not root.exists():
             return []
         scan_root = (root / subpath).resolve() if subpath else root
-        if root.resolve() not in scan_root.parents and scan_root != root.resolve():
+        if root not in scan_root.parents and scan_root != root:
             raise CodeRAGAdapterError(f"Path escapes corpus root: {subpath}")
         ignore_dirs = _BUILTIN_IGNORE_DIRS | set(corpus.index_ignore_dirs)
         suffixes = _BUILTIN_TEXT_SUFFIXES | set(corpus.index_suffixes)
@@ -386,6 +367,19 @@ _BUILTIN_TEXT_SUFFIXES = {
     ".cpp",
     ".c",
     ".cs",
+    ".py",
+    ".pyi",
+    ".js",
+    ".jsx",
+    ".ts",
+    ".tsx",
+    ".go",
+    ".rs",
+    ".java",
+    ".kt",
+    ".toml",
+    ".yaml",
+    ".yml",
     ".ini",
     ".json",
     ".md",
@@ -467,7 +461,7 @@ def module_from_path(path: str, module_roots: tuple[str, ...]) -> str | None:
 
 
 def _native_store_dir(corpus: Corpus) -> Path:
-    return Path(os.environ.get("CODERAG_STORE_DIR", str(corpus.coderag_store)))
+    return corpus.coderag_store
 
 
 def _configure_native_chunk_limit() -> None:

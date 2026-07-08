@@ -1,18 +1,7 @@
-"""Deterministic source entry-point locator.
-
-CodeRAG provides broad semantic retrieval. This module adds high-confidence
-source priors for canonical corpus concepts so Context Packs still cite stable
-source evidence when an embedding provider is intentionally low fidelity.
-
-All curated retrieval knowledge (source priors, module hints, identifier
-stopwords) is domain data that lives in configs/source_priors.json and is
-loaded once per process; set CODALITH_SOURCE_PRIORS to point at an
-alternative file.
-"""
+"""Deterministic source entry-point locator."""
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -21,11 +10,10 @@ from typing import Any
 from codalith.coderag.adapter import RetrievalHit, language_for_path
 from codalith.config import load_config
 from codalith.corpus.registry import Corpus
+from codalith.corpus.source_reader import SourceReader
 from codalith.corpus.uris import source_uri
 from codalith.errors import ConfigurationError
 from codalith.text import normalize, tokenize
-
-_DEFAULT_PRIORS_PATH = "configs/source_priors.json"
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,51 +25,53 @@ class SourcePrior:
     line_terms: tuple[str, ...] = ()
 
 
-@lru_cache(maxsize=1)
-def _domain_config() -> dict[str, Any]:
-    return load_config(_priors_path())
+@dataclass(frozen=True, slots=True)
+class SourceDomainConfig:
+    priors: tuple[SourcePrior, ...] = ()
+    module_hints: frozenset[str] = frozenset()
+    identifier_stopwords: frozenset[str] = frozenset()
 
 
-@lru_cache(maxsize=1)
-def source_priors() -> tuple[SourcePrior, ...]:
-    """Load and cache the curated source priors."""
-    return _parse_priors(_priors_path(), _domain_config())
+@lru_cache(maxsize=64)
+def load_source_domain_config(path: str | Path | None) -> SourceDomainConfig:
+    """Load optional corpus-local source priors and detector vocabulary."""
+    if path is None:
+        return SourceDomainConfig()
+    resolved = Path(path)
+    raw = load_config(resolved)
+    return SourceDomainConfig(
+        priors=_parse_priors(resolved, raw),
+        module_hints=frozenset(str(item) for item in raw.get("module_hints", [])),
+        identifier_stopwords=frozenset(
+            str(item) for item in raw.get("identifier_stopwords", [])
+        ),
+    )
 
 
-@lru_cache(maxsize=1)
-def module_hints() -> frozenset[str]:
-    """Corpus module names the entity detector should recognize in queries."""
-    return frozenset(str(item) for item in _domain_config().get("module_hints", []))
+def source_priors(path: str | Path | None = None) -> tuple[SourcePrior, ...]:
+    """Return source priors for an explicit corpus config path."""
+    return load_source_domain_config(path).priors
 
 
-@lru_cache(maxsize=1)
-def identifier_stopwords() -> frozenset[str]:
-    """Domain words the identifier detector must not treat as symbols."""
-    return frozenset(str(item) for item in _domain_config().get("identifier_stopwords", []))
+def module_hints(path: str | Path | None = None) -> frozenset[str]:
+    """Return module hints for an explicit corpus config path."""
+    return load_source_domain_config(path).module_hints
+
+
+def identifier_stopwords(path: str | Path | None = None) -> frozenset[str]:
+    """Return identifier stopwords for an explicit corpus config path."""
+    return load_source_domain_config(path).identifier_stopwords
 
 
 def reset_domain_config_cache() -> None:
     """Clear every cached view of the domain config (tests, config reloads)."""
-    _domain_config.cache_clear()
-    source_priors.cache_clear()
-    module_hints.cache_clear()
-    identifier_stopwords.cache_clear()
-
-
-def _priors_path() -> Path:
-    override = os.getenv("CODALITH_SOURCE_PRIORS")
-    if override:
-        return Path(override)
-    cwd_path = Path(_DEFAULT_PRIORS_PATH)
-    if cwd_path.exists():
-        return cwd_path
-    return Path(__file__).resolve().parents[3] / _DEFAULT_PRIORS_PATH
+    load_source_domain_config.cache_clear()
 
 
 def _parse_priors(path: Path, raw: dict[str, Any]) -> tuple[SourcePrior, ...]:
-    priors = raw.get("priors")
-    if not isinstance(priors, list) or not priors:
-        raise ConfigurationError(f"{path} must define a non-empty 'priors' list")
+    priors = raw.get("priors", [])
+    if not isinstance(priors, list):
+        raise ConfigurationError(f"{path} must define a 'priors' list")
     loaded: list[SourcePrior] = []
     for index, item in enumerate(priors):
         if not isinstance(item, dict):
@@ -107,19 +97,22 @@ def locate_source_priors(
     query: str,
     identifiers: list[str],
     max_hits: int,
+    priors: tuple[SourcePrior, ...] = (),
+    source_reader: SourceReader | None = None,
 ) -> list[RetrievalHit]:
     scored: list[tuple[float, SourcePrior]] = []
     normalized_query = normalize(query)
     identifier_terms = {normalize(identifier) for identifier in identifiers}
     query_tokens = set(tokenize(normalized_query))
-    for prior in source_priors():
+    reader = source_reader or SourceReaderPlaceholder(corpus)
+    for prior in priors:
         score = _score_prior(prior, normalized_query, identifier_terms, query_tokens)
         if score > 0:
             scored.append((score, prior))
 
     hits: list[RetrievalHit] = []
     for score, prior in sorted(scored, key=lambda item: item[0], reverse=True):
-        hit = _hit_for_prior(corpus, prior, query=query, score=score)
+        hit = _hit_for_prior(corpus, prior, query=query, score=score, source_reader=reader)
         if hit is not None:
             hits.append(hit)
         if len(hits) >= max_hits:
@@ -156,13 +149,17 @@ def _score_prior(
     return score
 
 
-def _hit_for_prior(corpus: Corpus, prior: SourcePrior, *, query: str, score: float) -> RetrievalHit | None:
-    full_path = _root(corpus) / prior.path
-    if not full_path.is_file():
-        return None
+def _hit_for_prior(
+    corpus: Corpus,
+    prior: SourcePrior,
+    *,
+    query: str,
+    score: float,
+    source_reader: SourceReader | SourceReaderPlaceholder,
+) -> RetrievalHit | None:
     try:
-        lines = full_path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
+        lines = source_reader.read_lines(corpus.corpus_id, prior.path)
+    except (OSError, FileNotFoundError):
         return None
     if not lines:
         return None
@@ -203,6 +200,16 @@ def _window(lines: list[str], *, query: str, line_terms: tuple[str, ...]) -> tup
     end = min(len(lines), best_line + 15)
     return start, end
 
+class SourceReaderPlaceholder:
+    """Tiny source-root-first reader for direct unit calls without a registry."""
 
-def _root(corpus: Corpus) -> Path:
-    return corpus.indexed_root if corpus.indexed_root.exists() else corpus.source_root
+    def __init__(self, corpus: Corpus) -> None:
+        self.corpus = corpus
+
+    def read_lines(self, corpus_id: str, path: str) -> list[str]:
+        _ = corpus_id
+        for root in (self.corpus.source_root, self.corpus.indexed_root):
+            target = root / path
+            if target.is_file():
+                return target.read_text(encoding="utf-8", errors="replace").splitlines()
+        raise FileNotFoundError(path)

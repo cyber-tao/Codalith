@@ -99,7 +99,7 @@ def write_reports(report: EvalReport, output_dir: str | Path) -> tuple[Path, Pat
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--registry", default="configs/corpus_registry.json")
-    parser.add_argument("--dataset", default="eval/datasets/ue_eval_suite.jsonl")
+    parser.add_argument("--dataset", default="eval/datasets/sample_eval_suite.jsonl")
     parser.add_argument("--output-dir", default="reports/eval")
     parser.add_argument(
         "--version", default=None, help="Engine version (defaults to the registry default engine)"

@@ -1,12 +1,7 @@
-"""Built-in Knowledge Card generator.
-
-Seed card topics are domain data and live in configs/seed_cards.json; set
-CODALITH_SEED_CARDS to point at an alternative file.
-"""
+"""Knowledge Card generator from optional corpus seed topics."""
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
@@ -21,8 +16,6 @@ from codalith.corpus.uri_resolver import URIResolver
 from codalith.corpus.uris import source_uri
 from codalith.errors import ConfigurationError
 
-_DEFAULT_SEED_CARDS_PATH = "configs/seed_cards.json"
-
 
 @dataclass(frozen=True, slots=True)
 class SeedTopic:
@@ -33,14 +26,15 @@ class SeedTopic:
     related_node: str
 
 
-@lru_cache(maxsize=1)
-def seed_topics() -> tuple[SeedTopic, ...]:
+@lru_cache(maxsize=64)
+def seed_topics(path: str | Path | None = None) -> tuple[SeedTopic, ...]:
     """Load and cache the curated seed card topics."""
-    path = _seed_cards_path()
+    if path is None:
+        return ()
     raw = load_config(path)
-    topics = raw.get("topics")
-    if not isinstance(topics, list) or not topics:
-        raise ConfigurationError(f"{path} must define a non-empty 'topics' list")
+    topics = raw.get("topics", [])
+    if not isinstance(topics, list):
+        raise ConfigurationError(f"{path} must define a 'topics' list")
     loaded: list[SeedTopic] = []
     for index, item in enumerate(topics):
         if not isinstance(item, dict):
@@ -60,19 +54,14 @@ def seed_topics() -> tuple[SeedTopic, ...]:
     return tuple(loaded)
 
 
-def _seed_cards_path() -> Path:
-    override = os.getenv("CODALITH_SEED_CARDS")
-    if override:
-        return Path(override)
-    cwd_path = Path(_DEFAULT_SEED_CARDS_PATH)
-    if cwd_path.exists():
-        return cwd_path
-    return Path(__file__).resolve().parents[3] / _DEFAULT_SEED_CARDS_PATH
-
-
-def built_in_cards(*, corpus_id: str, version: str) -> list[KnowledgeCard]:
+def built_in_cards(
+    *,
+    corpus_id: str,
+    version: str,
+    seed_cards_path: str | Path | None = None,
+) -> list[KnowledgeCard]:
     cards: list[KnowledgeCard] = []
-    for topic in seed_topics():
+    for topic in seed_topics(seed_cards_path):
         evidence_uri = source_uri(corpus_id, topic.path, 1, 20)
         cards.append(
             KnowledgeCard(

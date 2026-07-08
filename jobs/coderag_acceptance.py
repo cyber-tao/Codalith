@@ -28,9 +28,9 @@ DEFAULT_CODERAG_WORKERS = "4"
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--registry", default="configs/corpus_registry.json")
-    parser.add_argument("--dataset", default="eval/datasets/ue_eval_suite.jsonl")
+    parser.add_argument("--dataset", default="eval/datasets/sample_eval_suite.jsonl")
     parser.add_argument(
-        "--version", default=None, help="Engine version (defaults to the registry default engine)"
+        "--version", default=None, help="Corpus version (defaults to the registry default corpus)"
     )
     parser.add_argument("--output-dir", default="reports/coderag")
     parser.add_argument("--provider", default=os.getenv("CODALITH_CODERAG_PROVIDER", "fake"))
@@ -55,13 +55,18 @@ def main(argv: list[str] | None = None) -> int:
     cards = [
         card.verified()
         for card in attach_source_hashes(
-            built_in_cards(corpus_id=corpus.corpus_id, version=corpus.version_label),
+            built_in_cards(
+                corpus_id=corpus.corpus_id,
+                version=corpus.version_label,
+                seed_cards_path=corpus.seed_cards_path,
+            ),
             resolver,
             card_adapter,
         )
     ]
     write_cards(cards, corpus.card_root)
-    write_cards(cards, corpus.indexed_root)
+    if corpus.indexed_root.exists() or corpus.indexed_root == corpus.source_root:
+        write_cards(cards, corpus.indexed_root)
 
     os.environ["CODALITH_USE_NATIVE_CODERAG"] = "1"
     os.environ["CODALITH_NATIVE_CODERAG_STRICT"] = "1"
@@ -208,24 +213,12 @@ def configure_openai_batch_limit(provider: str) -> None:
 
 
 def prepare_indexed_root(corpus: Corpus) -> None:
-    corpus.indexed_root.mkdir(parents=True, exist_ok=True)
-    engine_dir = corpus.indexed_root / "Engine"
-    if not engine_dir.exists():
-        source_engine = corpus.source_root / "Engine"
-        if not source_engine.exists():
-            raise FileNotFoundError(f"Engine source directory is missing: {source_engine}")
-        try:
-            engine_dir.symlink_to(source_engine, target_is_directory=True)
-        except OSError as exc:
-            # Docker compose mounts the engine source directly for the real acceptance profile.
-            raise FileNotFoundError(
-                f"{engine_dir} is missing. Mount the engine source there or run with an indexed root."
-            ) from exc
-    if engine_dir.is_symlink():
-        raise RuntimeError(
-            f"{engine_dir} is a symlink; CodeRAG's walker does not follow symlinked directories. "
-            "Mount the Engine directory directly into indexed_root/Engine."
-        )
+    if corpus.indexed_root.exists() or corpus.source_root.exists():
+        return
+    raise FileNotFoundError(
+        f"Neither indexed_root nor source_root exists for corpus {corpus.corpus_id}: "
+        f"{corpus.indexed_root} / {corpus.source_root}"
+    )
 
 
 def enforce_acceptance(

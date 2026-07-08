@@ -17,7 +17,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--registry", default="configs/corpus_registry.json")
     parser.add_argument("--version", default=None, help="Engine version (defaults to the registry default engine)")
     parser.add_argument("--project")
-    parser.add_argument("--corpus-id")
+    parser.add_argument("--corpus", help="Explicit corpus id or version alias")
+    parser.add_argument("--corpus-id", help="Output corpus id override")
     parser.add_argument("--output", default="reports/semantic_summary.json")
     parser.add_argument("--min-modules", type=int, default=0)
     parser.add_argument("--min-reflection-entities", type=int, default=0)
@@ -27,7 +28,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     registry = CorpusRegistry.from_file(args.registry)
-    corpus = registry.get_project(args.project) if args.project else registry.get_engine(args.version)
+    if args.corpus:
+        corpus = registry.get_corpus(args.corpus)
+    elif args.project:
+        corpus = registry.get_project(args.project)
+    else:
+        corpus = registry.get_engine(args.version)
     root = corpus.indexed_root if corpus.indexed_root.exists() else corpus.source_root
     store = SemanticStore(args.semantic_db) if args.semantic_db else None
     if store is not None:

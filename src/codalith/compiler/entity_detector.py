@@ -1,14 +1,12 @@
 """Lightweight entity detection from a query string.
 
-Detection is generic; the corpus-specific vocabulary (module hints and extra
-identifier stopwords) comes from the domain config next to the source priors.
+Detection is generic; corpus-specific vocabulary is passed in by the caller.
 """
 
 from __future__ import annotations
 
 import re
 
-from codalith.compiler.source_locator import identifier_stopwords, module_hints
 from codalith.text import camel_words, contains_word
 
 _IDENT_RE = re.compile(r"\b[A-Z][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)?\b")
@@ -67,17 +65,17 @@ _ENGLISH_STOPWORDS = frozenset(
 )
 
 
-def detect_identifiers(query: str) -> list[str]:
-    stopwords = _ENGLISH_STOPWORDS | identifier_stopwords()
+def detect_identifiers(query: str, *, stopwords: frozenset[str] = frozenset()) -> list[str]:
+    ignored = _ENGLISH_STOPWORDS | stopwords
     found = dict.fromkeys(_IDENT_RE.findall(query))
-    return [identifier for identifier in found if identifier not in stopwords]
+    return [identifier for identifier in found if identifier not in ignored]
 
 
-def detect_modules(query: str) -> list[str]:
+def detect_modules(query: str, *, module_hints: frozenset[str] = frozenset()) -> list[str]:
     lower = query.lower()
     found = [
         module
-        for module in module_hints()
+        for module in module_hints
         if any(contains_word(variant, lower) for variant in _module_variants(module))
     ]
     return sorted(found)

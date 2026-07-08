@@ -2,12 +2,14 @@ x-codalith-env: &codalith-env
   PYTHONPATH: ${CODALITH_WORKSPACE_DIR:-/workspace}/src
   CODALITH_AUDIT_LOG: ${CODALITH_AUDIT_LOG:-/workspace/data/audit/source_reads.jsonl}
   CODALITH_SEMANTIC_DSN: ${CODALITH_SEMANTIC_DSN:-postgresql://codalith:codalith@postgres:5432/codalith}
-  CODALITH_ENGINE_VERSION: ${CODALITH_ENGINE_VERSION:-5.7.4}
-  CODALITH_ENGINE_SEMANTIC_SCHEMA: ${CODALITH_ENGINE_SEMANTIC_SCHEMA:-ue_5_7_4}
-  CODALITH_ENGINE_SOURCE_ROOT: ${CODALITH_ENGINE_SOURCE_ROOT:-/srv/ue/5.7.4}
-  CODALITH_ENGINE_INDEXED_ROOT: ${CODALITH_ENGINE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}
-  CODALITH_ENGINE_CARD_ROOT: ${CODALITH_ENGINE_CARD_ROOT:-/srv/codalith/cards/ue-5.7.4}
-  CODALITH_ENGINE_ACCESS_SCOPE: ${CODALITH_ENGINE_ACCESS_SCOPE:-ue:5.7}
+  CODALITH_SAMPLE_CORPUS_ID: ${CODALITH_SAMPLE_CORPUS_ID:-sample-codebase}
+  CODALITH_SAMPLE_VERSION: ${CODALITH_SAMPLE_VERSION:-sample}
+  CODALITH_SAMPLE_SOURCE_ROOT: ${CODALITH_SAMPLE_SOURCE_ROOT:-fixtures/sample_corpus}
+  CODALITH_SAMPLE_INDEXED_ROOT: ${CODALITH_SAMPLE_INDEXED_ROOT:-fixtures/sample_corpus}
+  CODALITH_SAMPLE_CARD_ROOT: ${CODALITH_SAMPLE_CARD_ROOT:-data/cards/sample-codebase}
+  CODALITH_SAMPLE_CODERAG_STORE_DIR: ${CODALITH_SAMPLE_CODERAG_STORE_DIR:-data/coderag/sample-codebase}
+  CODALITH_SAMPLE_SOURCE_PRIORS: ${CODALITH_SAMPLE_SOURCE_PRIORS:-configs/source_priors.json}
+  CODALITH_SAMPLE_SEED_CARDS: ${CODALITH_SAMPLE_SEED_CARDS:-configs/seed_cards.json}
   # Empty grants base capabilities plus every corpus access scope from the registry.
   CODALITH_SCOPES: ${CODALITH_SCOPES:-}
   UV_PROJECT_ENVIRONMENT: ${CODALITH_UV_ENV:-/tmp/codalith-venv}
@@ -17,7 +19,6 @@ x-codalith-env: &codalith-env
   LANCE_INCLUDE_VECTOR_CENTROIDS: ${LANCE_INCLUDE_VECTOR_CENTROIDS:-false}
 
 x-coderag-openai-env: &coderag-openai-env
-  # Upstream CodeRAG still reads CODERAG_*; .env exposes CODALITH_* names.
   CODERAG_PROVIDER: openai
   CODERAG_OPENAI_MODEL: ${CODALITH_CODERAG_EMBEDDING_MODEL:-Qwen3-Embedding-8B}
   CODERAG_OPENAI_BATCH: ${CODALITH_CODERAG_EMBEDDING_BATCH_SIZE:-32}
@@ -26,8 +27,7 @@ x-coderag-openai-env: &coderag-openai-env
   OPENAI_API_KEY: ${OPENAI_API_KEY:-replace-me}
   CODERAG_INDEX_ALL_TEXT: "1"
   CODERAG_GITIGNORE: "0"
-  CODERAG_STORE_DIR: ${CODALITH_CODERAG_OPENAI_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4-openai-qwen3-embedding-8b}
-  CODALITH_CODERAG_STORE_DIR: ${CODALITH_CODERAG_OPENAI_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4-openai-qwen3-embedding-8b}
+  CODERAG_STORE_DIR: ${CODALITH_CODERAG_OPENAI_STORE_DIR:-/var/lib/codalith/coderag/sample-codebase-openai}
   CODALITH_CODERAG_MAX_CHUNK_CHARS: ${CODALITH_CODERAG_MAX_CHUNK_CHARS:-2048}
   CODALITH_CODERAG_MAX_CHUNK_BYTES: ${CODALITH_CODERAG_MAX_CHUNK_BYTES:-}
   CODALITH_CODERAG_BATCH_CHUNKS: ${CODALITH_CODERAG_BATCH_CHUNKS:-}
@@ -76,16 +76,11 @@ services:
     env_file:
       - .env
     environment:
-      <<:
-        - *codalith-env
-        - *coderag-openai-env
+      <<: *codalith-env
       CODALITH_HTTP_HOST: ${CODALITH_HTTP_HOST:-0.0.0.0}
       CODALITH_HTTP_PORT: ${CODALITH_HTTP_PORT:-8765}
       CODALITH_HTTP_ENDPOINT: ${CODALITH_HTTP_ENDPOINT:-/mcp}
       CODALITH_HTTP_ALLOWED_ORIGINS: ${CODALITH_HTTP_ALLOWED_ORIGINS:-}
-      CODALITH_USE_NATIVE_CODERAG: "1"
-      CODALITH_NATIVE_CODERAG_STRICT: "1"
-      CODALITH_NATIVE_CODERAG_PROGRESS: "1"
     depends_on:
       postgres:
         condition: service_healthy
@@ -93,17 +88,8 @@ services:
       - "${CODALITH_HTTP_BIND:-127.0.0.1}:${CODALITH_HTTP_PORT:-8765}:${CODALITH_HTTP_PORT:-8765}"
     volumes:
       - ${CODALITH_REPO_ROOT:-.}:${CODALITH_WORKSPACE_DIR:-/workspace}
-      - ${CODALITH_CODERAG_OPENAI_HOST_ROOT:-coderag-openai-store}:${CODALITH_CODERAG_VOLUME_ROOT:-/var/lib/codalith/coderag}
-      - ${CODALITH_ENGINE_HOST_ROOT:-E:/UnrealEngine_5.7}:${CODALITH_ENGINE_SOURCE_ROOT:-/srv/ue/5.7.4}:ro
-      # Same layout the store was indexed from: engine sources, all plugins
-      # (source priors may cite any of them), and knowledge cards.
-      - ${CODALITH_ENGINE_SOURCE_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Source}:${CODALITH_ENGINE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Source:ro
-      - ${CODALITH_ENGINE_PLUGINS_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Plugins}:${CODALITH_ENGINE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Plugins:ro
-      - ${CODALITH_REPO_ROOT:-.}/data/cards/ue-${CODALITH_ENGINE_VERSION:-5.7.4}/KNOWLEDGE:${CODALITH_ENGINE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/KNOWLEDGE
-      - ${CODALITH_REPO_ROOT:-.}/data/cards/ue-${CODALITH_ENGINE_VERSION:-5.7.4}:${CODALITH_ENGINE_CARD_ROOT:-/srv/codalith/cards/ue-5.7.4}
     command: >
       sh -lc "uv sync &&
-      uv run python -c 'from jobs.coderag_acceptance import ensure_coderag_installed; ensure_coderag_installed(\"openai\")' &&
       uv run codalith-mcp-http"
 
   corpus-acceptance:
@@ -114,18 +100,16 @@ services:
       - .env
     environment:
       <<: *codalith-env
-      CODALITH_EXPECT_SEMANTIC_READY: "1"
     depends_on:
       postgres:
         condition: service_healthy
     volumes:
       - ${CODALITH_REPO_ROOT:-.}:${CODALITH_WORKSPACE_DIR:-/workspace}
-      - ${CODALITH_ENGINE_HOST_ROOT:-E:/UnrealEngine_5.7}:${CODALITH_ENGINE_SOURCE_ROOT:-/srv/ue/5.7.4}:ro
     command: >
       sh -lc "uv sync --extra dev &&
-      uv run codalith-index-engine --version \"$${CODALITH_ENGINE_VERSION}\" --smoke &&
-      uv run codalith-extract-semantic --version \"$${CODALITH_ENGINE_VERSION}\" --semantic-db \"$${CODALITH_SEMANTIC_DSN}\" --min-modules 100 --min-reflection-entities 100 --min-guards 10 --stop-after-min &&
-      uv run codalith-verify-cards --version \"$${CODALITH_ENGINE_VERSION}\" &&
+      uv run codalith-index-corpus --corpus \"$${CODALITH_SAMPLE_CORPUS_ID}\" --smoke --smoke-file src/core/cache.py &&
+      uv run codalith-extract-semantic --corpus \"$${CODALITH_SAMPLE_CORPUS_ID}\" --semantic-db \"$${CODALITH_SEMANTIC_DSN}\" &&
+      uv run codalith-verify-cards --corpus \"$${CODALITH_SAMPLE_CORPUS_ID}\" &&
       uv run pytest -m corpus_acceptance"
 
   coderag-acceptance:
@@ -140,20 +124,15 @@ services:
       CODERAG_INDEX_ALL_TEXT: "1"
       CODERAG_GITIGNORE: "0"
       CODERAG_WORKERS: ${CODALITH_CODERAG_WORKERS:-4}
-      CODERAG_STORE_DIR: ${CODALITH_CODERAG_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4}
-      CODALITH_CODERAG_STORE_DIR: ${CODALITH_CODERAG_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4}
       CODALITH_NATIVE_CODERAG_PROGRESS: "1"
     depends_on:
       postgres:
         condition: service_healthy
     volumes:
       - ${CODALITH_REPO_ROOT:-.}:${CODALITH_WORKSPACE_DIR:-/workspace}
-      - ${CODALITH_ENGINE_HOST_ROOT:-E:/UnrealEngine_5.7}:${CODALITH_ENGINE_SOURCE_ROOT:-/srv/ue/5.7.4}:ro
-      - ${CODALITH_ENGINE_SOURCE_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Source}:${CODALITH_ENGINE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Source:ro
-      - ${CODALITH_GAMEPLAY_ABILITIES_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Plugins/Runtime/GameplayAbilities}:${CODALITH_ENGINE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Plugins/Runtime/GameplayAbilities:ro
     command: >
       sh -lc "uv sync &&
-      uv run codalith-coderag-acceptance --version \"$${CODALITH_ENGINE_VERSION}\" --provider fake --full"
+      uv run codalith-coderag-acceptance --version \"$${CODALITH_SAMPLE_VERSION}\" --provider fake --dataset eval/datasets/sample_eval_suite.jsonl --full --min-files 2 --min-chunks 2"
 
   coderag-openai-acceptance:
     image: ghcr.io/astral-sh/uv:python3.12-bookworm
@@ -172,12 +151,35 @@ services:
     volumes:
       - ${CODALITH_REPO_ROOT:-.}:${CODALITH_WORKSPACE_DIR:-/workspace}
       - ${CODALITH_CODERAG_OPENAI_HOST_ROOT:-coderag-openai-store}:${CODALITH_CODERAG_VOLUME_ROOT:-/var/lib/codalith/coderag}
-      - ${CODALITH_ENGINE_HOST_ROOT:-E:/UnrealEngine_5.7}:${CODALITH_ENGINE_SOURCE_ROOT:-/srv/ue/5.7.4}:ro
-      - ${CODALITH_ENGINE_SOURCE_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Source}:${CODALITH_ENGINE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Source:ro
-      - ${CODALITH_GAMEPLAY_ABILITIES_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Plugins/Runtime/GameplayAbilities}:${CODALITH_ENGINE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Plugins/Runtime/GameplayAbilities:ro
     command: >
       sh -lc "uv sync &&
-      uv run codalith-coderag-acceptance --version \"$${CODALITH_ENGINE_VERSION}\" --provider openai --output-dir reports/coderag-openai"
+      uv run codalith-coderag-acceptance --version \"$${CODALITH_SAMPLE_VERSION}\" --provider openai --dataset eval/datasets/sample_eval_suite.jsonl --output-dir reports/coderag-openai --min-files 2 --min-chunks 2"
+
+  ue-eval:
+    image: ghcr.io/astral-sh/uv:python3.12-bookworm
+    profiles: ["eval-ue"]
+    working_dir: ${CODALITH_WORKSPACE_DIR:-/workspace}
+    env_file:
+      - .env
+    environment:
+      <<: *codalith-env
+      CODALITH_USE_NATIVE_CODERAG: "1"
+      CODALITH_NATIVE_CODERAG_STRICT: "1"
+      CODALITH_EVAL_UE_VERSION: ${CODALITH_EVAL_UE_VERSION:-5.7.4}
+      CODALITH_EVAL_UE_SOURCE_ROOT: ${CODALITH_EVAL_UE_SOURCE_ROOT:-/srv/ue/5.7.4}
+      CODALITH_EVAL_UE_INDEXED_ROOT: ${CODALITH_EVAL_UE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}
+      CODALITH_EVAL_UE_CODERAG_STORE_DIR: ${CODALITH_EVAL_UE_CODERAG_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ${CODALITH_REPO_ROOT:-.}:${CODALITH_WORKSPACE_DIR:-/workspace}
+      - ${CODALITH_EVAL_UE_HOST_ROOT:-E:/UnrealEngine_5.7}:${CODALITH_EVAL_UE_SOURCE_ROOT:-/srv/ue/5.7.4}:ro
+      - ${CODALITH_EVAL_UE_SOURCE_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Source}:${CODALITH_EVAL_UE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Source:ro
+      - ${CODALITH_EVAL_UE_PLUGINS_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Plugins}:${CODALITH_EVAL_UE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Plugins:ro
+    command: >
+      sh -lc "uv sync &&
+      uv run python -m codalith.eval.runner --registry eval/configs/ue_5_7_4_registry.json --dataset eval/datasets/ue_eval_suite.jsonl --output-dir reports/eval/ue_eval_suite --version \"$${CODALITH_EVAL_UE_VERSION}\" --max-source-spans 20"
 
 volumes:
   codalith-postgres:

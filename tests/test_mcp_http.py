@@ -46,14 +46,14 @@ def test_streamable_http_post_get_session_and_origin(tools):
                 "method": "tools/call",
                 "params": {
                     "name": "codalith_index_status",
-                    "arguments": {"version": "5.7.4"},
+                    "arguments": {"version": "sample"},
                 },
             },
             session_id=session_id,
         )
         assert status_response.status == 200
         assert "error" not in status_payload
-        assert status_payload["result"]["structuredContent"]["semantic"]["engine"]["corpus_id"] == "ue-5.7.4"
+        assert status_payload["result"]["structuredContent"]["semantic"]["engine"]["corpus_id"] == "sample-codebase"
 
         graph_response, graph_payload = _post(
             host,
@@ -64,7 +64,7 @@ def test_streamable_http_post_get_session_and_origin(tools):
                 "method": "tools/call",
                 "params": {
                     "name": "codalith_graph",
-                    "arguments": {"node": "AActor", "version": "5.7.4"},
+                    "arguments": {"node": "EventBus", "version": "sample"},
                 },
             },
             session_id=session_id,

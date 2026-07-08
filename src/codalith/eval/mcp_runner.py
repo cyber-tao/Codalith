@@ -222,7 +222,7 @@ def write_reports(report: MCPEvalReport, output_dir: str | Path) -> tuple[Path, 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--endpoint", default="http://127.0.0.1:8765/mcp")
-    parser.add_argument("--dataset", default="eval/datasets/ue_eval_suite.jsonl")
+    parser.add_argument("--dataset", default="eval/datasets/sample_eval_suite.jsonl")
     parser.add_argument("--output-dir", default="reports/mcp-eval")
     parser.add_argument("--label", default="baseline")
     parser.add_argument(

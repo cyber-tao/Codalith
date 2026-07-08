@@ -1,74 +1,36 @@
 {
   "engines": {
-    "ue-${CODALITH_ENGINE_VERSION:-5.7.4}": {
-      "kind": "engine",
-      "version": "${CODALITH_ENGINE_VERSION:-5.7.4}",
-      "display_name": "${CODALITH_ENGINE_DISPLAY_NAME:-Unreal Engine}",
-      "description": "${CODALITH_ENGINE_DESCRIPTION:-Unreal Engine full source tree (C++, Build.cs, plugins, generated reflection code)}",
+    "${CODALITH_SAMPLE_CORPUS_ID:-sample-codebase}": {
+      "kind": "source",
+      "version": "${CODALITH_SAMPLE_VERSION:-sample}",
+      "display_name": "${CODALITH_SAMPLE_DISPLAY_NAME:-Sample Codebase}",
+      "description": "${CODALITH_SAMPLE_DESCRIPTION:-Small neutral source corpus for local Codalith development}",
       "keywords": [
-        "Unreal Engine",
-        "UE5",
-        "UHT",
-        "reflection",
-        "Build.cs",
-        "networking",
-        "rendering",
-        "gameplay framework",
-        "editor",
-        "asset",
-        "GC",
-        "serialization"
+        "source code",
+        "API",
+        "architecture",
+        "cache",
+        "events"
       ],
-      "source_commit": "${CODALITH_ENGINE_SOURCE_COMMIT:-UNKNOWN}",
-      "source_root": "${CODALITH_ENGINE_SOURCE_ROOT:-/srv/ue/5.7.4}",
-      "indexed_root": "${CODALITH_ENGINE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}",
-      "coderag_store": "${CODALITH_CODERAG_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4}",
-      "semantic_schema": "${CODALITH_ENGINE_SEMANTIC_SCHEMA:-ue_5_7_4}",
-      "semantic_profile": "unreal",
-      "card_root": "${CODALITH_ENGINE_CARD_ROOT:-/srv/codalith/cards/ue-5.7.4}",
+      "source_commit": "${CODALITH_SAMPLE_SOURCE_COMMIT:-UNKNOWN}",
+      "source_root": "${CODALITH_SAMPLE_SOURCE_ROOT:-fixtures/sample_corpus}",
+      "indexed_root": "${CODALITH_SAMPLE_INDEXED_ROOT:-fixtures/sample_corpus}",
+      "coderag_store": "${CODALITH_SAMPLE_CODERAG_STORE_DIR:-data/coderag/sample-codebase}",
+      "semantic_schema": "${CODALITH_SAMPLE_SEMANTIC_SCHEMA:-sample_codebase}",
+      "card_root": "${CODALITH_SAMPLE_CARD_ROOT:-data/cards/sample-codebase}",
+      "seed_cards_path": "${CODALITH_SAMPLE_SEED_CARDS:-configs/seed_cards.json}",
+      "source_priors_path": "${CODALITH_SAMPLE_SOURCE_PRIORS:-configs/source_priors.json}",
       "default": true,
-      "access_scopes": ["${CODALITH_ENGINE_ACCESS_SCOPE:-ue:5.7}", "source:read"],
+      "access_scopes": ["source:read"],
       "scope_prefixes": {
-        "engine": ["Engine/Source/"],
-        "plugins": ["Engine/Plugins/"]
+        "source": ["src/"],
+        "docs": ["docs/"]
       },
-      "module_roots": ["Runtime", "Developer", "Editor"],
-      "index_ignore_dirs": ["Binaries", "Intermediate", "Saved", "DerivedDataCache", "ThirdParty"],
-      "index_suffixes": [".uplugin", ".uproject"]
+      "module_roots": ["src"],
+      "index_ignore_dirs": [".venv", "node_modules", "dist", "build", "__pycache__"],
+      "index_suffixes": [".py", ".md", ".json", ".toml", ".yaml", ".yml"]
     }
   },
-  "projects": {
-    "${CODALITH_PROJECT_ID:-ProjectA}": {
-      "kind": "project",
-      "display_name": "${CODALITH_PROJECT_DISPLAY_NAME:-Game project overlay}",
-      "engine_corpus": "ue-${CODALITH_ENGINE_VERSION:-5.7.4}",
-      "source_root": "${CODALITH_PROJECT_SOURCE_ROOT:-fixtures/project_overlay/ProjectA}",
-      "indexed_root": "${CODALITH_PROJECT_INDEXED_ROOT:-fixtures/project_overlay/ProjectA}",
-      "coderag_store": "${CODALITH_PROJECT_CODERAG_STORE_DIR:-data/coderag/project-a}",
-      "semantic_schema": "${CODALITH_PROJECT_SEMANTIC_SCHEMA:-project_a}",
-      "semantic_profile": "unreal",
-      "card_root": "${CODALITH_PROJECT_CARD_ROOT:-data/cards/project-a}",
-      "access_scopes": ["${CODALITH_PROJECT_ACCESS_SCOPE:-project:ProjectA}", "source:read"],
-      "module_roots": ["Runtime", "Developer", "Editor"],
-      "index_ignore_dirs": ["Binaries", "Intermediate", "Saved", "DerivedDataCache", "ThirdParty"],
-      "index_suffixes": [".uplugin", ".uproject"]
-    }
-  },
-  "generated": {
-    "generated-ue-${CODALITH_ENGINE_VERSION:-5.7.4}": {
-      "kind": "generated",
-      "engine_corpus": "ue-${CODALITH_ENGINE_VERSION:-5.7.4}",
-      "version": "${CODALITH_ENGINE_VERSION:-5.7.4}",
-      "source_root": "${CODALITH_GENERATED_SOURCE_ROOT:-data/generated/ue-5.7.4}",
-      "indexed_root": "${CODALITH_GENERATED_INDEXED_ROOT:-data/generated/ue-5.7.4}",
-      "coderag_store": "${CODALITH_GENERATED_CODERAG_STORE_DIR:-data/coderag/generated-ue-5.7.4}",
-      "semantic_schema": "${CODALITH_GENERATED_SEMANTIC_SCHEMA:-generated_ue_5_7_4}",
-      "semantic_profile": "unreal",
-      "card_root": "${CODALITH_GENERATED_CARD_ROOT:-data/cards/generated-ue-5.7.4}",
-      "access_scopes": ["${CODALITH_GENERATED_ACCESS_SCOPE:-generated:read}", "source:read"],
-      "module_roots": ["Runtime", "Developer", "Editor"],
-      "index_ignore_dirs": ["Binaries", "Intermediate", "Saved", "DerivedDataCache", "ThirdParty"],
-      "index_suffixes": [".uplugin", ".uproject"]
-    }
-  }
+  "projects": {},
+  "generated": {}
 }

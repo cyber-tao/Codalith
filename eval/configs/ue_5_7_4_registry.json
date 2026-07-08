@@ -1,0 +1,30 @@
+{
+  "engines": {
+    "ue-${CODALITH_EVAL_UE_VERSION:-5.7.4}": {
+      "kind": "source",
+      "version": "${CODALITH_EVAL_UE_VERSION:-5.7.4}",
+      "display_name": "UE Eval Source Corpus",
+      "description": "Eval-only corpus for the existing UE 5.7 CodeRAG embedding store",
+      "keywords": ["UE eval", "source retrieval benchmark"],
+      "source_commit": "${CODALITH_EVAL_UE_SOURCE_COMMIT:-UNKNOWN}",
+      "source_root": "${CODALITH_EVAL_UE_SOURCE_ROOT:-/srv/ue/5.7.4}",
+      "indexed_root": "${CODALITH_EVAL_UE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}",
+      "coderag_store": "${CODALITH_EVAL_UE_CODERAG_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4}",
+      "semantic_schema": "${CODALITH_EVAL_UE_SEMANTIC_SCHEMA:-eval_ue_5_7_4}",
+      "card_root": "${CODALITH_EVAL_UE_CARD_ROOT:-/srv/codalith/cards/ue-5.7.4}",
+      "source_priors_path": "${CODALITH_EVAL_UE_SOURCE_PRIORS:-eval/configs/ue_source_priors.json}",
+      "seed_cards_path": "${CODALITH_EVAL_UE_SEED_CARDS:-eval/configs/ue_seed_cards.json}",
+      "default": true,
+      "access_scopes": ["source:read"],
+      "scope_prefixes": {
+        "source": ["Engine/Source/"],
+        "plugins": ["Engine/Plugins/"]
+      },
+      "module_roots": ["Runtime", "Developer", "Editor"],
+      "index_ignore_dirs": ["Binaries", "Intermediate", "Saved", "DerivedDataCache", "ThirdParty"],
+      "index_suffixes": [".uplugin", ".uproject", ".Build.cs", ".Target.cs"]
+    }
+  },
+  "projects": {},
+  "generated": {}
+}

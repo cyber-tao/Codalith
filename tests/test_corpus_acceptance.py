@@ -11,24 +11,18 @@ from codalith.semantic.store import SemanticStore
 
 
 @pytest.mark.corpus_acceptance
-def test_ue57_source_mount_can_read_actor_header():
-    root = Path("/srv/ue/5.7.4")
-    if not (root / "Engine/Source").exists():
-        pytest.skip("UE 5.7 source is not mounted at /srv/ue/5.7.4")
-    assert (root / "Engine/Source").exists()
+def test_sample_source_mount_can_read_cache_file():
     registry = CorpusRegistry.from_file("configs/corpus_registry.json")
+    corpus = registry.get_engine()
+    if not corpus.source_root.exists():
+        pytest.skip(f"Sample source root is not available: {corpus.source_root}")
     adapter = CodeRAGAdapter(registry)
-    content = adapter.get_file(
-        "ue-5.7.4",
-        "Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h",
-        1,
-        5,
-    )
-    assert "AActor" in content or "#pragma once" in content
+    content = adapter.get_file(corpus.corpus_id, "src/core/cache.py", 1, 20)
+    assert "CachedValue" in content
 
 
 @pytest.mark.corpus_acceptance
-def test_ue57_semantic_status_meets_v0_floors():
+def test_sample_semantic_status_is_queryable():
     semantic_target = os.getenv("CODALITH_SEMANTIC_DSN") or os.getenv(
         "CODALITH_SEMANTIC_DB",
         "/tmp/codalith-semantic.sqlite",
@@ -36,12 +30,6 @@ def test_ue57_semantic_status_meets_v0_floors():
     if not semantic_target.startswith(("postgresql://", "postgres://")) and not Path(semantic_target).exists():
         pytest.skip(f"Semantic DB is not available: {semantic_target}")
     store = SemanticStore(semantic_target)
-    status = store.semantic_status("ue-5.7.4")
-    expect_ready = os.getenv("CODALITH_EXPECT_SEMANTIC_READY", "").lower() in {"1", "true", "yes"}
-    if not expect_ready and status["module_dependencies"] == 0:
-        pytest.skip("Semantic DB is configured but has not been populated for this test service")
-
-    assert status["module_dependencies"] >= 100
-    assert status["reflection_entities"] >= 100
-    assert status["cpp_symbols"] >= 100
-    assert status["compile_guards"] > 0
+    corpus_id = CorpusRegistry.from_file("configs/corpus_registry.json").get_engine().corpus_id
+    status = store.semantic_status(corpus_id)
+    assert status["corpus_id"] == corpus_id

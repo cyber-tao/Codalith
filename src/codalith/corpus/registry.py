@@ -1,4 +1,4 @@
-"""Corpus registry for engine and project source roots."""
+"""Corpus registry for versioned source corpora."""
 
 from __future__ import annotations
 
@@ -32,15 +32,19 @@ class Corpus:
     scope_prefixes: dict[str, tuple[str, ...]] = field(default_factory=dict)
     # Name of the domain extractor profile used to build the semantic graph.
     semantic_profile: str | None = None
-    # Directory names whose next path segment is the module name (e.g. UE's
-    # "Runtime"/"Developer"/"Editor"). Empty means no path-based module hints.
+    # Directory names whose next path segment is the module name. Empty means
+    # no path-based module hints.
     module_roots: tuple[str, ...] = ()
     # Extra directory names skipped while indexing, on top of the built-in
     # neutral ignores (VCS/store internals).
     index_ignore_dirs: tuple[str, ...] = ()
     # Extra file suffixes indexed by the local fallback, on top of the
-    # built-in plain-text set (e.g. ".uplugin"/".uproject").
+    # built-in plain-text set.
     index_suffixes: tuple[str, ...] = ()
+    # Optional corpus-local retrieval/card domain data. Defaults should stay
+    # empty so the service core never assumes a specific source domain.
+    source_priors_path: Path | None = None
+    seed_cards_path: Path | None = None
 
     @classmethod
     def from_config(cls, corpus_id: str, raw: dict[str, Any]) -> Corpus:
@@ -68,6 +72,12 @@ class Corpus:
             module_roots=tuple(str(item) for item in raw.get("module_roots", [])),
             index_ignore_dirs=tuple(str(item) for item in raw.get("index_ignore_dirs", [])),
             index_suffixes=tuple(str(item).lower() for item in raw.get("index_suffixes", [])),
+            source_priors_path=Path(str(raw["source_priors_path"]))
+            if raw.get("source_priors_path")
+            else None,
+            seed_cards_path=Path(str(raw["seed_cards_path"]))
+            if raw.get("seed_cards_path")
+            else None,
         )
 
     @property

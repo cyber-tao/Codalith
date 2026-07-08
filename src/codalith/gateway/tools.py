@@ -13,6 +13,7 @@ from codalith.coderag.adapter import CodeRAGAdapter, RetrievalHit
 from codalith.compiler.context_compiler import ContextCompiler
 from codalith.corpus.registry import Corpus, CorpusRegistry
 from codalith.corpus.source_policy import SourcePolicy, SourceReadRateLimiter
+from codalith.corpus.source_reader import SourceReader
 from codalith.corpus.uri_resolver import ResolvedURI, URIResolver
 from codalith.errors import CorpusNotFoundError, SourcePolicyError
 from codalith.gateway.audit import AuditLogger, AuditRecord
@@ -26,6 +27,7 @@ class ToolRuntime:
     registry: CorpusRegistry
     resolver: URIResolver
     policy: SourcePolicy
+    source_reader: SourceReader
     adapter: CodeRAGAdapter
     compiler: ContextCompiler
     audit: AuditLogger
@@ -43,6 +45,7 @@ def create_runtime(
     registry = CorpusRegistry.from_file(registry_path)
     resolver = URIResolver(registry)
     policy = SourcePolicy.from_file(source_policy_path)
+    source_reader = SourceReader(registry)
     adapter = CodeRAGAdapter(registry)
     semantic_target = os.getenv("CODALITH_SEMANTIC_DSN") or os.getenv("CODALITH_SEMANTIC_DB") or str(
         Path("data") / "semantic" / "codalith.sqlite"
@@ -52,6 +55,7 @@ def create_runtime(
         registry,
         adapter,
         semantic_store=semantic_store,
+        source_reader=source_reader,
     )
     audit = AuditLogger(
         audit_log
@@ -62,6 +66,7 @@ def create_runtime(
         registry=registry,
         resolver=resolver,
         policy=policy,
+        source_reader=source_reader,
         adapter=adapter,
         compiler=compiler,
         audit=audit,
@@ -133,7 +138,7 @@ class CodalithTools:
                     start_line=resolved.start_line,
                     end_line=resolved.end_line,
                 )
-            content = self.runtime.adapter.get_file(
+            content = self.runtime.source_reader.read_source(
                 resolved.corpus_id,
                 resolved.relative_path,
                 resolved.start_line,
@@ -541,7 +546,7 @@ def _tool_schema_data(default_version: str | None) -> list[dict[str, Any]]:
                         "enum": ["explain", "trace", "implement", "debug", "api_usage", "compare"],
                         "default": "explain",
                     },
-                    "max_source_spans": {"type": "integer", "default": 8},
+                    "max_source_spans": {"type": "integer", "default": 8, "minimum": 1, "maximum": 20},
                     "include_project_overlay": {"type": "boolean", "default": True},
                     "include_generated_overlay": {"type": "boolean", "default": False},
                 },
@@ -555,8 +560,8 @@ def _tool_schema_data(default_version: str | None) -> list[dict[str, Any]]:
                 "type": "object",
                 "properties": {
                     "uri": {"type": "string"},
-                    "start_line": {"type": "integer"},
-                    "end_line": {"type": "integer"},
+                    "start_line": {"type": "integer", "minimum": 1},
+                    "end_line": {"type": "integer", "minimum": 1},
                     "with_line_numbers": {"type": "boolean", "default": True},
                 },
                 "required": ["uri"],
@@ -600,8 +605,8 @@ def _tool_schema_data(default_version: str | None) -> list[dict[str, Any]]:
                     "version": _version_property(default_version),
                     "project": {"type": "string"},
                     "edge_types": {"type": "array", "items": {"type": "string"}},
-                    "depth": {"type": "integer", "default": 1},
-                    "max_nodes": {"type": "integer", "default": 80},
+                    "depth": {"type": "integer", "default": 1, "minimum": 1, "maximum": 4},
+                    "max_nodes": {"type": "integer", "default": 80, "minimum": 1, "maximum": 200},
                 },
                 "required": ["node"],
             },
@@ -620,7 +625,7 @@ def _tool_schema_data(default_version: str | None) -> list[dict[str, Any]]:
                         "enum": ["engine", "plugins", "tests", "project", "generated", "all"],
                         "default": "all",
                     },
-                    "max_examples": {"type": "integer", "default": 8},
+                    "max_examples": {"type": "integer", "default": 8, "minimum": 1, "maximum": 50},
                 },
                 "required": ["symbol_or_api"],
             },
@@ -683,6 +688,38 @@ def _validate_arguments(name: str, input_schema: dict[str, Any], arguments: dict
     if unknown:
         raise ValueError(f"{name} got unexpected argument(s): {', '.join(sorted(unknown))}")
     for key, value in arguments.items():
-        allowed = properties[key].get("enum")
+        prop = properties[key]
+        _validate_type(name, key, prop, value)
+        _validate_range(name, key, prop, value)
+        allowed = prop.get("enum")
         if allowed is not None and value not in allowed:
             raise ValueError(f"{name} argument {key!r} must be one of {allowed}, got {value!r}")
+
+
+def _validate_type(name: str, key: str, prop: dict[str, Any], value: Any) -> None:
+    expected = prop.get("type")
+    if expected is None or value is None:
+        return
+    if expected == "string" and not isinstance(value, str):
+        raise ValueError(f"{name} argument {key!r} must be a string, got {type(value).__name__}")
+    if expected == "integer" and (not isinstance(value, int) or isinstance(value, bool)):
+        raise ValueError(f"{name} argument {key!r} must be an integer, got {type(value).__name__}")
+    if expected == "boolean" and not isinstance(value, bool):
+        raise ValueError(f"{name} argument {key!r} must be a boolean, got {type(value).__name__}")
+    if expected == "array":
+        if not isinstance(value, list):
+            raise ValueError(f"{name} argument {key!r} must be an array, got {type(value).__name__}")
+        item_type = prop.get("items", {}).get("type")
+        if item_type == "string" and any(not isinstance(item, str) for item in value):
+            raise ValueError(f"{name} argument {key!r} items must be strings")
+
+
+def _validate_range(name: str, key: str, prop: dict[str, Any], value: Any) -> None:
+    if not isinstance(value, int) or isinstance(value, bool):
+        return
+    minimum = prop.get("minimum")
+    maximum = prop.get("maximum")
+    if isinstance(minimum, int) and value < minimum:
+        raise ValueError(f"{name} argument {key!r} must be >= {minimum}, got {value}")
+    if isinstance(maximum, int) and value > maximum:
+        raise ValueError(f"{name} argument {key!r} must be <= {maximum}, got {value}")
