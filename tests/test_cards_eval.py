@@ -117,6 +117,15 @@ def test_card_verifier_checks_related_semantic_nodes(registry, adapter, tmp_path
     corpus = registry.get_base()
     store = SemanticStore(tmp_path / "semantic.sqlite")
     store.upsert_module(corpus_id=corpus.corpus_id, module_name="core")
+    # Mark the card evidence file as semantically scanned so related-node
+    # existence is enforced rather than skipped.
+    store.upsert_source_file(
+        corpus_id=corpus.corpus_id,
+        path="src/core/cache.py",
+        language="python",
+        line_count=10,
+        module_name="core",
+    )
     resolver = URIResolver(registry)
     card = attach_source_hashes(
         built_in_cards(
@@ -136,6 +145,29 @@ def test_card_verifier_checks_related_semantic_nodes(registry, adapter, tmp_path
     bad_result = KnowledgeCardVerifier(resolver, adapter, store).verify(bad_card)
     assert not bad_result.ok
     assert any("MissingModule" in error for error in bad_result.errors)
+
+
+def test_card_verifier_skips_related_nodes_when_semantic_db_is_unpopulated(
+    registry, adapter, tmp_path
+):
+    corpus = registry.get_base()
+    store = SemanticStore(tmp_path / "semantic.sqlite")
+    resolver = URIResolver(registry)
+    card = attach_source_hashes(
+        built_in_cards(
+            corpus_id=corpus.corpus_id,
+            version=corpus.version_label,
+            seed_cards_path=corpus.seed_cards_path,
+        )[:1],
+        resolver,
+        adapter,
+    )[0]
+
+    # No extractor has populated the store, so related nodes cannot be
+    # asserted and verification must still pass.
+    result = KnowledgeCardVerifier(resolver, adapter, store).verify(card)
+
+    assert result.ok, result.errors
 
 
 def test_eval_runner_generates_json_and_markdown(registry, adapter, tmp_path):

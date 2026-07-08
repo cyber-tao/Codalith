@@ -90,10 +90,14 @@ class KnowledgeCardVerifier:
         store = self.semantic_store
         if store is None:
             return
+        if not evidence_semantically_scanned:
+            # The semantic store has not scanned this card's evidence files
+            # (e.g. no extractor has populated the corpus yet), so absent
+            # related nodes are expected rather than card defects.
+            return
         if node.startswith("module:"):
             module = node.split(":", maxsplit=1)[1]
             if not store.module_exists(corpus_id, module):
                 errors.append(f"Related module does not exist in semantic DB: {module}")
         elif node.startswith("symbol:") and not store.symbol_exists(corpus_id, node):
-            if evidence_semantically_scanned:
-                errors.append(f"Related semantic node does not exist in semantic DB: {node}")
+            errors.append(f"Related semantic node does not exist in semantic DB: {node}")
