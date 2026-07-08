@@ -2,7 +2,7 @@
 
 [中文文档](README.zh-CN.md)
 
-Codalith is a Python MCP gateway for versioned source-code corpora. The core is domain-neutral: default code, configuration, tests, and Docker services use a small sample source corpus, and production corpora are declared through `configs/corpus_registry.json`.
+Codalith is a Python MCP gateway for versioned source-code corpora. The core is domain-neutral: default code, configuration, tests, and Docker services use a small sample source corpus, and production corpora are declared through the `corpora`/`projects`/`generated` sections of `configs/corpus_registry.json`.
 
 UE 5.7 appears only in `eval/` because the current retrieval-quality baseline uses an existing CodeRAG embedding store built from UE 5.7 source. It is not part of the default MCP service path.
 
@@ -108,7 +108,7 @@ The UE profile uses `eval/configs/ue_5_7_4_registry.json`, `eval/configs/ue_sour
 | `codalith-mcp` | stdio MCP server. |
 | `codalith-mcp-http` | Streamable HTTP MCP server. |
 | `codalith-index-corpus --corpus <id>` | Index any configured corpus. |
-| `codalith-extract-semantic --corpus <id>` | Run the configured semantic profile; no profile is a successful no-op. |
+| `codalith-extract-semantic --corpus <id>` | Record corpus metadata and report semantic store status; the core ships no domain extractors. |
 | `codalith-generate-cards --corpus <id>` | Generate and verify configured seed cards. |
 | `codalith-verify-cards --corpus <id>` | Verify configured seed cards. |
 | `codalith-eval --dataset <path>` | Run in-process eval. |

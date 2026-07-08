@@ -2,7 +2,7 @@
 
 [English README](README.md)
 
-Codalith 是一个面向版本化源码语料的 Python MCP 网关。核心保持领域中性：默认代码、配置、测试和 Docker 服务都使用一个小型 sample 源码语料；真实业务语料通过 `configs/corpus_registry.json` 声明。
+Codalith 是一个面向版本化源码语料的 Python MCP 网关。核心保持领域中性：默认代码、配置、测试和 Docker 服务都使用一个小型 sample 源码语料；真实业务语料通过 `configs/corpus_registry.json` 的 `corpora`/`projects`/`generated` 段声明。
 
 UE 5.7 只出现在 `eval/` 中，因为当前检索质量基线依赖已有的 UE 5.7 源码 CodeRAG embedding store。它不是默认 MCP 服务路径的一部分。
 
@@ -108,7 +108,7 @@ UE profile 使用 `eval/configs/ue_5_7_4_registry.json`、`eval/configs/ue_sourc
 | `codalith-mcp` | stdio MCP server。 |
 | `codalith-mcp-http` | Streamable HTTP MCP server。 |
 | `codalith-index-corpus --corpus <id>` | 索引任意已配置 corpus。 |
-| `codalith-extract-semantic --corpus <id>` | 运行已配置语义 profile；无 profile 时成功 no-op。 |
+| `codalith-extract-semantic --corpus <id>` | 记录 corpus 元数据并输出语义库状态摘要；core 不包含领域 extractor。 |
 | `codalith-generate-cards --corpus <id>` | 生成并校验配置的 seed cards。 |
 | `codalith-verify-cards --corpus <id>` | 校验配置的 seed cards。 |
 | `codalith-eval --dataset <path>` | 进程内 eval。 |
