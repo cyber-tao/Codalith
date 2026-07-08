@@ -12,8 +12,8 @@ from codalith.corpus.registry import CorpusRegistry
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--registry", default="configs/corpus_registry.json")
-    parser.add_argument("--corpus", help="Corpus id or engine version alias")
-    parser.add_argument("--version", help="Engine version alias used when --corpus is omitted")
+    parser.add_argument("--corpus", help="Corpus id or version alias")
+    parser.add_argument("--version", help="Corpus version alias used when --corpus is omitted")
     parser.add_argument("--path", help="Optional corpus-relative subpath to reindex")
     parser.add_argument("--full", action="store_true")
     parser.add_argument("--smoke", action="store_true")

@@ -38,13 +38,19 @@ class ToolRuntime:
 
 def create_runtime(
     *,
-    registry_path: str = "configs/corpus_registry.json",
-    source_policy_path: str = "configs/source_policy.json",
+    registry_path: str | None = None,
+    source_policy_path: str | None = None,
     audit_log: str | None = None,
 ) -> ToolRuntime:
-    registry = CorpusRegistry.from_file(registry_path)
+    resolved_registry_path = registry_path
+    if resolved_registry_path is None:
+        resolved_registry_path = os.getenv("CODALITH_CORPUS_REGISTRY") or "configs/corpus_registry.json"
+    resolved_source_policy_path = source_policy_path
+    if resolved_source_policy_path is None:
+        resolved_source_policy_path = os.getenv("CODALITH_SOURCE_POLICY") or "configs/source_policy.json"
+    registry = CorpusRegistry.from_file(resolved_registry_path)
     resolver = URIResolver(registry)
-    policy = SourcePolicy.from_file(source_policy_path)
+    policy = SourcePolicy.from_file(resolved_source_policy_path)
     source_reader = SourceReader(registry)
     adapter = CodeRAGAdapter(registry)
     semantic_target = os.getenv("CODALITH_SEMANTIC_DSN") or os.getenv("CODALITH_SEMANTIC_DB") or str(

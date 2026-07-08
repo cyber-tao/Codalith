@@ -16,7 +16,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--registry", default="configs/corpus_registry.json")
     parser.add_argument(
-        "--version", default=None, help="Engine version (defaults to the registry default engine)"
+        "--version", default=None, help="Corpus version (defaults to the registry default corpus)"
     )
     parser.add_argument("--corpus", help="Explicit corpus id or version alias")
     args = parser.parse_args(argv)

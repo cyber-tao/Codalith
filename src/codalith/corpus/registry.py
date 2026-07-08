@@ -133,7 +133,7 @@ class CorpusRegistry:
         return cls(engines=engines, projects=projects, generated=generated)
 
     def get_corpus(self, corpus_id: str) -> Corpus:
-        """Resolve a corpus id (or an engine version label) to its corpus."""
+        """Resolve a corpus id (or a corpus version label) to its corpus."""
         for collection in (self.engines, self.projects, self.generated):
             if corpus_id in collection:
                 return collection[corpus_id]

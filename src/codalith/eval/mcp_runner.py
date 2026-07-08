@@ -226,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-dir", default="reports/mcp-eval")
     parser.add_argument("--label", default="baseline")
     parser.add_argument(
-        "--version", default=None, help="Engine version (defaults to the registry default engine)"
+        "--version", default=None, help="Corpus version (defaults to the endpoint default corpus)"
     )
     parser.add_argument("--max-source-spans", type=int, default=20)
     parser.add_argument("--metric-k", type=int, default=5)

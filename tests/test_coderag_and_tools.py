@@ -21,7 +21,7 @@ from codalith.corpus.source_reader import SourceReader
 from codalith.errors import SourcePolicyError
 from codalith.gateway.auth import AuthContext, AuthError
 from codalith.gateway.mcp_server import handle_request
-from codalith.gateway.tools import call_tool
+from codalith.gateway.tools import call_tool, create_runtime
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +94,44 @@ def test_native_store_dir_uses_corpus_store_not_global_env(registry, monkeypatch
     monkeypatch.setenv("CODERAG_STORE_DIR", str(tmp_path / "wrong-store"))
 
     assert _native_store_dir(corpus) == Path(corpus.coderag_store)
+
+
+def test_runtime_loads_registry_from_environment(monkeypatch, tmp_path):
+    source_root = tmp_path / "env_corpus"
+    source_root.mkdir()
+    (source_root / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "engines": {
+                    "env-corpus": {
+                        "kind": "source",
+                        "version": "env",
+                        "source_root": str(source_root),
+                        "indexed_root": str(source_root),
+                        "coderag_store": str(tmp_path / "coderag"),
+                        "semantic_schema": "env_corpus",
+                        "card_root": str(tmp_path / "cards"),
+                        "default": True,
+                        "access_scopes": ["source:read"],
+                    }
+                },
+                "projects": {},
+                "generated": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CODALITH_CORPUS_REGISTRY", str(registry_path))
+    monkeypatch.setenv("CODALITH_SEMANTIC_DB", str(tmp_path / "semantic.sqlite"))
+
+    runtime = create_runtime(audit_log=str(tmp_path / "audit.jsonl"))
+    try:
+        assert runtime.registry.get_engine().corpus_id == "env-corpus"
+    finally:
+        if runtime.semantic_store is not None:
+            runtime.semantic_store.close()
 
 
 def test_source_reader_prefers_source_root_when_indexed_root_is_partial(tmp_path, registry):

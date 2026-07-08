@@ -10,6 +10,8 @@ x-codalith-env: &codalith-env
   CODALITH_SAMPLE_CODERAG_STORE_DIR: ${CODALITH_SAMPLE_CODERAG_STORE_DIR:-data/coderag/sample-codebase}
   CODALITH_SAMPLE_SOURCE_PRIORS: ${CODALITH_SAMPLE_SOURCE_PRIORS:-configs/source_priors.json}
   CODALITH_SAMPLE_SEED_CARDS: ${CODALITH_SAMPLE_SEED_CARDS:-configs/seed_cards.json}
+  CODALITH_CORPUS_REGISTRY: ${CODALITH_CORPUS_REGISTRY:-configs/corpus_registry.json}
+  CODALITH_SOURCE_POLICY: ${CODALITH_SOURCE_POLICY:-configs/source_policy.json}
   # Empty grants base capabilities plus every corpus access scope from the registry.
   CODALITH_SCOPES: ${CODALITH_SCOPES:-}
   UV_PROJECT_ENVIRONMENT: ${CODALITH_UV_ENV:-/tmp/codalith-venv}
