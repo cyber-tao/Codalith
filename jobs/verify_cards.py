@@ -6,38 +6,24 @@ import argparse
 import json
 import os
 
-from codalith.cards.generator import attach_source_hashes, built_in_cards
 from codalith.cards.verifier import KnowledgeCardVerifier
-from codalith.coderag.adapter import CodeRAGAdapter
-from codalith.corpus.registry import CorpusRegistry
+from codalith.coderag import CodeRAGAdapter
 from codalith.corpus.uri_resolver import URIResolver
 from codalith.semantic.store import SemanticStore
+from jobs.common import add_corpus_arguments, load_seed_cards, resolve_corpus
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--registry", default="configs/corpus_registry.json")
-    parser.add_argument(
-        "--version", default=None, help="Corpus version (defaults to the registry default corpus)"
-    )
-    parser.add_argument("--corpus", help="Explicit corpus id or version alias")
+    add_corpus_arguments(parser)
     args = parser.parse_args(argv)
-    registry = CorpusRegistry.from_file(args.registry)
+    registry, corpus = resolve_corpus(args)
     resolver = URIResolver(registry)
     adapter = CodeRAGAdapter(registry)
     semantic_target = os.getenv("CODALITH_SEMANTIC_DSN") or os.getenv("CODALITH_SEMANTIC_DB")
     semantic_store = SemanticStore(semantic_target) if semantic_target else None
     verifier = KnowledgeCardVerifier(resolver, adapter, semantic_store)
-    corpus = registry.get_corpus(args.corpus) if args.corpus else registry.get_base(args.version)
-    cards = attach_source_hashes(
-        built_in_cards(
-            corpus_id=corpus.corpus_id,
-            version=corpus.version_label,
-            seed_cards_path=corpus.seed_cards_path,
-        ),
-        resolver,
-        adapter,
-    )
+    cards = load_seed_cards(corpus, resolver, adapter)
     results = []
     for card in cards:
         result = verifier.verify(card)

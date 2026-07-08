@@ -12,17 +12,19 @@ import time
 from pathlib import Path
 from typing import Any
 
-from codalith.cards.generator import attach_source_hashes, built_in_cards, write_cards
+from codalith.cards.generator import write_cards
 from codalith.cards.verifier import KnowledgeCardVerifier
-from codalith.coderag.adapter import CodeRAGAdapter
+from codalith.coderag import CodeRAGAdapter
 from codalith.compiler.context_compiler import ContextCompiler
 from codalith.corpus.registry import Corpus, CorpusRegistry
 from codalith.corpus.uri_resolver import URIResolver
 from codalith.eval.runner import EvalRunner, write_reports
+from jobs.common import load_seed_cards
 
 DEFAULT_CODERAG_EMBEDDING_BATCH_SIZE = "32"
 DEFAULT_CODERAG_EMBEDDING_MODEL = "Qwen3-Embedding-8B"
 DEFAULT_CODERAG_WORKERS = "4"
+DEFAULT_PYPI_INDEX = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -52,18 +54,7 @@ def main(argv: list[str] | None = None) -> int:
     prepare_indexed_root(corpus)
     resolver = URIResolver(registry)
     card_adapter = CodeRAGAdapter(registry)
-    cards = [
-        card.verified()
-        for card in attach_source_hashes(
-            built_in_cards(
-                corpus_id=corpus.corpus_id,
-                version=corpus.version_label,
-                seed_cards_path=corpus.seed_cards_path,
-            ),
-            resolver,
-            card_adapter,
-        )
-    ]
+    cards = [card.verified() for card in load_seed_cards(corpus, resolver, card_adapter)]
     write_cards(cards, corpus.card_root)
     if corpus.indexed_root.exists() or corpus.indexed_root == corpus.source_root:
         write_cards(cards, corpus.indexed_root)
@@ -144,7 +135,7 @@ def acceptance_minimums(
 
 
 def ensure_coderag_installed(provider: str) -> None:
-    mirror = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/"
+    mirror = os.getenv("CODALITH_PYPI_INDEX", DEFAULT_PYPI_INDEX)
     os.environ.setdefault("UV_DEFAULT_INDEX", mirror)
     os.environ.setdefault("PIP_INDEX_URL", mirror)
     try:
@@ -240,9 +231,9 @@ def enforce_acceptance(
     required_cards = min_cards_verified if min_cards_verified is not None else acceptance["cards_total"]
     if int(acceptance["cards_verified"]) < int(required_cards):
         failures.append(f"cards_verified {acceptance['cards_verified']} < {required_cards}")
-    if float(eval_report["file_recall@5"]) < min_file_recall_at_5:
+    if float(eval_report["file_recall@k"]) < min_file_recall_at_5:
         failures.append(
-            f"file_recall@5 {eval_report['file_recall@5']:.3f} < {min_file_recall_at_5:.3f}"
+            f"file_recall@k {eval_report['file_recall@k']:.3f} < {min_file_recall_at_5:.3f}"
         )
     if float(eval_report["latency_p95_ms"]) > max_p95_ms:
         failures.append(f"latency_p95_ms {eval_report['latency_p95_ms']:.1f} > {max_p95_ms:.1f}")

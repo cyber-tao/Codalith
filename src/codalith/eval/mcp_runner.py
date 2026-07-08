@@ -6,18 +6,17 @@ import argparse
 import http.client
 import json
 import os
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 from codalith.eval.common import (
+    DEFAULT_METRIC_K,
+    aggregate_rows,
     average,
+    evaluate_dataset,
     expected_strings,
-    p95,
-    pack_metrics,
-    read_jsonl,
     write_report_files,
 )
 from codalith.eval.metrics import file_recall_at_k
@@ -56,6 +55,10 @@ class MCPEvalReport:
             "latency_p95_ms": self.latency_p95_ms,
             "rows": self.rows,
         }
+
+    @property
+    def all_passed(self) -> bool:
+        return all(row.get("failure_class") == "pass" for row in self.rows)
 
 
 class MCPClient:
@@ -144,7 +147,7 @@ def run_mcp_eval(
     label: str,
     version: str | None = None,
     max_source_spans: int = 20,
-    metric_k: int = 5,
+    metric_k: int = DEFAULT_METRIC_K,
     timeout_seconds: float = 120.0,
 ) -> MCPEvalReport:
     client = MCPClient(
@@ -153,58 +156,54 @@ def run_mcp_eval(
         bearer_token=os.getenv("CODALITH_HTTP_BEARER_TOKEN") or None,
     )
     client.initialize()
-    rows: list[dict[str, Any]] = []
-    latencies: list[float] = []
-    for item in read_jsonl(dataset_path):
-        expected_files = expected_strings(item, "expected_files")
-        expected_version = str(item["version"]) if item.get("version") else version
+
+    def run_pack(item: dict[str, Any], item_version: str | None) -> dict[str, Any]:
         arguments: dict[str, Any] = {
             "query": str(item["query"]),
             "mode": str(item.get("mode", "explain")),
             "max_source_spans": max_source_spans,
         }
-        if expected_version:
-            arguments["version"] = expected_version
-        started = time.perf_counter()
-        pack = client.call_tool("codalith_context", arguments)
-        elapsed_ms = (time.perf_counter() - started) * 1000
-        latencies.append(elapsed_ms)
-        metrics = pack_metrics(pack, item, k=metric_k, default_version=version)
+        if item_version:
+            arguments["version"] = item_version
+        return client.call_tool("codalith_context", arguments)
+
+    def row_extras(
+        item: dict[str, Any],
+        pack: dict[str, Any],
+        metrics: dict[str, float],
+    ) -> dict[str, Any]:
+        expected_files = expected_strings(item, "expected_files")
         candidate_recall = file_recall_at_k(pack, expected_files, k=max_source_spans)
         source_spans = pack.get("source_spans", [])
-        rows.append(
-            {
-                "id": item.get("id"),
-                "query": item["query"],
-                **metrics,
-                f"file_recall@{max_source_spans}": candidate_recall,
-                "latency_ms": elapsed_ms,
-                "failure_class": _failure_class(
-                    metrics[f"file_recall@{metric_k}"],
-                    candidate_recall,
-                    metrics["module_accuracy"],
-                ),
-                "expected_files": expected_files,
-                "expected_modules": expected_strings(item, "expected_modules"),
-                "source_paths": [str(span.get("path", "")) for span in source_spans],
-                "modules": [str(module.get("name", "")) for module in pack.get("modules", [])],
-            }
-        )
-    count = len(rows)
+        return {
+            f"file_recall@{max_source_spans}": candidate_recall,
+            "failure_class": _failure_class(
+                metrics[f"file_recall@{metric_k}"],
+                candidate_recall,
+                metrics["module_accuracy"],
+            ),
+            "expected_files": expected_files,
+            "expected_modules": expected_strings(item, "expected_modules"),
+            "source_paths": [str(span.get("path", "")) for span in source_spans],
+            "modules": [str(module.get("name", "")) for module in pack.get("modules", [])],
+        }
+
+    rows, latencies = evaluate_dataset(
+        dataset_path,
+        run_pack,
+        version=version,
+        metric_k=metric_k,
+        row_extras=row_extras,
+    )
     return MCPEvalReport(
         label=label,
         endpoint=endpoint,
         metric_k=metric_k,
         max_source_spans=max_source_spans,
-        count=count,
-        file_recall_at_k=average(rows, f"file_recall@{metric_k}"),
+        count=len(rows),
         candidate_file_recall=average(rows, f"file_recall@{max_source_spans}"),
-        module_accuracy=average(rows, "module_accuracy"),
-        symbol_recall=average(rows, "symbol_recall"),
-        missing_source_citation_rate=average(rows, "missing_source_citation_rate"),
-        wrong_version_rate=average(rows, "wrong_version_rate"),
-        latency_p95_ms=p95(latencies),
         rows=rows,
+        **aggregate_rows(rows, latencies, metric_k=metric_k),
     )
 
 
@@ -228,8 +227,13 @@ def main(argv: list[str] | None = None) -> int:
         "--version", default=None, help="Corpus version (defaults to the endpoint default corpus)"
     )
     parser.add_argument("--max-source-spans", type=int, default=20)
-    parser.add_argument("--metric-k", type=int, default=5)
+    parser.add_argument("--metric-k", type=int, default=DEFAULT_METRIC_K)
     parser.add_argument("--timeout-seconds", type=float, default=120.0)
+    parser.add_argument(
+        "--require-pass",
+        action="store_true",
+        help="Exit non-zero unless every row's failure_class is 'pass'",
+    )
     args = parser.parse_args(argv)
     report = run_mcp_eval(
         endpoint=args.endpoint,
@@ -242,6 +246,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     write_reports(report, args.output_dir)
     print(json.dumps(report.as_dict(), indent=2, sort_keys=True))
+    if args.require_pass and not report.all_passed:
+        failures = [row["id"] for row in report.rows if row.get("failure_class") != "pass"]
+        print(f"require-pass failed for rows: {', '.join(str(item) for item in failures)}")
+        return 1
     return 0
 
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import math
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +16,8 @@ from codalith.eval.metrics import (
     symbol_recall,
     wrong_version_rate,
 )
+
+DEFAULT_METRIC_K = 5
 
 
 def read_jsonl(path: str | Path) -> list[dict[str, Any]]:
@@ -62,6 +66,59 @@ def pack_metrics(
 
 def average(rows: list[dict[str, Any]], key: str) -> float:
     return sum(float(row[key]) for row in rows) / len(rows) if rows else 0.0
+
+
+def evaluate_dataset(
+    dataset_path: str | Path,
+    run_pack: Callable[[dict[str, Any], str | None], dict[str, Any]],
+    *,
+    version: str | None = None,
+    metric_k: int = DEFAULT_METRIC_K,
+    row_extras: Callable[[dict[str, Any], dict[str, Any], dict[str, float]], dict[str, Any]]
+    | None = None,
+) -> tuple[list[dict[str, Any]], list[float]]:
+    """Run every dataset item through ``run_pack`` and collect metric rows.
+
+    ``run_pack`` receives the dataset item and its effective version and must
+    return a Context Pack dict. ``row_extras`` can append runner-specific
+    columns computed from the item, pack, and base metrics.
+    """
+    rows: list[dict[str, Any]] = []
+    latencies: list[float] = []
+    for item in read_jsonl(dataset_path):
+        item_version = str(item["version"]) if item.get("version") else version
+        started = time.perf_counter()
+        pack = run_pack(item, item_version)
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        latencies.append(elapsed_ms)
+        metrics = pack_metrics(pack, item, k=metric_k, default_version=version)
+        row: dict[str, Any] = {
+            "id": item.get("id"),
+            "query": item["query"],
+            **metrics,
+            "latency_ms": elapsed_ms,
+        }
+        if row_extras is not None:
+            row.update(row_extras(item, pack, metrics))
+        rows.append(row)
+    return rows, latencies
+
+
+def aggregate_rows(
+    rows: list[dict[str, Any]],
+    latencies: list[float],
+    *,
+    metric_k: int,
+) -> dict[str, float]:
+    """Aggregate the shared per-item metrics into report-level numbers."""
+    return {
+        "file_recall_at_k": average(rows, f"file_recall@{metric_k}"),
+        "module_accuracy": average(rows, "module_accuracy"),
+        "symbol_recall": average(rows, "symbol_recall"),
+        "missing_source_citation_rate": average(rows, "missing_source_citation_rate"),
+        "wrong_version_rate": average(rows, "wrong_version_rate"),
+        "latency_p95_ms": p95(latencies),
+    }
 
 
 def write_report_files(

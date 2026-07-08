@@ -5,15 +5,13 @@ from __future__ import annotations
 import argparse
 import json
 
-from codalith.coderag.adapter import CodeRAGAdapter
-from codalith.corpus.registry import CorpusRegistry
+from codalith.coderag import CodeRAGAdapter
+from jobs.common import add_corpus_arguments, resolve_corpus
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--registry", default="configs/corpus_registry.json")
-    parser.add_argument("--corpus", help="Corpus id or version alias")
-    parser.add_argument("--version", help="Corpus version alias used when --corpus is omitted")
+    add_corpus_arguments(parser)
     parser.add_argument("--path", help="Optional corpus-relative subpath to reindex")
     parser.add_argument("--full", action="store_true")
     parser.add_argument("--smoke", action="store_true")
@@ -23,8 +21,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Relative path read to verify the corpus mount when --smoke is set",
     )
     args = parser.parse_args(argv)
-    registry = CorpusRegistry.from_file(args.registry)
-    corpus = registry.get_corpus(args.corpus) if args.corpus else registry.get_base(args.version)
+    registry, corpus = resolve_corpus(args)
     adapter = CodeRAGAdapter(registry)
     if args.smoke:
         content = adapter.get_file(corpus.corpus_id, args.smoke_file, 1, 5)

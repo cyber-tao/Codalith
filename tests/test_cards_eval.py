@@ -157,7 +157,7 @@ def test_eval_runner_generates_json_and_markdown(registry, adapter, tmp_path):
     compiler = ContextCompiler(registry, adapter)
     report = EvalRunner(compiler).run(dataset)
     assert report.count == 1
-    assert report.file_recall_at_5 == 1.0
+    assert report.file_recall_at_k == 1.0
     assert report.symbol_recall == 1.0
     json_path, md_path = write_reports(report, tmp_path / "reports")
     assert json.loads(json_path.read_text(encoding="utf-8"))["count"] == 1

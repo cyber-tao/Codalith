@@ -13,31 +13,21 @@ import json
 from pathlib import Path
 from typing import Any
 
-from codalith.corpus.registry import Corpus, CorpusRegistry
+from codalith.corpus.registry import Corpus
 from codalith.errors import ConfigurationError
 from codalith.semantic.store import SemanticStore
+from jobs.common import add_corpus_arguments, resolve_corpus
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--registry", default="configs/corpus_registry.json")
-    parser.add_argument(
-        "--version", default=None, help="Corpus version (defaults to the registry default corpus)"
-    )
-    parser.add_argument("--project")
-    parser.add_argument("--corpus", help="Explicit corpus id or version alias")
+    add_corpus_arguments(parser)
     parser.add_argument("--corpus-id", help="Output corpus id override")
     parser.add_argument("--output", default="reports/semantic_summary.json")
     parser.add_argument("--semantic-db")
     args = parser.parse_args(argv)
 
-    registry = CorpusRegistry.from_file(args.registry)
-    if args.corpus:
-        corpus = registry.get_corpus(args.corpus)
-    elif args.project:
-        corpus = registry.get_project(args.project)
-    else:
-        corpus = registry.get_base(args.version)
+    _, corpus = resolve_corpus(args)
     if corpus.semantic_profile is not None:
         raise ConfigurationError(
             f"Unknown semantic profile: {corpus.semantic_profile}. "

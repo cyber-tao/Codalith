@@ -5,37 +5,23 @@ from __future__ import annotations
 import argparse
 import json
 
-from codalith.cards.generator import attach_source_hashes, built_in_cards, write_cards
+from codalith.cards.generator import write_cards
 from codalith.cards.verifier import KnowledgeCardVerifier
-from codalith.coderag.adapter import CodeRAGAdapter
-from codalith.corpus.registry import CorpusRegistry
+from codalith.coderag import CodeRAGAdapter
 from codalith.corpus.uri_resolver import URIResolver
+from jobs.common import add_corpus_arguments, load_seed_cards, resolve_corpus
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--registry", default="configs/corpus_registry.json")
-    parser.add_argument(
-        "--version", default=None, help="Corpus version (defaults to the registry default corpus)"
-    )
-    parser.add_argument("--corpus", help="Explicit corpus id or version alias")
+    add_corpus_arguments(parser)
     args = parser.parse_args(argv)
-    registry = CorpusRegistry.from_file(args.registry)
-    corpus = registry.get_corpus(args.corpus) if args.corpus else registry.get_base(args.version)
+    registry, corpus = resolve_corpus(args)
     resolver = URIResolver(registry)
     adapter = CodeRAGAdapter(registry)
-    cards = attach_source_hashes(
-        built_in_cards(
-            corpus_id=corpus.corpus_id,
-            version=corpus.version_label,
-            seed_cards_path=corpus.seed_cards_path,
-        ),
-        resolver,
-        adapter,
-    )
-    # Cards only ship as "verified" after passing evidence verification here.
-    # The context compiler relies on this invariant when it reports card hits
-    # as verified in Context Packs.
+    cards = load_seed_cards(corpus, resolver, adapter)
+    # Cards only ship as "verified" after passing evidence verification here;
+    # Context Packs report whatever status the rendered front matter carries.
     verifier = KnowledgeCardVerifier(resolver, adapter)
     failures: dict[str, list[str]] = {}
     verified = []
