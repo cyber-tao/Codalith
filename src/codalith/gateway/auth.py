@@ -47,7 +47,7 @@ class AuthContext:
 
 
 class AuthError(CodalithError):
-    """Raised when a request cannot be authenticated."""
+    """Raised when a request cannot be authenticated or lacks a required scope."""
 
 
 _CURRENT_AUTH: contextvars.ContextVar[AuthContext | None] = contextvars.ContextVar(

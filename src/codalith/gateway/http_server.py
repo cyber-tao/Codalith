@@ -20,10 +20,12 @@ from codalith.gateway.auth import (
     reset_current_auth_context,
     set_current_auth_context,
 )
-from codalith.gateway.mcp_server import handle_request
+from codalith.gateway.mcp_server import PROTOCOL_VERSION, handle_request
 from codalith.gateway.tools import CodalithTools, create_runtime
 
-SUPPORTED_PROTOCOL_VERSIONS = {"2025-11-25", "2025-06-18", "2025-03-26"}
+SUPPORTED_PROTOCOL_VERSIONS = {PROTOCOL_VERSION, "2025-06-18", "2025-03-26"}
+# Requests without an MCP-Protocol-Version header are assumed to speak
+# 2025-03-26, as required by the Streamable HTTP backwards-compatibility rules.
 DEFAULT_PROTOCOL_VERSION = "2025-03-26"
 MAX_SESSIONS = 1024
 

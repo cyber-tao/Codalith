@@ -132,8 +132,8 @@ class CodalithTools:
             )
         try:
             resolved = self._bounded_read_range(resolved)
-            self._require_corpus_access(resolved.corpus_id)
-            self.runtime.policy.check(resolved, self._scopes())
+            self.require_corpus_access(resolved.corpus_id)
+            self.runtime.policy.check(resolved, self.scopes())
             assert resolved.start_line is not None
             assert resolved.end_line is not None
             line_count = resolved.line_count or 0
@@ -277,7 +277,7 @@ class CodalithTools:
             ),
             "context": pack,
         }
-        if "graph:read" in self._scopes():
+        if "graph:read" in self.scopes():
             result["graph"] = self.codalith_graph(node=symbol, version=version, project=project, max_nodes=24)
         else:
             warnings.append("Graph neighborhood omitted: missing scope graph:read.")
@@ -367,7 +367,7 @@ class CodalithTools:
             project,
             include_project_overlay=scope in {"project", "all"},
             include_generated_overlay=scope == "generated"
-            or (scope == "all" and "generated:read" in self._scopes()),
+            or (scope == "all" and "generated:read" in self.scopes()),
         )
         self._require_resolution_access(resolution)
         hits: list[RetrievalHit] = []
@@ -421,11 +421,11 @@ class CodalithTools:
     def _auth(self) -> AuthContext:
         return current_auth_context(self.runtime.identity)
 
-    def _scopes(self) -> set[str]:
+    def scopes(self) -> set[str]:
         return set(self._auth().scopes)
 
     def _require_scope(self, scope: str) -> None:
-        if scope not in self._scopes():
+        if scope not in self.scopes():
             raise AuthError(f"Missing required scope: {scope}")
 
     def _bounded_read_range(self, resolved: ResolvedURI) -> ResolvedURI:
@@ -444,11 +444,11 @@ class CodalithTools:
 
     def _require_resolution_access(self, resolution: Any) -> None:
         for corpus in resolution.ordered:
-            self._require_corpus_access(corpus.corpus_id)
+            self.require_corpus_access(corpus.corpus_id)
 
-    def _require_corpus_access(self, corpus_id: str) -> None:
+    def require_corpus_access(self, corpus_id: str) -> None:
         corpus = self.runtime.registry.get_corpus(corpus_id)
-        missing = sorted(scope for scope in corpus.access_scopes if scope not in self._scopes())
+        missing = sorted(scope for scope in corpus.access_scopes if scope not in self.scopes())
         if missing:
             raise AuthError(f"Missing required corpus scope(s) for {corpus_id}: {', '.join(missing)}")
 
@@ -570,7 +570,13 @@ def _tool_schema_data(default_version: str | None) -> list[dict[str, Any]]:
         {
             "name": "codalith_index_status",
             "description": "Report CodeRAG index status plus semantic graph status per corpus.",
-            "inputSchema": {"type": "object", "properties": {"version": {"type": "string"}, "project": {"type": "string"}}},
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "version": _version_property(default_version),
+                    "project": {"type": "string"},
+                },
+            },
         },
         {
             "name": "codalith_lookup_symbol",
@@ -687,6 +693,10 @@ def _validate_arguments(name: str, input_schema: dict[str, Any], arguments: dict
     if unknown:
         raise ValueError(f"{name} got unexpected argument(s): {', '.join(sorted(unknown))}")
     for key, value in arguments.items():
+        if value is None:
+            # No tool argument is nullable; null would silently override the
+            # handler default, so callers must omit the key instead.
+            raise ValueError(f"{name} argument {key!r} must not be null; omit it instead")
         prop = properties[key]
         _validate_type(name, key, prop, value)
         _validate_range(name, key, prop, value)
@@ -697,7 +707,7 @@ def _validate_arguments(name: str, input_schema: dict[str, Any], arguments: dict
 
 def _validate_type(name: str, key: str, prop: dict[str, Any], value: Any) -> None:
     expected = prop.get("type")
-    if expected is None or value is None:
+    if expected is None:
         return
     if expected == "string" and not isinstance(value, str):
         raise ValueError(f"{name} argument {key!r} must be a string, got {type(value).__name__}")

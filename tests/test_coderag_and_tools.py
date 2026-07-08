@@ -375,6 +375,17 @@ def test_mcp_tools_list_and_call(tools):
     assert called["result"]["structuredContent"]["source_spans"]
 
 
+def test_mcp_tools_call_rejects_null_params_as_invalid_params(tools):
+    for request in (
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": None},
+        {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": None}},
+        {"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": "bogus"},
+    ):
+        response = handle_request(request, tools)
+        assert response is not None
+        assert response["error"]["code"] == -32602
+
+
 def test_mcp_initialize_instructions_come_from_registry(tools):
     initialized = handle_request({"jsonrpc": "2.0", "id": 1, "method": "initialize"}, tools)
     assert initialized is not None
@@ -492,6 +503,8 @@ def test_call_tool_rejects_unknown_tools_and_invalid_arguments(tools):
         call_tool(tools, "codalith_context", {"query": "CachedValue", "bogus": True})
     with pytest.raises(ValueError, match="must be a string"):
         call_tool(tools, "codalith_context", {"query": 123})
+    with pytest.raises(ValueError, match="must not be null"):
+        call_tool(tools, "codalith_context", {"query": None})
     with pytest.raises(ValueError, match="must be >="):
         call_tool(tools, "codalith_context", {"query": "x", "max_source_spans": 0})
     with pytest.raises(ValueError, match="must be <="):

@@ -6,10 +6,14 @@ import json
 import sys
 from typing import Any
 
+from codalith import __version__
 from codalith.corpus.registry import CorpusRegistry
 from codalith.errors import CodalithError
 from codalith.gateway.resources import read_resource, resource_templates, resources
 from codalith.gateway.tools import CodalithTools, call_tool, create_runtime, tool_schemas
+
+# Protocol revision this server implements and advertises on initialize.
+PROTOCOL_VERSION = "2025-11-25"
 
 
 def build_instructions(registry: CorpusRegistry) -> str:
@@ -54,20 +58,24 @@ def handle_request(request: dict[str, Any], tools: CodalithTools) -> dict[str, A
     if method == "notifications/initialized":
         return None
     try:
+        params = _params(request)
         result: dict[str, Any]
         if method == "initialize":
             result = {
-                "protocolVersion": "2025-11-25",
+                "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": {"tools": {}, "resources": {}},
-                "serverInfo": {"name": "codalith", "version": "0.1.0"},
+                "serverInfo": {"name": "codalith", "version": __version__},
                 "instructions": build_instructions(tools.runtime.registry),
             }
         elif method == "tools/list":
             result = {"tools": tool_schemas(tools.runtime.registry)}
         elif method == "tools/call":
-            params = request.get("params", {})
-            name = str(params.get("name"))
+            name = params.get("name")
+            if not isinstance(name, str) or not name:
+                raise ValueError("tools/call requires a string 'name' parameter")
             arguments = params.get("arguments") or {}
+            if not isinstance(arguments, dict):
+                raise ValueError("tools/call 'arguments' must be an object")
             structured = call_tool(tools, name, arguments)
             result = {
                 "content": [
@@ -83,8 +91,9 @@ def handle_request(request: dict[str, Any], tools: CodalithTools) -> dict[str, A
         elif method == "resources/templates/list":
             result = {"resourceTemplates": resource_templates()}
         elif method == "resources/read":
-            params = request.get("params", {})
-            uri = str(params.get("uri"))
+            uri = params.get("uri")
+            if not isinstance(uri, str) or not uri:
+                raise ValueError("resources/read requires a string 'uri' parameter")
             structured = read_resource(uri, tools)
             result = {
                 "contents": [
@@ -101,9 +110,18 @@ def handle_request(request: dict[str, Any], tools: CodalithTools) -> dict[str, A
     except (ValueError, TypeError) as exc:
         return _error(request_id, -32602, str(exc))
     except CodalithError as exc:
-        return _error(request_id, -32000, str(exc))
+        return _error(request_id, -32000, str(exc), data={"type": type(exc).__name__})
     except Exception as exc:  # noqa: BLE001 - protocol boundary.
         return _error(request_id, -32603, str(exc))
+
+
+def _params(request: dict[str, Any]) -> dict[str, Any]:
+    params = request.get("params")
+    if params is None:
+        return {}
+    if not isinstance(params, dict):
+        raise ValueError("params must be an object")
+    return params
 
 
 def serve(tools: CodalithTools) -> None:
@@ -128,8 +146,16 @@ def main() -> int:
     return 0
 
 
-def _error(request_id: object, code: int, message: str) -> dict[str, Any]:
-    return {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
+def _error(
+    request_id: object,
+    code: int,
+    message: str,
+    data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    error: dict[str, Any] = {"code": code, "message": message}
+    if data is not None:
+        error["data"] = data
+    return {"jsonrpc": "2.0", "id": request_id, "error": error}
 
 
 if __name__ == "__main__":

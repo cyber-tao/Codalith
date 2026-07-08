@@ -21,8 +21,7 @@ from codalith.eval.common import (
     write_report_files,
 )
 from codalith.eval.metrics import file_recall_at_k
-
-PROTOCOL_VERSION = "2025-11-25"
+from codalith.gateway.mcp_server import PROTOCOL_VERSION
 
 
 @dataclass(frozen=True, slots=True)

@@ -96,7 +96,7 @@ def read_resource(uri: str, tools: CodalithTools) -> dict[str, Any]:
         base = corpus_uri(corpus.corpus_id)
         if uri != base and not uri.startswith(f"{base}/"):
             continue
-        tools._require_corpus_access(corpus.corpus_id)
+        tools.require_corpus_access(corpus.corpus_id)
         if uri == base:
             return {
                 "uri": uri,
@@ -129,7 +129,7 @@ def read_resource(uri: str, tools: CodalithTools) -> dict[str, Any]:
         raise URIResolutionError(f"Unknown resource URI: {uri}")
     for project_id, corpus in registry.projects.items():
         if uri == corpus_uri(project_id):
-            tools._require_corpus_access(corpus.corpus_id)
+            tools.require_corpus_access(corpus.corpus_id)
             return {
                 "uri": uri,
                 "corpus_id": corpus.corpus_id,
@@ -193,7 +193,7 @@ def _card_resource(
     uri: str,
     card_path: str,
 ) -> dict[str, Any]:
-    if "cards:read" not in tools._scopes():
+    if "cards:read" not in tools.scopes():
         raise AuthError("Missing required scope: cards:read")
     parts = card_path.split("/")
     if len(parts) != 2 or not all(_SAFE_SEGMENT_RE.fullmatch(part) for part in parts):
