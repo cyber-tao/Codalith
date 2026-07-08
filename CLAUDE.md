@@ -1,12 +1,13 @@
 # Codalith — AI 上下文索引（根级）
 
-> 本文件由 AI 上下文初始化流程生成，2026-07-01 21:12:11。仓库此前无任何 CLAUDE.md，全部为新建。
-> 阅读顺序：先读本文件了解全局，再按需进入各模块目录的 `CLAUDE.md`。
+> 本文件由 AI 上下文初始化流程生成，2026-07-01 21:12:11。
+> 本仓库当前只维护这一份根级 CLAUDE.md；模块细节以各模块源码与本文件的模块索引为准。
 
 ## 变更记录 (Changelog)
 
 | 时间 | 动作 | 说明 |
 | --- | --- | --- |
+| 2026-07-08 | 内核收口 + 数据迁移 | 去 UE 硬编码扫尾：coderag adapter 的模块识别/忽略目录/文件后缀改语料级配置（`Corpus.module_roots`/`index_ignore_dirs`/`index_suffixes`，`module_from_path` 参数化）；semantic store 表/索引 `ue_*` 改名 `codalith_*` 且 `initialize_schema` 内置 SQLite/Postgres 启动自动迁移（旧表改名、`ue_version` 列改 `version`，数据保留）；writers `upsert_module_dep` 的 extractor/observed_from 参数化，graph reflection kinds 改查库数据驱动；auth 默认 scopes 从 registry 的 `access_scopes` 派生（删除硬编码 `ue:5.7`，`CODALITH_SCOPES` 仍可覆盖）；compiler 重排改宽窗口后分流——卡片命中只进 `cards`（验证过的 evidence span 仍附加），`source_spans` 只留源码，修复卡片挤占召回导致的指标回退；compose `mcp-http` 按建索引布局挂载 indexed_root（Engine/Source + Engine/Plugins + `data/cards` 持久化 KNOWLEDGE，新增 `CODALITH_ENGINE_PLUGINS_HOST_ROOT`）。生产 Postgres 已完成自动迁移，seed 卡已重生成并重建索引（旧 `UE_KNOWLEDGE` chunk 已清理），本地 runner 与 MCP runner 双 eval 80/80 全 pass（recall/module_accuracy 全 1.0）。同时清理本文件中指向从未落盘的模块级 CLAUDE.md 的失效链接。 |
 | 2026-07-07 | 去 UE 硬编码改造 | 中性内核 + 配置驱动能力声明落地：`ue_version` 字段/DB 列改名 `version`（`version_label` 属性兜底 corpus_id）；`ue://`/`ue-project://`/`ue-generated://` 三 scheme 合并为 `codalith://<corpus_id>/<facet>/...`（共享 helper `corpus/uris.py`，ContextPack `schema_version` 0.2 新增顶层 `corpus_id` 与 span `corpus_kind`，`wrong_version_rate` 改按 corpus 一致性判定）；module hints/identifier stopwords 外置 `configs/source_priors.json`，seed 卡外置 `configs/seed_cards.json`，scope 路径前缀改语料级 `scope_prefixes` 配置，`UE_KNOWLEDGE` 目录改中性常量 `CARDS_DIR`（`KNOWLEDGE`）；UE 语义提取收口 `semantic/extractors/unreal.py` profile（registry 配置 `semantic_profile: "unreal"`，`jobs/extract_semantic.py` 变中性驱动器）；marker `ue_acceptance`→`corpus_acceptance`、compose 服务 `ue-acceptance`→`corpus-acceptance`（profile `acceptance`）、jobs/eval CLI `--version` 默认 None 由 registry 默认引擎推导。本地 semantic DB 与 seed 卡需重新生成，MCP 服务需重启。 |
 | 2026-07-07 | 能力声明配置化 | MCP 客户端可见的自描述不再硬编码 UE5：`Corpus` 新增 `display_name`/`description`/`keywords`（`configs/corpus_registry.json` + `.env` 可覆盖），`initialize.instructions` 由 `build_instructions(registry)` 运行时组装，工具 schema 描述中性化且 `version` 默认值从 registry 默认引擎派生（工具方法 `version` 参数改为 `None` 跟随配置）；resources 名称改用 corpus label；ContextPack summary/caveats/reason 及 `source-locator` 标签去 UE 措辞。`ue://` scheme、`ue_version` 字段、semantic extractors、source priors 等域适配层保持不变。 |
 | 2026-07-07 | 检索内核优化 | 新增共享文本原语模块 `codalith/text.py`（normalize/tokenize/contains_word/camel_words），intent/entity/source_locator/local 检索四处 tokenize 统一；reranker 改为按 source 分组归一化 base 分并移除 prior `+1000` 哨兵值；local fallback `_local_search` 由每查询全量扫描改为窗口级倒排索引（含 CamelCase/snake_case 子词展开）。 |
@@ -40,7 +41,7 @@ Codalith 是一个面向**版本化源码语料**的 Python MCP（Model Context 
 1. **配置与错误层**（`codalith.config`, `codalith.errors`）：JSON 配置加载 + 环境变量占位符展开；统一异常体系。
 2. **语料层**（`codalith.corpus`）：`CorpusRegistry`（engine + project + generated）、`URIResolver`（统一 `codalith://` scheme，helper 在 `corpus/uris.py`）、`SourcePolicy` + `SourceReadRateLimiter`。
 3. **检索适配层**（`codalith.coderag`）：`CodeRAGAdapter`，原生 CodeRAG 与本地确定性兜底双模式。
-4. **语义层**（`codalith.semantic`）：SQLite 语义图 + 可插拔 extractor profile（内置 `unreal` 域包），对外通过 `query_graph` 做 BFS 邻域查询。
+4. **语义层**（`codalith.semantic`）：SQLite/Postgres 语义图（`codalith_*` 表）+ 可插拔 extractor profile（内置 `unreal` 域包），对外通过 `query_graph` 做 BFS 邻域查询。
 5. **编译层**（`codalith.compiler`）：`ContextCompiler` 编排意图/实体/规划/重排/证据/源定位，输出 `ContextPack`。
 6. **卡片层**（`codalith.cards`）：seed 卡片 schema、生成、哈希、渲染、验证。
 7. **网关层**（`codalith.gateway`）：MCP stdio + Streamable HTTP，工具/资源/提示/审计/鉴权注册。
@@ -82,41 +83,28 @@ graph TD
     SRC --> CARDS["cards"]
     SRC --> EVALMOD["eval"]
     SRC --> CFG["config / errors (顶层)"]
-
-    click GW "./src/codalith/gateway/CLAUDE.md" "查看 gateway 模块文档"
-    click CORPUS "./src/codalith/corpus/CLAUDE.md" "查看 corpus 模块文档"
-    click SEM "./src/codalith/semantic/CLAUDE.md" "查看 semantic 模块文档"
-    click COMP "./src/codalith/compiler/CLAUDE.md" "查看 compiler 模块文档"
-    click CR "./src/codalith/coderag/CLAUDE.md" "查看 coderag 模块文档"
-    click CARDS "./src/codalith/cards/CLAUDE.md" "查看 cards 模块文档"
-    click EVALMOD "./src/codalith/eval/CLAUDE.md" "查看 eval 模块文档"
-    click CFG "./src/codalith/CLAUDE.md" "查看 codalith 顶层包文档"
-    click JOBS "./jobs/CLAUDE.md" "查看 jobs 模块文档"
-    click TESTS "./tests/CLAUDE.md" "查看 tests 模块文档"
-    click CONFIGS "./configs/CLAUDE.md" "查看 configs 模块文档"
-    click SCRIPTS "./scripts/CLAUDE.md" "查看 scripts 模块文档"
 ```
 
 ## 模块索引
 
-| 模块 | 路径 | 一句话职责 | 文档 |
-| --- | --- | --- | --- |
-| codalith（顶层包） | `src/codalith/` | 包入口、`config.py`（JSON+占位符）、`errors.py`（异常基类） | [doc](./src/codalith/CLAUDE.md) |
-| gateway | `src/codalith/gateway/` | MCP stdio + Streamable HTTP 网关、工具/资源/提示/审计/鉴权 | [doc](./src/codalith/gateway/CLAUDE.md) |
-| corpus | `src/codalith/corpus/` | 版本化语料注册表、URI 解析、源码读取策略与限流 | [doc](./src/codalith/corpus/CLAUDE.md) |
-| semantic | `src/codalith/semantic/` | SQLite 语义图 + 可插拔 extractor profile（内置 `unreal` 域包：Build.cs / UHT / C++ / 守卫等） | [doc](./src/codalith/semantic/CLAUDE.md) |
-| compiler | `src/codalith/compiler/` | 上下文编译器：意图/实体/规划/重排/证据/源定位 → ContextPack | [doc](./src/codalith/compiler/CLAUDE.md) |
-| coderag | `src/codalith/coderag/` | CodeRAG 适配器（原生 + 本地兜底）、查询构建、结果映射 | [doc](./src/codalith/coderag/CLAUDE.md) |
-| cards | `src/codalith/cards/` | 知识卡片 schema、生成、哈希、Markdown 渲染、验证 | [doc](./src/codalith/cards/CLAUDE.md) |
-| eval | `src/codalith/eval/` | 评估指标（recall/module_accuracy/latency）与运行器 | [doc](./src/codalith/eval/CLAUDE.md) |
-| jobs | `jobs/` | CLI 任务脚本，对应 `codalith-*` 入口脚本 | [doc](./jobs/CLAUDE.md) |
-| tests | `tests/` | pytest 测试套件，含 `corpus_acceptance` marker | [doc](./tests/CLAUDE.md) |
-| configs | `configs/` | `corpus_registry.json` / `source_policy.json` / `source_priors.json` | [doc](./configs/CLAUDE.md) |
-| scripts | `scripts/` | MCP 客户端一键安装脚本（sh / ps1） | [doc](./scripts/CLAUDE.md) |
-| eval/datasets | `eval/datasets/` | 统一 UE Eval Suite：`ue_eval_suite.jsonl`（80 题） | （并入 eval，无独立文档） |
-| fixtures/project_overlay | `fixtures/project_overlay/` | 测试夹具：示例 UE 项目 ProjectA | （并入 tests，无独立文档） |
-| docs | `docs/` | 设计文档 `Codalith_CodeRAG_Design.md` | （无独立文档） |
-| external/CodeRAG | `external/CodeRAG/` | **Git 子模块，外部依赖，勿深入生成模块文档** | — |
+| 模块 | 路径 | 一句话职责 |
+| --- | --- | --- |
+| codalith（顶层包） | `src/codalith/` | 包入口、`config.py`（JSON+占位符）、`errors.py`（异常基类）、`text.py`（共享文本原语） |
+| gateway | `src/codalith/gateway/` | MCP stdio + Streamable HTTP 网关、工具/资源/提示/审计/鉴权（默认 scopes 由 registry 派生） |
+| corpus | `src/codalith/corpus/` | 版本化语料注册表（能力声明 + 索引配置）、`codalith://` URI 解析、源码读取策略与限流 |
+| semantic | `src/codalith/semantic/` | SQLite/Postgres 语义图（`codalith_*` 表，启动自动迁移旧 `ue_*`）+ 可插拔 extractor profile（内置 `unreal` 域包：Build.cs / UHT / C++ / 守卫等） |
+| compiler | `src/codalith/compiler/` | 上下文编译器：意图/实体/规划/重排/证据/源定位 → ContextPack（卡片命中与源码 span 分流） |
+| coderag | `src/codalith/coderag/` | CodeRAG 适配器（原生 + 本地兜底）、查询构建、结果映射（模块识别/扫描规则由语料配置驱动） |
+| cards | `src/codalith/cards/` | 知识卡片 schema、生成、哈希、Markdown 渲染、验证 |
+| eval | `src/codalith/eval/` | 评估指标（recall/module_accuracy/latency）与运行器 |
+| jobs | `jobs/` | CLI 任务脚本，对应 `codalith-*` 入口脚本 |
+| tests | `tests/` | pytest 测试套件，含 `corpus_acceptance` marker |
+| configs | `configs/` | `corpus_registry.json` / `source_policy.json` / `source_priors.json` / `seed_cards.json` |
+| scripts | `scripts/` | MCP 客户端一键安装脚本（sh / ps1） |
+| eval/datasets | `eval/datasets/` | 统一 UE Eval Suite：`ue_eval_suite.jsonl`（80 题，当前部署的领域数据集） |
+| fixtures/project_overlay | `fixtures/project_overlay/` | 测试夹具：示例项目 ProjectA |
+| docs | `docs/` | 设计文档 `Codalith_CodeRAG_Design.md` |
+| external/CodeRAG | `external/CodeRAG/` | **Git 子模块，外部依赖，勿深入生成模块文档** |
 
 ## 运行与开发
 
@@ -159,9 +147,9 @@ docker compose --profile coderag run --rm coderag-openai-acceptance  # OpenAI-co
 
 所有主机相关路径通过 `.env` 配置（勿直接改 `docker-compose.yml`）。关键变量见 `.env.example`：
 
-- 主机路径：`CODALITH_ENGINE_HOST_ROOT`、`CODALITH_ENGINE_SOURCE_HOST_ROOT`、`CODALITH_GAMEPLAY_ABILITIES_HOST_ROOT`
+- 主机路径：`CODALITH_ENGINE_HOST_ROOT`、`CODALITH_ENGINE_SOURCE_HOST_ROOT`、`CODALITH_ENGINE_PLUGINS_HOST_ROOT`、`CODALITH_GAMEPLAY_ABILITIES_HOST_ROOT`
 - 容器路径：`CODALITH_ENGINE_SOURCE_ROOT`、`CODALITH_ENGINE_INDEXED_ROOT`、`CODALITH_CODERAG_STORE_DIR`、`CODALITH_CODERAG_OPENAI_STORE_DIR`
-- 运行时：`CODALITH_AUDIT_LOG`、`CODALITH_SEMANTIC_DB`、`CODALITH_SCOPES`、`CODALITH_HTTP_*`
+- 运行时：`CODALITH_AUDIT_LOG`、`CODALITH_SEMANTIC_DB`、`CODALITH_SCOPES`（留空则按 registry 派生完整权限）、`CODALITH_HTTP_*`
 - CodeRAG：`CODALITH_CODERAG_PROVIDER`、`CODALITH_CODERAG_EMBEDDING_MODEL`、`CODALITH_CODERAG_MAX_CHUNK_CHARS`
 
 `configs/*.json` 支持 `${VAR:-default}` 占位符，同一仓库可在不同机器运行而无需改提交的配置文件。
@@ -249,9 +237,4 @@ uv run python -m codalith.eval.mcp_runner --endpoint http://127.0.0.1:8765/mcp -
 - 修改语料/策略时改 `configs/*.json` + `.env`，不要硬编码路径；域知识（module hints、stopwords、seed 卡、scope 前缀、semantic profile）一律走配置或域包，不进中性内核。
 - 语义图数据需先运行 `codalith-extract-semantic --semantic-db <path>`（按语料 `semantic_profile` 选择域包），否则 `codalith_graph` 会返回空边并提示。
 - external/CodeRAG 是外部子模块，不要在其内生成文档或修改源码。
-
-## 安全边界（本索引任务）
-
-- 仅生成/更新文档与 `.claude/index.json`，不修改任何源代码。
-- 忽略 `.venv/`、`external/CodeRAG/`（子模块）、`.git/`、`build/`、`reports/`、`data/`、二进制与缓存。
-- external/CodeRAG 仅在根索引标注为外部依赖，不深入生成模块文档。
+- `reports/`、`data/`、`.local/` 为生成产物或本地运行数据，不提交。
