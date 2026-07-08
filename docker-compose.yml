@@ -95,6 +95,12 @@ services:
       - ${CODALITH_REPO_ROOT:-.}:${CODALITH_WORKSPACE_DIR:-/workspace}
       - ${CODALITH_CODERAG_OPENAI_HOST_ROOT:-coderag-openai-store}:${CODALITH_CODERAG_VOLUME_ROOT:-/var/lib/codalith/coderag}
       - ${CODALITH_ENGINE_HOST_ROOT:-E:/UnrealEngine_5.7}:${CODALITH_ENGINE_SOURCE_ROOT:-/srv/ue/5.7.4}:ro
+      # Same layout the store was indexed from: engine sources, all plugins
+      # (source priors may cite any of them), and knowledge cards.
+      - ${CODALITH_ENGINE_SOURCE_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Source}:${CODALITH_ENGINE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Source:ro
+      - ${CODALITH_ENGINE_PLUGINS_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Plugins}:${CODALITH_ENGINE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Plugins:ro
+      - ${CODALITH_REPO_ROOT:-.}/data/cards/ue-${CODALITH_ENGINE_VERSION:-5.7.4}/KNOWLEDGE:${CODALITH_ENGINE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/KNOWLEDGE
+      - ${CODALITH_REPO_ROOT:-.}/data/cards/ue-${CODALITH_ENGINE_VERSION:-5.7.4}:${CODALITH_ENGINE_CARD_ROOT:-/srv/codalith/cards/ue-5.7.4}
     command: >
       sh -lc "uv sync &&
       uv run python -c 'from jobs.coderag_acceptance import ensure_coderag_installed; ensure_coderag_installed(\"openai\")' &&

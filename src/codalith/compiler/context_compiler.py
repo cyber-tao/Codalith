@@ -72,17 +72,21 @@ class ContextCompiler:
                         top_k=search_top_k,
                     )
                 )
-        hits = rerank(
+        # Rerank a wider window than the span budget so card hits do not evict
+        # source hits: cards land in the cards section, not in source_spans.
+        ranked = rerank(
             _unique_hits(raw_hits),
             identifiers=identifiers,
-            max_hits=max_source_spans,
+            max_hits=max_source_spans * 2,
             mode=intent,
         )
+        card_hits = [hit for hit in ranked if _is_card_path(hit.path)]
+        hits = [hit for hit in ranked if not _is_card_path(hit.path)][:max_source_spans]
         engine_corpus_id = resolution.engine.corpus_id
         corpus_kinds = {corpus.corpus_id: corpus.kind for corpus in resolution.ordered}
         inferred_modules = _module_entries(engine_corpus_id, modules, hits)
         source_spans = self._enriched_source_spans(hits, corpus_kinds)
-        source_spans.extend(self._card_evidence_spans(hits))
+        source_spans.extend(self._card_evidence_spans(card_hits))
         # Card evidence must not let the pack exceed the caller's span budget.
         source_spans = source_spans[:max_source_spans]
         graph_edges = self._graph_edges(
@@ -97,8 +101,7 @@ class ContextCompiler:
                 # them, so a hit inside CARDS_DIR implies a verified card.
                 "verification_status": "verified",
             }
-            for hit in hits
-            if _is_card_path(hit.path)
+            for hit in card_hits
         ]
         return ContextPack(
             query=query,
