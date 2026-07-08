@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from codalith.cards import CARDS_DIR
 from codalith.corpus.registry import CorpusRegistry
-from codalith.corpus.uris import corpus_uri
+from codalith.corpus.uris import card_uri, corpus_uri
 from codalith.errors import URIResolutionError
 from codalith.gateway.auth import AuthError
 
@@ -203,7 +203,7 @@ def _card_resource(
     if not card_file.is_file():
         raise URIResolutionError(f"Unknown card resource: {uri}")
     return {
-        "uri": uri,
+        "uri": card_uri(corpus.corpus_id, card_type, card_id),
         "corpus_id": corpus.corpus_id,
         "kind": "card",
         "card_type": card_type,

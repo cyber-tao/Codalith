@@ -9,7 +9,14 @@ import re
 
 from codalith.text import camel_words, contains_word
 
-_IDENT_RE = re.compile(r"\b[A-Z][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)?\b")
+# Identifier shapes: capitalized/CamelCase (optionally ::qualified) plus
+# snake_case. Bare lowercase words stay out so prose does not become symbols.
+_IDENT_RE = re.compile(
+    r"\b(?:"
+    r"[A-Z][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)?"
+    r"|[a-z][a-z0-9]*(?:_[a-z0-9]+)+"
+    r")\b"
+)
 
 # Capitalized English question/aux/filler words the identifier regex would
 # otherwise mistake for symbols at sentence starts. Domain vocabulary that

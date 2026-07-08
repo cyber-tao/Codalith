@@ -1,11 +1,11 @@
-"""Compile CodeRAG hits and semantic metadata into Context Pack v0."""
+"""Compile CodeRAG hits and semantic metadata into a Context Pack."""
 
 from __future__ import annotations
 
 import re
 from typing import Any
 
-from codalith.cards import CARDS_DIR
+from codalith.cards import is_card_path
 from codalith.cards.hashing import source_sha256
 from codalith.coderag import CodeRAGAdapter, RetrievalHit, language_for_path
 from codalith.compiler.context_pack import ContextPack, ContextSummary
@@ -15,8 +15,10 @@ from codalith.compiler.reranker import rerank
 from codalith.compiler.source_locator import load_source_domain_config, locate_source_priors
 from codalith.corpus.registry import CorpusRegistry
 from codalith.corpus.source_reader import SourceReader
-from codalith.corpus.uris import SCHEME, module_uri, symbol_uri
+from codalith.corpus.uris import SCHEME, module_uri, parse_source_uri, symbol_uri
 from codalith.semantic.graph import query_graph
+
+_FRONT_MATTER_STATUS_RE = re.compile(r"^verification_status:\s*(?P<status>\S+)\s*$", re.MULTILINE)
 
 
 class ContextCompiler:
@@ -95,8 +97,8 @@ class ContextCompiler:
             max_hits=max_source_spans * 2,
             mode=intent,
         )
-        card_hits = [hit for hit in ranked if _is_card_path(hit.path)]
-        hits = [hit for hit in ranked if not _is_card_path(hit.path)][:max_source_spans]
+        card_hits = [hit for hit in ranked if is_card_path(hit.path)]
+        hits = [hit for hit in ranked if not is_card_path(hit.path)][:max_source_spans]
         base_corpus_id = resolution.base.corpus_id
         corpus_kinds = {corpus.corpus_id: corpus.kind for corpus in resolution.ordered}
         inferred_modules = _module_entries(base_corpus_id, modules, hits)
@@ -112,9 +114,7 @@ class ContextCompiler:
             {
                 "uri": hit.uri,
                 "title": hit.title,
-                # Cards are only indexed after codalith-generate-cards verifies
-                # them, so a hit inside CARDS_DIR implies a verified card.
-                "verification_status": "verified",
+                "verification_status": self._card_verification_status(hit),
             }
             for hit in card_hits
         ]
@@ -217,13 +217,26 @@ class ContextCompiler:
                     ]
         return spans
 
+    def _card_verification_status(self, hit: RetrievalHit) -> str:
+        """Read the actual verification status from the card's front matter.
+
+        The retrieval snippet may start mid-file, so the card file head is read
+        through the corpus source reader instead of trusting the hit snippet.
+        """
+        try:
+            head = self.source_reader.read_source(hit.corpus_id, hit.path, 1, 10)
+        except Exception:
+            return "unknown"
+        match = _FRONT_MATTER_STATUS_RE.search(head)
+        return match.group("status") if match else "unknown"
+
     def _card_evidence_spans(self, hits: list[RetrievalHit]) -> list[dict[str, object]]:
         spans: list[dict[str, object]] = []
         for hit in hits:
-            if not _is_card_path(hit.path):
+            if not is_card_path(hit.path):
                 continue
             for uri in _extract_evidence_uris(hit.snippet):
-                parsed = _parse_source_uri(uri)
+                parsed = parse_source_uri(uri)
                 if parsed is None:
                     continue
                 corpus_id, path, start, end = parsed
@@ -362,27 +375,8 @@ def _confidence(hits: list[RetrievalHit]) -> str:
     return "medium"
 
 
-def _is_card_path(path: str) -> bool:
-    return CARDS_DIR in path.split("/")
-
-
 def _extract_evidence_uris(text: str) -> list[str]:
     return re.findall(rf"{SCHEME}://[^\s)]+", text)
-
-
-def _parse_source_uri(uri: str) -> tuple[str, str, int, int] | None:
-    match = re.match(
-        rf"{SCHEME}://(?P<corpus_id>[^/]+)/source/(?P<path>[^#]+)#L(?P<start>\d+)-L(?P<end>\d+)",
-        uri,
-    )
-    if not match:
-        return None
-    return (
-        match.group("corpus_id"),
-        match.group("path"),
-        int(match.group("start")),
-        int(match.group("end")),
-    )
 
 
 def _graph_caveat(graph_edges: list[dict[str, object]], has_store: bool) -> str:

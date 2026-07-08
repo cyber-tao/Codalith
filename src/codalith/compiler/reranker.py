@@ -9,7 +9,7 @@ weights decide how the sources compete.
 
 from __future__ import annotations
 
-from codalith.cards import CARDS_DIR
+from codalith.cards import is_card_path
 from codalith.coderag import RetrievalHit
 
 
@@ -31,7 +31,7 @@ def rerank(
         base = hit.score / peak if peak > 0 else 0.0
         haystack = f"{hit.path}\n{hit.title}\n{hit.snippet}".lower()
         exact = 1.0 if any(identifier in haystack for identifier in identifier_set) else 0.0
-        card = 1.0 if CARDS_DIR in hit.path.split("/") else 0.0
+        card = 1.0 if is_card_path(hit.path) else 0.0
         module = 1.0 if hit.module and hit.module.lower() in haystack else 0.0
         source_prior = 1.0 if hit.source == "source-locator" else 0.0
         path_match = 1.0 if any(identifier in hit.path.lower() for identifier in identifier_set) else 0.0

@@ -51,6 +51,28 @@ def test_written_cards_are_searchable_from_indexed_root(registry, adapter, sampl
     assert any("KNOWLEDGE" in hit.path for hit in hits)
 
 
+def test_context_pack_reads_card_verification_status_from_front_matter(
+    registry, adapter, sample_corpus_root
+):
+    corpus = registry.get_base()
+    cards = built_in_cards(
+        corpus_id=corpus.corpus_id,
+        version=corpus.version_label,
+        seed_cards_path=corpus.seed_cards_path,
+    )
+    write_cards([cards[0].verified(), cards[1]], sample_corpus_root)
+    adapter.reindex(corpus.corpus_id)
+    compiler = ContextCompiler(registry, adapter)
+
+    pack = compiler.compile(query="Core Cache API seed knowledge card", version="sample")
+
+    statuses = {card["uri"]: card["verification_status"] for card in pack.cards}
+    assert statuses, "expected at least one card hit"
+    for uri, status in statuses.items():
+        expected = "verified" if "module-core-cache" in uri else "unverified"
+        assert status == expected, (uri, status)
+
+
 def test_card_without_evidence_fails(registry, adapter):
     card = KnowledgeCard(
         corpus_id="sample-codebase",

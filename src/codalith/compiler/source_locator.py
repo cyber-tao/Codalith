@@ -12,7 +12,7 @@ from codalith.config import load_config
 from codalith.corpus.registry import Corpus
 from codalith.corpus.source_reader import SourceReader
 from codalith.corpus.uris import source_uri
-from codalith.errors import ConfigurationError
+from codalith.errors import ConfigurationError, SourceReadError
 from codalith.text import normalize, tokenize
 
 
@@ -46,21 +46,6 @@ def load_source_domain_config(path: str | Path | None) -> SourceDomainConfig:
             str(item) for item in raw.get("identifier_stopwords", [])
         ),
     )
-
-
-def source_priors(path: str | Path | None = None) -> tuple[SourcePrior, ...]:
-    """Return source priors for an explicit corpus config path."""
-    return load_source_domain_config(path).priors
-
-
-def module_hints(path: str | Path | None = None) -> frozenset[str]:
-    """Return module hints for an explicit corpus config path."""
-    return load_source_domain_config(path).module_hints
-
-
-def identifier_stopwords(path: str | Path | None = None) -> frozenset[str]:
-    """Return identifier stopwords for an explicit corpus config path."""
-    return load_source_domain_config(path).identifier_stopwords
 
 
 def reset_domain_config_cache() -> None:
@@ -97,14 +82,13 @@ def locate_source_priors(
     query: str,
     identifiers: list[str],
     max_hits: int,
+    source_reader: SourceReader,
     priors: tuple[SourcePrior, ...] = (),
-    source_reader: SourceReader | None = None,
 ) -> list[RetrievalHit]:
     scored: list[tuple[float, SourcePrior]] = []
     normalized_query = normalize(query)
     identifier_terms = {normalize(identifier) for identifier in identifiers}
     query_tokens = set(tokenize(normalized_query))
-    reader = source_reader or SourceReaderPlaceholder(corpus)
     for prior in priors:
         score = _score_prior(prior, normalized_query, identifier_terms, query_tokens)
         if score > 0:
@@ -112,7 +96,7 @@ def locate_source_priors(
 
     hits: list[RetrievalHit] = []
     for score, prior in sorted(scored, key=lambda item: item[0], reverse=True):
-        hit = _hit_for_prior(corpus, prior, query=query, score=score, source_reader=reader)
+        hit = _hit_for_prior(corpus, prior, query=query, score=score, source_reader=source_reader)
         if hit is not None:
             hits.append(hit)
         if len(hits) >= max_hits:
@@ -155,11 +139,11 @@ def _hit_for_prior(
     *,
     query: str,
     score: float,
-    source_reader: SourceReader | SourceReaderPlaceholder,
+    source_reader: SourceReader,
 ) -> RetrievalHit | None:
     try:
         lines = source_reader.read_lines(corpus.corpus_id, prior.path)
-    except (OSError, FileNotFoundError):
+    except (OSError, SourceReadError):
         return None
     if not lines:
         return None
@@ -199,17 +183,3 @@ def _window(lines: list[str], *, query: str, line_terms: tuple[str, ...]) -> tup
     start = max(1, best_line - 4)
     end = min(len(lines), best_line + 15)
     return start, end
-
-class SourceReaderPlaceholder:
-    """Tiny source-root-first reader for direct unit calls without a registry."""
-
-    def __init__(self, corpus: Corpus) -> None:
-        self.corpus = corpus
-
-    def read_lines(self, corpus_id: str, path: str) -> list[str]:
-        _ = corpus_id
-        for root in (self.corpus.source_root, self.corpus.indexed_root):
-            target = root / path
-            if target.is_file():
-                return target.read_text(encoding="utf-8", errors="replace").splitlines()
-        raise FileNotFoundError(path)

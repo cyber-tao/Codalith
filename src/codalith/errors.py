@@ -21,5 +21,9 @@ class SourcePolicyError(CodalithError):
     """Raised when source access policy denies a read."""
 
 
+class SourceReadError(CodalithError):
+    """Raised when a corpus source file cannot be read (missing or invalid path)."""
+
+
 class CodeRAGAdapterError(CodalithError):
     """Raised when a CodeRAG operation cannot be completed."""

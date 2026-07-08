@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from codalith.corpus.registry import Corpus, CorpusRegistry
-from codalith.errors import CodeRAGAdapterError
+from codalith.errors import SourceReadError
 
 
 class SourceReader:
@@ -48,7 +48,7 @@ class SourceReader:
             _ensure_inside(root, candidate, relative)
             if candidate.is_file():
                 return candidate
-        raise FileNotFoundError(f"Source file does not exist: {path}")
+        raise SourceReadError(f"Source file does not exist: {path}")
 
 
 def _candidate_roots(corpus: Corpus) -> list[Path]:
@@ -64,10 +64,10 @@ def _clean_relative_path(path: str) -> Path:
     normalized = path.replace("\\", "/").lstrip("/")
     parts = Path(normalized).parts
     if not normalized or any(part == ".." for part in parts):
-        raise CodeRAGAdapterError(f"Invalid source path: {path}")
+        raise SourceReadError(f"Invalid source path: {path}")
     return Path(normalized)
 
 
 def _ensure_inside(root: Path, candidate: Path, relative: Path) -> None:
     if root not in candidate.parents and candidate != root:
-        raise CodeRAGAdapterError(f"Path escapes corpus root: {relative.as_posix()}")
+        raise SourceReadError(f"Path escapes corpus root: {relative.as_posix()}")
