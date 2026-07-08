@@ -13,8 +13,31 @@ def test_extract_semantic_no_profile_writes_empty_summary(registry_path, tmp_pat
 
     summary = json.loads(output.read_text(encoding="utf-8"))
     assert summary["corpus_id"] == "sample-codebase"
+    assert summary["profile"] is None
     assert summary["modules"] == 0
-    assert summary["reflection_entities"] == 0
+    assert summary["symbols"] == 0
+
+
+def test_extract_semantic_with_db_records_corpus(registry_path, tmp_path):
+    output = tmp_path / "summary.json"
+    db_path = tmp_path / "semantic.sqlite"
+
+    assert extract_semantic_main(
+        [
+            "--registry",
+            str(registry_path),
+            "--corpus",
+            "sample-codebase",
+            "--output",
+            str(output),
+            "--semantic-db",
+            str(db_path),
+        ]
+    ) == 0
+
+    summary = json.loads(output.read_text(encoding="utf-8"))
+    assert summary["semantic_store"] == str(db_path)
+    assert db_path.exists()
 
 
 def test_index_corpus_smoke_reads_generic_sample(registry_path, capsys):

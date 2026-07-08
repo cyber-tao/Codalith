@@ -575,12 +575,12 @@ def _tool_schema_data(default_version: str | None) -> list[dict[str, Any]]:
         },
         {
             "name": "codalith_index_status",
-            "description": "Report CodeRAG index status plus semantic extractor status per corpus.",
+            "description": "Report CodeRAG index status plus semantic graph status per corpus.",
             "inputSchema": {"type": "object", "properties": {"version": {"type": "string"}, "project": {"type": "string"}}},
         },
         {
             "name": "codalith_lookup_symbol",
-            "description": "Resolve a source or reflection symbol to definitions, declarations, modules, reflection metadata, generated-code relation, references, examples, and source URIs.",
+            "description": "Resolve a source symbol to definitions, declarations, modules, references, examples, and source URIs.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -592,8 +592,7 @@ def _tool_schema_data(default_version: str | None) -> list[dict[str, Any]]:
                         "default": "any",
                         "description": (
                             "Symbol kind filter: 'any' or a kind emitted by the corpus "
-                            "extractors (e.g. class, struct, function, method, macro, "
-                            "module, or a domain-specific reflection kind)."
+                            "extractors (e.g. class, struct, function, method, macro, module)."
                         ),
                     },
                     "include_examples": {"type": "boolean", "default": True},
@@ -603,7 +602,7 @@ def _tool_schema_data(default_version: str | None) -> list[dict[str, Any]]:
         },
         {
             "name": "codalith_graph",
-            "description": "Return semantic graph neighbors for modules, plugins, symbols, reflection entities, build dependencies, include edges, overrides, generated-code relations, and usage examples.",
+            "description": "Return semantic graph neighbors for modules, symbols, build dependencies, include edges, and usage examples.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

@@ -32,7 +32,6 @@ class GraphEdge:
     def as_dict(self) -> dict[str, object]:
         return {
             "from": self.from_node,
-            "edge": self.edge_type,
             "edge_type": self.edge_type,
             "to": self.to_node,
             "evidence_uri": self.evidence_uri,
@@ -52,8 +51,6 @@ class GraphStore(Protocol):
         limit: int = 200,
     ) -> list[GraphEdge]: ...
 
-    def reflection_kinds(self, corpus_id: str) -> list[str]: ...
-
 
 def query_graph(
     store: GraphStore,
@@ -68,10 +65,7 @@ def query_graph(
 
     bounded_depth = max(1, min(depth, 4))
     bounded_nodes = max(1, max_nodes)
-    kinds = store.reflection_kinds(corpus_id) if ":" not in node.strip() else []
-    queue: deque[tuple[str, int]] = deque(
-        (candidate, 0) for candidate in node_candidates(node, kinds)
-    )
+    queue: deque[tuple[str, int]] = deque((candidate, 0) for candidate in node_candidates(node))
     visited: set[str] = set()
     nodes: dict[str, GraphNodeDict] = {}
     edges: dict[tuple[str, str, str], GraphEdge] = {}
@@ -103,12 +97,8 @@ def query_graph(
     }
 
 
-def node_candidates(node: str, reflection_kinds: Iterable[str] = ()) -> list[str]:
-    """Expand a bare name into candidate node ids.
-
-    Reflection node ids embed a domain-specific kind (e.g. "uclass"), so the
-    caller supplies the kinds observed in the store for this corpus.
-    """
+def node_candidates(node: str) -> list[str]:
+    """Expand a bare name into namespaced candidate node ids."""
     normalized = node.strip()
     if not normalized:
         return []
@@ -118,7 +108,6 @@ def node_candidates(node: str, reflection_kinds: Iterable[str] = ()) -> list[str
         normalized,
         f"module:{normalized}",
         f"symbol:{normalized}",
-        *(f"reflection:{kind}:{normalized}" for kind in reflection_kinds),
         f"macro:{normalized}",
     ]
 

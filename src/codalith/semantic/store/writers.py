@@ -8,15 +8,7 @@ from typing import Any
 from codalith.cards.schema import KnowledgeCard
 from codalith.corpus.registry import Corpus
 from codalith.semantic.store.queries import SemanticQueries
-from codalith.semantic.types import (
-    CompileGuard,
-    ModuleDependency,
-    PluginDescriptor,
-    ProjectDescriptor,
-    ReflectionEntity,
-    SourceSymbol,
-    TargetDefinition,
-)
+from codalith.semantic.types import CompileGuard, ModuleDependency, SourceSymbol
 
 
 class SemanticWriters(SemanticQueries):
@@ -171,48 +163,32 @@ class SemanticWriters(SemanticQueries):
         corpus_id: str,
         module_name: str,
         module_type: str | None = None,
-        loading_phase: str | None = None,
-        supported_platforms: list[str] | None = None,
-        public_include_paths: list[str] | None = None,
-        private_include_paths: list[str] | None = None,
         source_uri: str | None = None,
         metadata: dict[str, Any] | None = None,
         commit: bool = True,
     ) -> None:
         existing = self.get_module(corpus_id, module_name)
-        module_type = module_type or (str(existing["module_type"]) if existing and existing.get("module_type") else None)
-        loading_phase = loading_phase or (
-            str(existing["loading_phase"]) if existing and existing.get("loading_phase") else None
+        module_type = module_type or (
+            str(existing["module_type"]) if existing and existing.get("module_type") else None
         )
-        supported_platforms = supported_platforms or _json_list(existing, "supported_platforms")
-        public_include_paths = public_include_paths or _json_list(existing, "public_include_paths")
-        private_include_paths = private_include_paths or _json_list(existing, "private_include_paths")
         if source_uri is None and existing and existing.get("source_uri"):
             source_uri = str(existing["source_uri"])
         merged_metadata = _merge_dict(existing.get("metadata") if existing else None, metadata or {})
         if self.dialect == "postgresql":
             sql = """
                 INSERT INTO codalith_modules
-                  (corpus_id, module_name, module_type, loading_phase,
-                   supported_platforms, public_include_paths, private_include_paths,
-                   source_uri, metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  (corpus_id, module_name, module_type, source_uri, metadata)
+                VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT (corpus_id, module_name)
                 DO UPDATE SET module_type = EXCLUDED.module_type,
-                              loading_phase = EXCLUDED.loading_phase,
-                              supported_platforms = EXCLUDED.supported_platforms,
-                              public_include_paths = EXCLUDED.public_include_paths,
-                              private_include_paths = EXCLUDED.private_include_paths,
                               source_uri = EXCLUDED.source_uri,
                               metadata = EXCLUDED.metadata
                 """
         else:
             sql = """
                 INSERT OR REPLACE INTO codalith_modules
-                  (corpus_id, module_name, module_type, loading_phase,
-                   supported_platforms, public_include_paths, private_include_paths,
-                   source_uri, metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  (corpus_id, module_name, module_type, source_uri, metadata)
+                VALUES (?, ?, ?, ?, ?)
                 """
         self._execute(
             sql,
@@ -220,125 +196,11 @@ class SemanticWriters(SemanticQueries):
                 corpus_id,
                 module_name,
                 module_type,
-                loading_phase,
-                self._json(supported_platforms or []),
-                self._json(public_include_paths or []),
-                self._json(private_include_paths or []),
                 source_uri,
                 self._json(merged_metadata),
             ),
             commit=commit,
         )
-
-    def upsert_reflection_entity(
-        self,
-        *,
-        corpus_id: str,
-        entity: ReflectionEntity,
-        commit: bool = True,
-    ) -> None:
-        if self.dialect == "postgresql":
-            sql = """
-                INSERT INTO codalith_reflection_entities
-                  (corpus_id, reflection_id, kind, name, owner_name,
-                   module_name, declaration_uri, generated_uri, specifiers, metadata, confidence)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (reflection_id)
-                DO UPDATE SET kind = EXCLUDED.kind,
-                              name = EXCLUDED.name,
-                              owner_name = EXCLUDED.owner_name,
-                              module_name = EXCLUDED.module_name,
-                              declaration_uri = EXCLUDED.declaration_uri,
-                              generated_uri = EXCLUDED.generated_uri,
-                              specifiers = EXCLUDED.specifiers,
-                              metadata = EXCLUDED.metadata,
-                              confidence = EXCLUDED.confidence
-                """
-        else:
-            sql = """
-                INSERT OR REPLACE INTO codalith_reflection_entities
-                  (corpus_id, reflection_id, kind, name, owner_name,
-                   module_name, declaration_uri, generated_uri, specifiers, metadata, confidence)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """
-        self._execute(
-            sql,
-            (
-                corpus_id,
-                f"{corpus_id}:{entity.kind}:{entity.owner or ''}:{entity.name}",
-                entity.kind,
-                entity.name,
-                entity.owner,
-                entity.module_name,
-                entity.declaration_uri,
-                entity.generated_header,
-                self._json(entity.specifiers),
-                self._json(entity.metadata),
-                entity.confidence,
-            ),
-        )
-        node = f"reflection:{entity.kind}:{entity.name}"
-        if entity.module_name:
-            self.upsert_graph_edge(
-                corpus_id=corpus_id,
-                from_node=f"module:{entity.module_name}",
-                edge_type="declares_reflection",
-                to_node=node,
-                evidence_uri=entity.declaration_uri,
-                extractor="uht_reflection",
-                confidence=entity.confidence,
-                metadata={"kind": entity.kind},
-                commit=False,
-            )
-        self.upsert_graph_edge(
-            corpus_id=corpus_id,
-            from_node=f"symbol:{entity.name}",
-            edge_type="has_reflection",
-            to_node=node,
-            evidence_uri=entity.declaration_uri,
-            extractor="uht_reflection",
-            confidence=entity.confidence,
-            metadata={"kind": entity.kind, "specifiers": entity.specifiers},
-            commit=False,
-        )
-        if entity.owner:
-            self.upsert_graph_edge(
-                corpus_id=corpus_id,
-                from_node=f"symbol:{entity.owner}",
-                edge_type="owns_reflection",
-                to_node=node,
-                evidence_uri=entity.declaration_uri,
-                extractor="uht_reflection",
-                confidence=entity.confidence,
-                metadata={"kind": entity.kind},
-                commit=False,
-            )
-        rep_notify = entity.metadata.get("rep_notify")
-        if isinstance(rep_notify, str) and rep_notify:
-            self.upsert_graph_edge(
-                corpus_id=corpus_id,
-                from_node=node,
-                edge_type="replicated_using",
-                to_node=f"symbol:{rep_notify}",
-                evidence_uri=entity.declaration_uri,
-                extractor="uht_reflection",
-                confidence=entity.confidence,
-                metadata={"property": entity.name},
-                commit=False,
-            )
-        if entity.generated_header:
-            self.upsert_graph_edge(
-                corpus_id=corpus_id,
-                from_node=node,
-                edge_type="generated_header",
-                to_node=f"file:{entity.generated_header}",
-                evidence_uri=entity.declaration_uri,
-                extractor="uht_reflection",
-                confidence=entity.confidence,
-                commit=False,
-            )
-        if commit:
-            self.connection.commit()
 
     def upsert_compile_guard(
         self,
@@ -401,7 +263,7 @@ class SemanticWriters(SemanticQueries):
         if commit:
             self.connection.commit()
 
-    def upsert_cpp_symbol(
+    def upsert_symbol(
         self,
         *,
         corpus_id: str,
@@ -462,7 +324,7 @@ class SemanticWriters(SemanticQueries):
             edge_type="declares_symbol",
             to_node=symbol_node,
             evidence_uri=evidence_uri,
-            extractor="cpp_symbols",
+            extractor="symbols",
             metadata={"kind": symbol.kind, "line": symbol.line, "qualified_name": symbol.qualified_name},
             commit=False,
         )
@@ -473,201 +335,8 @@ class SemanticWriters(SemanticQueries):
                 edge_type="declares_symbol",
                 to_node=symbol_node,
                 evidence_uri=evidence_uri,
-                extractor="cpp_symbols",
+                extractor="symbols",
                 metadata={"kind": symbol.kind, "path": path},
-                commit=False,
-            )
-        if commit:
-            self.connection.commit()
-
-    def upsert_target(
-        self,
-        *,
-        corpus_id: str,
-        target: TargetDefinition,
-        evidence_uri: str,
-        commit: bool = True,
-    ) -> None:
-        if self.dialect == "postgresql":
-            sql = """
-                INSERT INTO codalith_targets
-                  (corpus_id, target_name, target_type, extra_modules,
-                   build_settings, declaration_uri, metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (corpus_id, target_name)
-                DO UPDATE SET target_type = EXCLUDED.target_type,
-                              extra_modules = EXCLUDED.extra_modules,
-                              build_settings = EXCLUDED.build_settings,
-                              declaration_uri = EXCLUDED.declaration_uri,
-                              metadata = EXCLUDED.metadata
-                """
-        else:
-            sql = """
-                INSERT OR REPLACE INTO codalith_targets
-                  (corpus_id, target_name, target_type, extra_modules,
-                   build_settings, declaration_uri, metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """
-        self._execute(
-            sql,
-            (
-                corpus_id,
-                target.name,
-                target.target_type,
-                self._json(target.extra_modules),
-                target.build_settings,
-                evidence_uri,
-                self._json(target.metadata),
-            ),
-            commit=False,
-        )
-        target_node = f"target:{target.name}"
-        for module in target.extra_modules:
-            self.upsert_module(corpus_id=corpus_id, module_name=module, commit=False)
-            self.upsert_graph_edge(
-                corpus_id=corpus_id,
-                from_node=target_node,
-                edge_type="target_uses_module",
-                to_node=f"module:{module}",
-                evidence_uri=evidence_uri,
-                extractor="target_cs",
-                metadata={"target_type": target.target_type, "build_settings": target.build_settings},
-                commit=False,
-            )
-        if commit:
-            self.connection.commit()
-
-    def upsert_plugin(
-        self,
-        *,
-        corpus_id: str,
-        plugin: PluginDescriptor,
-        evidence_uri: str,
-        commit: bool = True,
-    ) -> None:
-        if self.dialect == "postgresql":
-            sql = """
-                INSERT INTO codalith_plugins
-                  (corpus_id, plugin_name, path, modules, supported_platforms, metadata)
-                VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT (corpus_id, plugin_name)
-                DO UPDATE SET path = EXCLUDED.path,
-                              modules = EXCLUDED.modules,
-                              supported_platforms = EXCLUDED.supported_platforms,
-                              metadata = EXCLUDED.metadata
-                """
-        else:
-            sql = """
-                INSERT OR REPLACE INTO codalith_plugins
-                  (corpus_id, plugin_name, path, modules, supported_platforms, metadata)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """
-        self._execute(
-            sql,
-            (
-                corpus_id,
-                plugin.name,
-                plugin.path,
-                self._json([module.as_dict() for module in plugin.modules]),
-                self._json(plugin.supported_platforms),
-                self._json(plugin.metadata),
-            ),
-            commit=False,
-        )
-        plugin_node = f"plugin:{plugin.name}"
-        for module in plugin.modules:
-            self.upsert_module(
-                corpus_id=corpus_id,
-                module_name=module.name,
-                module_type=module.module_type,
-                loading_phase=module.loading_phase,
-                supported_platforms=module.supported_platforms,
-                source_uri=evidence_uri,
-                metadata={"plugin": plugin.name},
-                commit=False,
-            )
-            self.upsert_graph_edge(
-                corpus_id=corpus_id,
-                from_node=plugin_node,
-                edge_type="plugin_contains_module",
-                to_node=f"module:{module.name}",
-                evidence_uri=evidence_uri,
-                extractor="plugin_descriptor",
-                metadata=module.as_dict(),
-                commit=False,
-            )
-        if commit:
-            self.connection.commit()
-
-    def upsert_project(
-        self,
-        *,
-        corpus_id: str,
-        project: ProjectDescriptor,
-        evidence_uri: str,
-        commit: bool = True,
-    ) -> None:
-        if self.dialect == "postgresql":
-            sql = """
-                INSERT INTO codalith_projects
-                  (corpus_id, project_name, path, modules, plugins, metadata)
-                VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT (corpus_id, project_name)
-                DO UPDATE SET path = EXCLUDED.path,
-                              modules = EXCLUDED.modules,
-                              plugins = EXCLUDED.plugins,
-                              metadata = EXCLUDED.metadata
-                """
-        else:
-            sql = """
-                INSERT OR REPLACE INTO codalith_projects
-                  (corpus_id, project_name, path, modules, plugins, metadata)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """
-        self._execute(
-            sql,
-            (
-                corpus_id,
-                project.name,
-                project.path,
-                self._json([module.as_dict() for module in project.modules]),
-                self._json(project.plugins),
-                self._json(project.metadata),
-            ),
-            commit=False,
-        )
-        project_node = f"project:{project.name}"
-        for module in project.modules:
-            self.upsert_module(
-                corpus_id=corpus_id,
-                module_name=module.name,
-                module_type=module.module_type,
-                loading_phase=module.loading_phase,
-                supported_platforms=module.supported_platforms,
-                source_uri=evidence_uri,
-                metadata={"project": project.name},
-                commit=False,
-            )
-            self.upsert_graph_edge(
-                corpus_id=corpus_id,
-                from_node=project_node,
-                edge_type="project_contains_module",
-                to_node=f"module:{module.name}",
-                evidence_uri=evidence_uri,
-                extractor="project_descriptor",
-                metadata=module.as_dict(),
-                commit=False,
-            )
-        for plugin_name, enabled in project.plugins.items():
-            edge_type = "project_enables_plugin" if enabled else "project_disables_plugin"
-            self.upsert_graph_edge(
-                corpus_id=corpus_id,
-                from_node=project_node,
-                edge_type=edge_type,
-                to_node=f"plugin:{plugin_name}",
-                evidence_uri=evidence_uri,
-                extractor="project_descriptor",
-                metadata={"enabled": enabled},
                 commit=False,
             )
         if commit:
@@ -764,15 +433,6 @@ class SemanticWriters(SemanticQueries):
         )
         if commit:
             self.connection.commit()
-
-
-def _json_list(row: dict[str, Any] | None, key: str) -> list[str]:
-    if not row:
-        return []
-    value = row.get(key)
-    if not isinstance(value, list):
-        return []
-    return [str(item) for item in value]
 
 
 def _merge_dict(left: object, right: dict[str, Any]) -> dict[str, Any]:

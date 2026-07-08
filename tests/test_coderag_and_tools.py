@@ -343,7 +343,7 @@ def test_index_status_reports_semantic_store(tools):
     status = tools.codalith_index_status(version="sample")
 
     assert status["semantic"]["engine"]["graph_edges"] > 0
-    assert status["semantic"]["engine"]["cpp_symbols"] > 0
+    assert status["semantic"]["engine"]["symbols"] > 0
 
 
 def test_mcp_tools_list_and_call(tools):

@@ -40,12 +40,6 @@ def resources(registry: CorpusRegistry) -> list[dict[str, str]]:
                     "mimeType": "application/json",
                 },
                 {
-                    "uri": f"{base}/plugins",
-                    "name": f"{label} plugins",
-                    "description": "Plugin index summary for the corpus.",
-                    "mimeType": "application/json",
-                },
-                {
                     "uri": f"{base}/cards",
                     "name": f"{label} knowledge cards",
                     "description": "Verified knowledge card collection summary.",
@@ -81,7 +75,7 @@ def resource_templates() -> list[dict[str, str]]:
         {
             "uriTemplate": "codalith://{corpus}/symbol/{symbol}",
             "name": "Symbol",
-            "description": "Version-pinned source or reflection symbol.",
+            "description": "Version-pinned source symbol.",
         },
         {
             "uriTemplate": "codalith://{corpus}/source/{path}",
@@ -112,7 +106,7 @@ def read_resource(uri: str, tools: CodalithTools) -> dict[str, Any]:
                 "source_commit": corpus.source_commit,
                 "semantic": _semantic_status(tools, corpus.corpus_id),
             }
-        if uri in {f"{base}/modules", f"{base}/plugins", f"{base}/cards", f"{base}/mechanisms"}:
+        if uri in {f"{base}/modules", f"{base}/cards", f"{base}/mechanisms"}:
             return {
                 "uri": uri,
                 "corpus_id": corpus.corpus_id,

@@ -20,22 +20,6 @@ class SemanticQueries(ConnectionBase):
         rows = self._execute(sql, params).fetchall()
         return [_row(row) for row in rows]
 
-    def list_reflection_entities(self, corpus_id: str, kind: str | None = None) -> list[dict[str, Any]]:
-        sql = "SELECT * FROM codalith_reflection_entities WHERE corpus_id = ?"
-        params: list[Any] = [corpus_id]
-        if kind:
-            sql += " AND kind = ?"
-            params.append(kind)
-        rows = self._execute(sql, params).fetchall()
-        return [_row(row) for row in rows]
-
-    def reflection_kinds(self, corpus_id: str) -> list[str]:
-        rows = self._execute(
-            "SELECT DISTINCT kind FROM codalith_reflection_entities WHERE corpus_id = ? ORDER BY kind",
-            (corpus_id,),
-        ).fetchall()
-        return [str(row["kind"]) for row in (dict(item) for item in rows)]
-
     def list_graph_edges(
         self,
         corpus_id: str,
@@ -46,10 +30,7 @@ class SemanticQueries(ConnectionBase):
     ) -> list[GraphEdge]:
         sql = "SELECT * FROM codalith_graph_edges WHERE corpus_id = ?"
         params: list[Any] = [corpus_id]
-        candidates: list[str] = []
-        if node:
-            kinds = self.reflection_kinds(corpus_id) if ":" not in node.strip() else []
-            candidates = node_candidates(node, kinds)
+        candidates = node_candidates(node) if node else []
         if candidates:
             placeholders = ",".join("?" for _ in candidates)
             sql += f" AND (from_node IN ({placeholders}) OR to_node IN ({placeholders}))"
@@ -100,19 +81,9 @@ class SemanticQueries(ConnectionBase):
         params.append(limit)
         return [_row(row) for row in self._execute(sql, params).fetchall()]
 
-    def symbol_or_reflection_exists(self, corpus_id: str, node: str) -> bool:
-        name = node.split(":", maxsplit=2)[-1]
-        if self.find_symbols(corpus_id, name, limit=1):
-            return True
-        row = self._execute(
-            """
-            SELECT 1 AS ok FROM codalith_reflection_entities
-            WHERE corpus_id = ? AND (name = ? OR ? = kind || ':' || name)
-            LIMIT 1
-            """,
-            (corpus_id, name, node),
-        ).fetchone()
-        return row is not None
+    def symbol_exists(self, corpus_id: str, node: str) -> bool:
+        name = node.split(":", maxsplit=1)[-1]
+        return bool(self.find_symbols(corpus_id, name, limit=1))
 
     def guards_for_span(
         self,
@@ -172,73 +143,36 @@ class SemanticQueries(ConnectionBase):
             """,
             (corpus_id, corpus_id),
         ).fetchone()
-        module_deps = self._execute(
-            "SELECT COUNT(*) AS count FROM codalith_module_deps WHERE corpus_id = ?",
-            (corpus_id,),
-        ).fetchone()
-        modules = self._execute(
-            "SELECT COUNT(*) AS count FROM codalith_modules WHERE corpus_id = ?",
-            (corpus_id,),
-        ).fetchone()
-        source_files = self._execute(
-            "SELECT COUNT(*) AS count FROM codalith_source_files WHERE corpus_id = ?",
-            (corpus_id,),
-        ).fetchone()
-        reflection = self._execute(
-            "SELECT COUNT(*) AS count FROM codalith_reflection_entities WHERE corpus_id = ?",
-            (corpus_id,),
-        ).fetchone()
-        cpp_symbols = self._execute(
-            "SELECT COUNT(*) AS count FROM codalith_symbols WHERE corpus_id = ?",
-            (corpus_id,),
-        ).fetchone()
-        compile_guards = self._execute(
-            "SELECT COUNT(*) AS count FROM codalith_compile_guards WHERE corpus_id = ?",
-            (corpus_id,),
-        ).fetchone()
-        targets = self._execute(
-            "SELECT COUNT(*) AS count FROM codalith_targets WHERE corpus_id = ?",
-            (corpus_id,),
-        ).fetchone()
-        plugins = self._execute(
-            "SELECT COUNT(*) AS count FROM codalith_plugins WHERE corpus_id = ?",
-            (corpus_id,),
-        ).fetchone()
-        projects = self._execute(
-            "SELECT COUNT(*) AS count FROM codalith_projects WHERE corpus_id = ?",
-            (corpus_id,),
-        ).fetchone()
+        counts = {
+            name: self._count(table, corpus_id)
+            for name, table in (
+                ("source_files", "codalith_source_files"),
+                ("modules", "codalith_modules"),
+                ("module_dependencies", "codalith_module_deps"),
+                ("symbols", "codalith_symbols"),
+                ("compile_guards", "codalith_compile_guards"),
+                ("cards", "knowledge_cards"),
+            )
+        }
         return {
             "corpus_id": corpus_id,
             "dialect": self.dialect,
-            "source_files": int(source_files["count"]),
-            "modules": int(modules["count"]),
-            "module_dependencies": int(module_deps["count"]),
-            "reflection_entities": int(reflection["count"]),
+            **counts,
             "graph_edges": int(graph["edge_count"]),
             "graph_nodes": int(graph_nodes["node_count"] or 0),
-            "cpp_symbols": int(cpp_symbols["count"]),
-            "compile_guards": int(compile_guards["count"]),
-            "targets": int(targets["count"]),
-            "plugins": int(plugins["count"]),
-            "projects": int(projects["count"]),
         }
+
+    def _count(self, table: str, corpus_id: str) -> int:
+        row = self._execute(
+            f"SELECT COUNT(*) AS count FROM {table} WHERE corpus_id = ?",  # noqa: S608 - fixed table names.
+            (corpus_id,),
+        ).fetchone()
+        return int(row["count"])
 
 
 def _row(row: Any) -> dict[str, Any]:
     data = dict(row)
-    for key in (
-        "metadata",
-        "specifiers",
-        "supported_platforms",
-        "public_include_paths",
-        "private_include_paths",
-        "extra_modules",
-        "modules",
-        "plugins",
-        "related_nodes",
-        "source_hashes",
-    ):
+    for key in ("metadata", "related_nodes", "source_hashes"):
         if key in data and isinstance(data[key], str):
             data[key] = json.loads(data[key])
     return data

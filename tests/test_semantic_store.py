@@ -1,17 +1,8 @@
 from __future__ import annotations
 
-from codalith.semantic.extractors import run_profile
 from codalith.semantic.graph import query_graph
 from codalith.semantic.store import SemanticStore
-from codalith.semantic.types import CompileGuard, ModuleDependency, ReflectionEntity, SourceSymbol
-
-
-def test_run_profile_without_domain_extractor_is_noop(sample_corpus_root):
-    summary = run_profile(None, sample_corpus_root, corpus_id="sample-codebase")
-
-    assert summary["corpus_id"] == "sample-codebase"
-    assert summary["profile"] is None
-    assert summary["modules"] == 0
+from codalith.semantic.types import CompileGuard, ModuleDependency, SourceSymbol
 
 
 def test_semantic_store_records_generic_modules_symbols_and_edges():
@@ -23,7 +14,7 @@ def test_semantic_store_records_generic_modules_symbols_and_edges():
         dependency=dependency,
         evidence_uri="codalith://sample-codebase/source/src/core/cache.py#L1-L3",
     )
-    store.upsert_cpp_symbol(
+    store.upsert_symbol(
         corpus_id="sample-codebase",
         path="src/core/cache.py",
         symbol=SourceSymbol(name="CachedValue", kind="class", line=4),
@@ -66,19 +57,29 @@ def test_upsert_compile_guard_supports_deferred_commit(tmp_path):
     assert SemanticStore(db_path).semantic_status("sample-codebase")["compile_guards"] == 1
 
 
-def test_reflection_entities_remain_domain_data_not_core_extractors():
+def test_semantic_status_reports_generic_counts():
     store = SemanticStore()
-    store.upsert_reflection_entity(
+    store.upsert_symbol(
         corpus_id="sample-codebase",
-        entity=ReflectionEntity(
-            kind="schema",
-            name="CachedValue",
-            owner="Cache",
-            specifiers={"source": "manual"},
-            declaration_uri="codalith://sample-codebase/source/src/core/cache.py#L1-L8",
-            module_name="core",
-        ),
+        path="src/core/events.py",
+        symbol=SourceSymbol(name="EventBus", kind="class", line=1),
+        evidence_uri="codalith://sample-codebase/source/src/core/events.py#L1-L10",
+        module_name="core",
     )
 
-    graph = query_graph(store, corpus_id="sample-codebase", node="CachedValue")
-    assert any(edge["edge_type"] == "has_reflection" for edge in graph["edges"])
+    status = store.semantic_status("sample-codebase")
+    assert status["corpus_id"] == "sample-codebase"
+    assert status["symbols"] == 1
+    assert status["graph_edges"] >= 1
+    assert set(status) == {
+        "corpus_id",
+        "dialect",
+        "source_files",
+        "modules",
+        "module_dependencies",
+        "symbols",
+        "compile_guards",
+        "cards",
+        "graph_edges",
+        "graph_nodes",
+    }

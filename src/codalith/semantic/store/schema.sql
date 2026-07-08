@@ -26,10 +26,6 @@ CREATE TABLE IF NOT EXISTS codalith_modules (
   corpus_id TEXT NOT NULL,
   module_name TEXT NOT NULL,
   module_type TEXT,
-  loading_phase TEXT,
-  supported_platforms TEXT DEFAULT '[]',
-  public_include_paths TEXT DEFAULT '[]',
-  private_include_paths TEXT DEFAULT '[]',
   source_uri TEXT,
   metadata TEXT DEFAULT '{}',
   PRIMARY KEY(corpus_id, module_name)
@@ -60,20 +56,6 @@ CREATE TABLE IF NOT EXISTS codalith_symbols (
   confidence REAL DEFAULT 1.0
 );
 
-CREATE TABLE IF NOT EXISTS codalith_reflection_entities (
-  corpus_id TEXT NOT NULL,
-  reflection_id TEXT PRIMARY KEY,
-  kind TEXT NOT NULL,
-  name TEXT NOT NULL,
-  owner_name TEXT,
-  module_name TEXT,
-  declaration_uri TEXT,
-  generated_uri TEXT,
-  specifiers TEXT DEFAULT '{}',
-  metadata TEXT DEFAULT '{}',
-  confidence REAL DEFAULT 1.0
-);
-
 CREATE TABLE IF NOT EXISTS codalith_compile_guards (
   corpus_id TEXT NOT NULL,
   guard_id TEXT PRIMARY KEY,
@@ -84,37 +66,6 @@ CREATE TABLE IF NOT EXISTS codalith_compile_guards (
   end_line INTEGER,
   evidence_uri TEXT,
   metadata TEXT DEFAULT '{}'
-);
-
-CREATE TABLE IF NOT EXISTS codalith_targets (
-  corpus_id TEXT NOT NULL,
-  target_name TEXT NOT NULL,
-  target_type TEXT,
-  extra_modules TEXT DEFAULT '[]',
-  build_settings TEXT,
-  declaration_uri TEXT,
-  metadata TEXT DEFAULT '{}',
-  PRIMARY KEY(corpus_id, target_name)
-);
-
-CREATE TABLE IF NOT EXISTS codalith_plugins (
-  corpus_id TEXT NOT NULL,
-  plugin_name TEXT NOT NULL,
-  path TEXT NOT NULL,
-  modules TEXT DEFAULT '[]',
-  supported_platforms TEXT DEFAULT '[]',
-  metadata TEXT DEFAULT '{}',
-  PRIMARY KEY(corpus_id, plugin_name)
-);
-
-CREATE TABLE IF NOT EXISTS codalith_projects (
-  corpus_id TEXT NOT NULL,
-  project_name TEXT NOT NULL,
-  path TEXT NOT NULL,
-  modules TEXT DEFAULT '[]',
-  plugins TEXT DEFAULT '[]',
-  metadata TEXT DEFAULT '{}',
-  PRIMARY KEY(corpus_id, project_name)
 );
 
 CREATE TABLE IF NOT EXISTS knowledge_cards (
@@ -153,9 +104,6 @@ ON codalith_symbols(corpus_id, name, kind);
 
 CREATE INDEX IF NOT EXISTS idx_codalith_symbols_qualified_name
 ON codalith_symbols(corpus_id, qualified_name);
-
-CREATE INDEX IF NOT EXISTS idx_codalith_reflection_entities_name
-ON codalith_reflection_entities(corpus_id, name);
 
 CREATE INDEX IF NOT EXISTS idx_codalith_compile_guards_path
 ON codalith_compile_guards(corpus_id, path, start_line, end_line);

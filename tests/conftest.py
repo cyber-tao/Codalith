@@ -278,14 +278,14 @@ def tools(
         line_count=10,
         module_name="core",
     )
-    semantic_store.upsert_cpp_symbol(
+    semantic_store.upsert_symbol(
         corpus_id=corpus.corpus_id,
         path="src/core/cache.py",
         symbol=SourceSymbol(name="CachedValue", kind="class", line=4),
         evidence_uri="codalith://sample-codebase/source/src/core/cache.py#L1-L8",
         module_name="core",
     )
-    semantic_store.upsert_cpp_symbol(
+    semantic_store.upsert_symbol(
         corpus_id=corpus.corpus_id,
         path="src/core/events.py",
         symbol=SourceSymbol(name="EventBus", kind="class", line=1),

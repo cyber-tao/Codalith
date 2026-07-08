@@ -94,6 +94,6 @@ class KnowledgeCardVerifier:
             module = node.split(":", maxsplit=1)[1]
             if not store.module_exists(corpus_id, module):
                 errors.append(f"Related module does not exist in semantic DB: {module}")
-        elif node.startswith(("symbol:", "reflection:")) and not store.symbol_or_reflection_exists(corpus_id, node):
+        elif node.startswith("symbol:") and not store.symbol_exists(corpus_id, node):
             if evidence_semantically_scanned:
                 errors.append(f"Related semantic node does not exist in semantic DB: {node}")
