@@ -23,7 +23,7 @@ from typing import Any, cast
 from codalith.corpus.registry import Corpus, CorpusRegistry
 from codalith.corpus.source_reader import SourceReader
 from codalith.corpus.uris import source_uri
-from codalith.errors import CodeRAGAdapterError, CorpusNotFoundError
+from codalith.errors import CodeRAGAdapterError
 from codalith.text import camel_words, tokenize
 
 logger = logging.getLogger(__name__)
@@ -118,7 +118,7 @@ class CodeRAGAdapter:
         top_k: int = 8,
         filters: dict[str, Any] | None = None,
     ) -> list[RetrievalHit]:
-        corpus = self._corpus(corpus_id)
+        corpus = self.registry.get_corpus(corpus_id)
         if self.prefer_native:
             try:
                 return self._native_search(corpus, query, top_k, filters or {})
@@ -136,7 +136,7 @@ class CodeRAGAdapter:
         return self._source_reader.read_source(corpus_id, path, start_line, end_line)
 
     def status(self, corpus_id: str) -> dict[str, Any]:
-        corpus = self._corpus(corpus_id)
+        corpus = self.registry.get_corpus(corpus_id)
         if self.prefer_native:
             try:
                 status = dict(self._native_instance(corpus).status())
@@ -162,7 +162,7 @@ class CodeRAGAdapter:
         }
 
     def reindex(self, corpus_id: str, path: str | None = None, full: bool = False) -> dict[str, Any]:
-        corpus = self._corpus(corpus_id)
+        corpus = self.registry.get_corpus(corpus_id)
         if self.prefer_native:
             try:
                 native = self._native_instance(corpus)
@@ -335,15 +335,6 @@ class CodeRAGAdapter:
                 )
             )
         return files
-
-    def _corpus(self, corpus_id: str) -> Corpus:
-        if corpus_id in self.registry.engines:
-            return self.registry.engines[corpus_id]
-        if corpus_id in self.registry.projects:
-            return self.registry.projects[corpus_id]
-        if corpus_id in self.registry.generated:
-            return self.registry.generated[corpus_id]
-        raise CorpusNotFoundError(f"Unknown corpus: {corpus_id}")
 
     @staticmethod
     def _root(corpus: Corpus) -> Path:

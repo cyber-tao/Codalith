@@ -214,7 +214,7 @@ class CodalithTools:
         resolution = self.runtime.registry.resolve(version, project, include_project_overlay=bool(project))
         self._require_resolution_access(resolution)
         semantic = {
-            "engine": self.runtime.semantic_store.semantic_status(resolution.engine.corpus_id)
+            "base": self.runtime.semantic_store.semantic_status(resolution.base.corpus_id)
             if self.runtime.semantic_store
             else None,
             "project": self.runtime.semantic_store.semantic_status(resolution.project.corpus_id)
@@ -222,7 +222,7 @@ class CodalithTools:
             else None,
         }
         return {
-            "engine": self.runtime.adapter.status(resolution.engine.corpus_id),
+            "base": self.runtime.adapter.status(resolution.base.corpus_id),
             "project": self.runtime.adapter.status(resolution.project.corpus_id)
             if resolution.project
             else None,
@@ -308,7 +308,7 @@ class CodalithTools:
         self._require_scope("graph:read")
         resolution = self.runtime.registry.resolve(version, project, include_project_overlay=bool(project))
         self._require_resolution_access(resolution)
-        resolved_version = resolution.engine.version_label
+        resolved_version = resolution.base.version_label
         if self.runtime.semantic_store is None:
             return {
                 "node": node,
@@ -405,8 +405,8 @@ class CodalithTools:
         diff = self._semantic_diff(
             target=target,
             diff_type=diff_type,
-            from_corpus=from_resolution.engine.corpus_id,
-            to_corpus=to_resolution.engine.corpus_id,
+            from_corpus=from_resolution.base.corpus_id,
+            to_corpus=to_resolution.base.corpus_id,
         )
         return {
             "target": target,
@@ -447,13 +447,7 @@ class CodalithTools:
             self._require_corpus_access(corpus.corpus_id)
 
     def _require_corpus_access(self, corpus_id: str) -> None:
-        corpus = (
-            self.runtime.registry.engines.get(corpus_id)
-            or self.runtime.registry.projects.get(corpus_id)
-            or self.runtime.registry.generated.get(corpus_id)
-        )
-        if corpus is None:
-            raise CorpusNotFoundError(f"Unknown corpus: {corpus_id}")
+        corpus = self.runtime.registry.get_corpus(corpus_id)
         missing = sorted(scope for scope in corpus.access_scopes if scope not in self._scopes())
         if missing:
             raise AuthError(f"Missing required corpus scope(s) for {corpus_id}: {', '.join(missing)}")
@@ -666,7 +660,7 @@ def _tool_registry(default_version: str | None) -> dict[str, dict[str, Any]]:
 
 def _default_version(registry: CorpusRegistry) -> str | None:
     try:
-        return registry.get_engine(None).version_label
+        return registry.get_base(None).version_label
     except CorpusNotFoundError:
         return None
 

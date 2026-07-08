@@ -23,7 +23,7 @@ def default_scopes(registry: CorpusRegistry | None = None) -> frozenset[str]:
     access scope declared by the configured corpora (self-hosted default)."""
     scopes = set(_BASE_SCOPES)
     if registry is not None:
-        for collection in (registry.engines, registry.projects, registry.generated):
+        for collection in (registry.corpora, registry.projects, registry.generated):
             for corpus in collection.values():
                 scopes |= corpus.access_scopes
     return frozenset(scopes)

@@ -22,7 +22,7 @@ _SAFE_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$")
 
 def resources(registry: CorpusRegistry) -> list[dict[str, str]]:
     items: list[dict[str, str]] = []
-    for corpus in registry.engines.values():
+    for corpus in registry.corpora.values():
         base = corpus_uri(corpus.corpus_id)
         label = corpus.label
         items.extend(
@@ -92,7 +92,7 @@ def resource_templates() -> list[dict[str, str]]:
 
 def read_resource(uri: str, tools: CodalithTools) -> dict[str, Any]:
     registry = tools.runtime.registry
-    for corpus in registry.engines.values():
+    for corpus in registry.corpora.values():
         base = corpus_uri(corpus.corpus_id)
         if uri != base and not uri.startswith(f"{base}/"):
             continue
@@ -101,7 +101,7 @@ def read_resource(uri: str, tools: CodalithTools) -> dict[str, Any]:
             return {
                 "uri": uri,
                 "corpus_id": corpus.corpus_id,
-                "kind": "engine",
+                "kind": "corpus",
                 "version": corpus.version_label,
                 "source_commit": corpus.source_commit,
                 "semantic": _semantic_status(tools, corpus.corpus_id),
@@ -134,7 +134,7 @@ def read_resource(uri: str, tools: CodalithTools) -> dict[str, Any]:
                 "uri": uri,
                 "corpus_id": corpus.corpus_id,
                 "kind": "project",
-                "engine_corpus": corpus.engine_corpus,
+                "base_corpus": corpus.base_corpus,
                 "semantic": _semantic_status(tools, corpus.corpus_id),
             }
     raise URIResolutionError(f"Unknown resource URI: {uri}")

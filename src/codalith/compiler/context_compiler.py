@@ -52,7 +52,7 @@ class ContextCompiler:
             include_project_overlay,
             include_generated_overlay=include_generated_overlay,
         )
-        resolved_version = resolution.engine.version_label
+        resolved_version = resolution.base.version_label
         intent = detect_intent(query, mode)
         domain_configs = {
             corpus.corpus_id: load_source_domain_config(corpus.source_priors_path)
@@ -99,9 +99,9 @@ class ContextCompiler:
         )
         card_hits = [hit for hit in ranked if _is_card_path(hit.path)]
         hits = [hit for hit in ranked if not _is_card_path(hit.path)][:max_source_spans]
-        engine_corpus_id = resolution.engine.corpus_id
+        base_corpus_id = resolution.base.corpus_id
         corpus_kinds = {corpus.corpus_id: corpus.kind for corpus in resolution.ordered}
-        inferred_modules = _module_entries(engine_corpus_id, modules, hits)
+        inferred_modules = _module_entries(base_corpus_id, modules, hits)
         source_spans = self._enriched_source_spans(hits, corpus_kinds)
         source_spans.extend(self._card_evidence_spans(card_hits))
         # Card evidence must not let the pack exceed the caller's span budget.
@@ -123,8 +123,8 @@ class ContextCompiler:
         return ContextPack(
             query=query,
             version=resolved_version,
-            corpus_id=engine_corpus_id,
-            source_commit=resolution.engine.source_commit,
+            corpus_id=base_corpus_id,
+            source_commit=resolution.base.source_commit,
             project=project,
             intent=intent,
             confidence=_confidence(hits),
@@ -133,7 +133,7 @@ class ContextCompiler:
             ),
             modules=inferred_modules,
             symbols=self._symbol_entries(
-                [corpus.corpus_id for corpus in resolution.ordered], identifiers, engine_corpus_id
+                [corpus.corpus_id for corpus in resolution.ordered], identifiers, base_corpus_id
             ),
             cards=cards,
             source_spans=source_spans,
@@ -266,7 +266,7 @@ class ContextCompiler:
         self,
         corpus_ids: list[str],
         identifiers: list[str],
-        engine_corpus_id: str,
+        base_corpus_id: str,
     ) -> list[dict[str, object]]:
         entries: list[dict[str, object]] = []
         seen: set[tuple[str, str, str | None]] = set()
@@ -286,7 +286,7 @@ class ContextCompiler:
                                 "kind": row["kind"],
                                 "module": row.get("module_name"),
                                 "uri": row.get("declaration_uri")
-                                or symbol_uri(engine_corpus_id, identifier),
+                                or symbol_uri(base_corpus_id, identifier),
                                 "reason": "Resolved from semantic symbol table.",
                             }
                         )
@@ -295,7 +295,7 @@ class ContextCompiler:
                 entries.append(
                     {
                         "name": identifier,
-                        "uri": symbol_uri(engine_corpus_id, identifier),
+                        "uri": symbol_uri(base_corpus_id, identifier),
                         "kind": "symbol",
                         "reason": "Identifier detected in the user query.",
                     }
@@ -315,7 +315,7 @@ def _unique_hits(hits: list[RetrievalHit]) -> list[RetrievalHit]:
 
 
 def _module_entries(
-    engine_corpus_id: str,
+    base_corpus_id: str,
     detected_modules: list[str],
     hits: list[RetrievalHit],
 ) -> list[dict[str, str]]:
@@ -323,7 +323,7 @@ def _module_entries(
     return [
         {
             "name": name,
-            "uri": module_uri(engine_corpus_id, name),
+            "uri": module_uri(base_corpus_id, name),
             "reason": "Detected from query or source path.",
         }
         for name in names

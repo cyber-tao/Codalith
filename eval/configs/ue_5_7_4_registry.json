@@ -1,5 +1,5 @@
 {
-  "engines": {
+  "corpora": {
     "ue-${CODALITH_EVAL_UE_VERSION:-5.7.4}": {
       "kind": "source",
       "version": "${CODALITH_EVAL_UE_VERSION:-5.7.4}",

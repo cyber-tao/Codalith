@@ -48,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
     ensure_coderag_installed(args.provider)
     configure_openai_batch_limit(args.provider)
     registry = CorpusRegistry.from_file(args.registry)
-    corpus = registry.get_engine(args.version)
+    corpus = registry.get_base(args.version)
     prepare_indexed_root(corpus)
     resolver = URIResolver(registry)
     card_adapter = CodeRAGAdapter(registry)

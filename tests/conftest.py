@@ -149,7 +149,7 @@ def registry_path(
 ) -> Path:
     path = tmp_path / "corpus_registry.json"
     data: dict[str, Any] = {
-        "engines": {
+        "corpora": {
             "sample-codebase": {
                 "kind": "source",
                 "version": "sample",
@@ -190,7 +190,7 @@ def registry_path(
         "projects": {
             "SampleProject": {
                 "kind": "project",
-                "engine_corpus": "sample-codebase",
+                "base_corpus": "sample-codebase",
                 "source_root": str(sample_corpus_root),
                 "indexed_root": str(sample_corpus_root),
                 "coderag_store": str(tmp_path / "project-store"),
@@ -204,7 +204,7 @@ def registry_path(
         "generated": {
             "generated-sample": {
                 "kind": "generated",
-                "engine_corpus": "sample-codebase",
+                "base_corpus": "sample-codebase",
                 "version": "sample",
                 "source_root": str(sample_corpus_root),
                 "indexed_root": str(sample_corpus_root),
@@ -261,7 +261,7 @@ def tools(
     policy = SourcePolicy.from_file(str(policy_path))
     source_reader = SourceReader(registry)
     semantic_store = SemanticStore(tmp_path / "semantic.sqlite")
-    corpus = registry.get_engine()
+    corpus = registry.get_base()
     semantic_store.upsert_corpus(corpus)
     semantic_store.upsert_module(corpus_id=corpus.corpus_id, module_name="core", source_uri="codalith://sample-codebase/module/core")
     semantic_store.upsert_source_file(
@@ -385,7 +385,7 @@ def ue_eval_registry_path(
         encoding="utf-8",
     )
     data = {
-        "engines": {
+        "corpora": {
             "ue-5.7.4": {
                 "kind": "source",
                 "version": "5.7.4",

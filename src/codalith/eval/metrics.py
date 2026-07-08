@@ -69,7 +69,7 @@ def wrong_version_rate(pack: dict[str, Any], expected_version: str) -> float:
     if not spans:
         return 1.0
     pack_version = str(pack.get("version", ""))
-    engine_corpus_id = str(pack.get("corpus_id", ""))
+    base_corpus_id = str(pack.get("corpus_id", ""))
     wrong = 0
     for span in spans:
         if not isinstance(span, dict):
@@ -77,7 +77,7 @@ def wrong_version_rate(pack: dict[str, Any], expected_version: str) -> float:
             continue
         if str(span.get("corpus_kind") or "") != "engine":
             continue
-        if pack_version != expected_version or str(span.get("corpus_id", "")) != engine_corpus_id:
+        if pack_version != expected_version or str(span.get("corpus_id", "")) != base_corpus_id:
             wrong += 1
     return wrong / len(spans)
 

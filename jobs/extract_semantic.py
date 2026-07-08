@@ -37,7 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     elif args.project:
         corpus = registry.get_project(args.project)
     else:
-        corpus = registry.get_engine(args.version)
+        corpus = registry.get_base(args.version)
     if corpus.semantic_profile is not None:
         raise ConfigurationError(
             f"Unknown semantic profile: {corpus.semantic_profile}. "

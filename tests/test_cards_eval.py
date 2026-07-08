@@ -13,7 +13,7 @@ from codalith.semantic.store import SemanticStore
 
 
 def test_built_in_cards_verify_against_sample_fixture(registry, adapter, tmp_path):
-    corpus = registry.get_engine()
+    corpus = registry.get_base()
     resolver = URIResolver(registry)
     verifier = KnowledgeCardVerifier(resolver, adapter)
     cards = attach_source_hashes(
@@ -36,7 +36,7 @@ def test_built_in_cards_verify_against_sample_fixture(registry, adapter, tmp_pat
 
 
 def test_written_cards_are_searchable_from_indexed_root(registry, adapter, sample_corpus_root):
-    corpus = registry.get_engine()
+    corpus = registry.get_base()
     cards = [
         card.verified()
         for card in built_in_cards(
@@ -67,7 +67,7 @@ def test_card_without_evidence_fails(registry, adapter):
 
 
 def test_card_hash_mismatch_fails(registry, adapter):
-    corpus = registry.get_engine()
+    corpus = registry.get_base()
     resolver = URIResolver(registry)
     card = attach_source_hashes(
         built_in_cards(
@@ -92,7 +92,7 @@ def test_card_hash_mismatch_fails(registry, adapter):
 
 
 def test_card_verifier_checks_related_semantic_nodes(registry, adapter, tmp_path):
-    corpus = registry.get_engine()
+    corpus = registry.get_base()
     store = SemanticStore(tmp_path / "semantic.sqlite")
     store.upsert_module(corpus_id=corpus.corpus_id, module_name="core")
     resolver = URIResolver(registry)

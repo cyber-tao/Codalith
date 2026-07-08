@@ -7,10 +7,10 @@ from codalith.corpus.uri_resolver import URIResolver
 from codalith.errors import SourcePolicyError, URIResolutionError
 
 
-def test_registry_resolves_engine_and_project(registry):
-    assert registry.get_engine("sample").corpus_id == "sample-codebase"
+def test_registry_resolves_base_and_project(registry):
+    assert registry.get_base("sample").corpus_id == "sample-codebase"
     resolution = registry.resolve("sample", "SampleProject", True)
-    assert resolution.engine.corpus_id == "sample-codebase"
+    assert resolution.base.corpus_id == "sample-codebase"
     assert resolution.project is not None
     assert resolution.project.corpus_id == "SampleProject"
     assert not resolution.overlays
@@ -45,7 +45,7 @@ def test_uri_resolver_parses_generated_source_uri(registry):
     assert resolved.relative_path == "generated/build.log"
 
 
-def test_uri_resolver_accepts_engine_version_alias_authority(registry):
+def test_uri_resolver_accepts_version_alias_authority(registry):
     resolved = URIResolver(registry).resolve_source(
         "codalith://sample/source/src/core/cache.py#L2-L4"
     )

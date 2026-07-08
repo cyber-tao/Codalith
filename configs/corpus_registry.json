@@ -1,5 +1,5 @@
 {
-  "engines": {
+  "corpora": {
     "${CODALITH_SAMPLE_CORPUS_ID:-sample-codebase}": {
       "kind": "source",
       "version": "${CODALITH_SAMPLE_VERSION:-sample}",

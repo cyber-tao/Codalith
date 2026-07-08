@@ -53,7 +53,7 @@ def test_streamable_http_post_get_session_and_origin(tools):
         )
         assert status_response.status == 200
         assert "error" not in status_payload
-        assert status_payload["result"]["structuredContent"]["semantic"]["engine"]["corpus_id"] == "sample-codebase"
+        assert status_payload["result"]["structuredContent"]["semantic"]["base"]["corpus_id"] == "sample-codebase"
 
         graph_response, graph_payload = _post(
             host,

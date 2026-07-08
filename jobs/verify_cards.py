@@ -28,7 +28,7 @@ def main(argv: list[str] | None = None) -> int:
     semantic_target = os.getenv("CODALITH_SEMANTIC_DSN") or os.getenv("CODALITH_SEMANTIC_DB")
     semantic_store = SemanticStore(semantic_target) if semantic_target else None
     verifier = KnowledgeCardVerifier(resolver, adapter, semantic_store)
-    corpus = registry.get_corpus(args.corpus) if args.corpus else registry.get_engine(args.version)
+    corpus = registry.get_corpus(args.corpus) if args.corpus else registry.get_base(args.version)
     cards = attach_source_hashes(
         built_in_cards(
             corpus_id=corpus.corpus_id,

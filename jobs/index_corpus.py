@@ -24,7 +24,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     registry = CorpusRegistry.from_file(args.registry)
-    corpus = registry.get_corpus(args.corpus) if args.corpus else registry.get_engine(args.version)
+    corpus = registry.get_corpus(args.corpus) if args.corpus else registry.get_base(args.version)
     adapter = CodeRAGAdapter(registry)
     if args.smoke:
         content = adapter.get_file(corpus.corpus_id, args.smoke_file, 1, 5)

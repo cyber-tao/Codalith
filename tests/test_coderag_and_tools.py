@@ -92,7 +92,7 @@ def test_local_search_ranks_path_token_matches_higher(adapter):
 
 
 def test_native_store_dir_uses_corpus_store_not_global_env(registry, monkeypatch, tmp_path):
-    corpus = registry.get_engine("sample")
+    corpus = registry.get_base("sample")
     monkeypatch.setenv("CODERAG_STORE_DIR", str(tmp_path / "wrong-store"))
 
     assert _native_store_dir(corpus) == Path(corpus.coderag_store)
@@ -133,7 +133,7 @@ def test_runtime_loads_registry_from_environment(monkeypatch, tmp_path):
     registry_path.write_text(
         json.dumps(
             {
-                "engines": {
+                "corpora": {
                     "env-corpus": {
                         "kind": "source",
                         "version": "env",
@@ -157,17 +157,17 @@ def test_runtime_loads_registry_from_environment(monkeypatch, tmp_path):
 
     runtime = create_runtime(audit_log=str(tmp_path / "audit.jsonl"))
     try:
-        assert runtime.registry.get_engine().corpus_id == "env-corpus"
+        assert runtime.registry.get_base().corpus_id == "env-corpus"
     finally:
         if runtime.semantic_store is not None:
             runtime.semantic_store.close()
 
 
 def test_source_reader_prefers_source_root_when_indexed_root_is_partial(tmp_path, registry):
-    corpus = registry.get_engine()
+    corpus = registry.get_base()
     indexed = tmp_path / "indexed"
     indexed.mkdir()
-    registry.engines[corpus.corpus_id] = dataclass_replace(corpus, indexed_root=indexed)
+    registry.corpora[corpus.corpus_id] = dataclass_replace(corpus, indexed_root=indexed)
 
     content = SourceReader(registry).read_source(corpus.corpus_id, "src/core/cache.py", 1, 2)
 
@@ -342,8 +342,8 @@ def test_compare_versions_compiles_both_context_packs(tools):
 def test_index_status_reports_semantic_store(tools):
     status = tools.codalith_index_status(version="sample")
 
-    assert status["semantic"]["engine"]["graph_edges"] > 0
-    assert status["semantic"]["engine"]["symbols"] > 0
+    assert status["semantic"]["base"]["graph_edges"] > 0
+    assert status["semantic"]["base"]["symbols"] > 0
 
 
 def test_mcp_tools_list_and_call(tools):
@@ -459,7 +459,7 @@ def test_mcp_resource_templates_resolve_module_symbol_source_and_card(tools):
     assert source["corpus_id"] == "sample-codebase"
     assert source["content"]
 
-    card_root = tools.runtime.registry.engines["sample-codebase"].card_root
+    card_root = tools.runtime.registry.corpora["sample-codebase"].card_root
     card_file = card_root / "KNOWLEDGE" / "Module" / "module-core-cache.md"
     card_file.parent.mkdir(parents=True, exist_ok=True)
     card_file.write_text("# Core Cache API\n", encoding="utf-8")

@@ -19,19 +19,19 @@ def build_instructions(registry: CorpusRegistry) -> str:
     trigger keywords all come from configs/corpus_registry.json, so a deployment
     that indexes a different codebase advertises that codebase instead.
     """
-    engine_labels = [
+    corpus_labels = [
         f"{corpus.label} ({corpus.description})" if corpus.description else corpus.label
-        for corpus in registry.engines.values()
+        for corpus in registry.corpora.values()
     ]
     project_ids = sorted(registry.projects)
     keywords = list(
         dict.fromkeys(
-            keyword for corpus in registry.engines.values() for keyword in corpus.keywords
+            keyword for corpus in registry.corpora.values() for keyword in corpus.keywords
         )
     )
     parts = ["This server provides version-pinned, source-backed context for indexed code corpora."]
-    if engine_labels:
-        parts.append("Indexed corpora: " + "; ".join(engine_labels) + ".")
+    if corpus_labels:
+        parts.append("Indexed corpora: " + "; ".join(corpus_labels) + ".")
     if project_ids:
         parts.append("Project overlays: " + ", ".join(project_ids) + ".")
     parts.append(
