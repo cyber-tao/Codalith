@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from codalith.cards.hashing import source_sha256
-from codalith.coderag.adapter import CodeRAGAdapter, RetrievalHit
+from codalith.coderag import CodeRAGAdapter, RetrievalHit
 from codalith.compiler.context_compiler import ContextCompiler
 from codalith.corpus.registry import Corpus, CorpusRegistry
 from codalith.corpus.source_policy import SourcePolicy, SourceReadRateLimiter

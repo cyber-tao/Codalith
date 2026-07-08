@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from codalith.coderag.adapter import CodeRAGAdapter
+from codalith.coderag import CodeRAGAdapter
 from codalith.corpus.registry import CorpusRegistry
 from codalith.semantic.store import SemanticStore
 

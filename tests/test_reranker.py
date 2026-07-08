@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from codalith.coderag.adapter import RetrievalHit
+from codalith.coderag import RetrievalHit
 from codalith.compiler.reranker import rerank
 
 

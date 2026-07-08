@@ -12,11 +12,11 @@ from typing import Any
 
 import pytest
 
-from codalith.coderag.adapter import (
+from codalith.coderag.native import (
     _configure_native_batch_embedding,
     _configure_native_env_aliases,
     _limit_chunk_texts,
-    _native_store_dir,
+    native_store_dir,
 )
 from codalith.corpus.source_policy import SourcePolicy, SourceReadRateLimiter
 from codalith.corpus.source_reader import SourceReader
@@ -95,7 +95,7 @@ def test_native_store_dir_uses_corpus_store_not_global_env(registry, monkeypatch
     corpus = registry.get_base("sample")
     monkeypatch.setenv("CODERAG_STORE_DIR", str(tmp_path / "wrong-store"))
 
-    assert _native_store_dir(corpus) == Path(corpus.coderag_store)
+    assert native_store_dir(corpus) == Path(corpus.coderag_store)
 
 
 def test_configure_native_env_aliases_uses_codalith_names(monkeypatch):

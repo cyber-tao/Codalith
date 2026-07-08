@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from codalith.coderag.adapter import CodeRAGAdapter
+from codalith.coderag import CodeRAGAdapter
 from codalith.compiler.context_compiler import ContextCompiler
 from codalith.corpus.registry import CorpusRegistry
 from codalith.eval.common import average, p95, pack_metrics, read_jsonl, write_report_files

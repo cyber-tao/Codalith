@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 
 from codalith.cards.hashing import source_sha256
 from codalith.cards.schema import KnowledgeCard
-from codalith.coderag.adapter import CodeRAGAdapter
+from codalith.coderag import CodeRAGAdapter
 from codalith.corpus.uri_resolver import URIResolver
 from codalith.semantic.store import SemanticStore
 

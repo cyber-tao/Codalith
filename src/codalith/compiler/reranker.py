@@ -10,7 +10,7 @@ weights decide how the sources compete.
 from __future__ import annotations
 
 from codalith.cards import CARDS_DIR
-from codalith.coderag.adapter import RetrievalHit
+from codalith.coderag import RetrievalHit
 
 
 def rerank(

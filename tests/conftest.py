@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from codalith.coderag.adapter import CodeRAGAdapter
+from codalith.coderag import CodeRAGAdapter
 from codalith.compiler.context_compiler import ContextCompiler
 from codalith.corpus.registry import CorpusRegistry
 from codalith.corpus.source_policy import SourcePolicy

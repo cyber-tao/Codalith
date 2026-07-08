@@ -10,7 +10,7 @@ from codalith.cards import CARDS_DIR
 from codalith.cards.hashing import source_sha256
 from codalith.cards.renderer import render_markdown
 from codalith.cards.schema import CardClaim, CardEvidence, KnowledgeCard
-from codalith.coderag.adapter import CodeRAGAdapter
+from codalith.coderag import CodeRAGAdapter
 from codalith.config import load_config
 from codalith.corpus.uri_resolver import URIResolver
 from codalith.corpus.uris import source_uri

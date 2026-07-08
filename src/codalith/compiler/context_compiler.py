@@ -7,9 +7,7 @@ from typing import Any
 
 from codalith.cards import CARDS_DIR
 from codalith.cards.hashing import source_sha256
-from codalith.coderag.adapter import CodeRAGAdapter, RetrievalHit, language_for_path
-from codalith.coderag.query_builder import build_queries
-from codalith.coderag.result_mapper import hits_to_source_spans
+from codalith.coderag import CodeRAGAdapter, RetrievalHit, language_for_path
 from codalith.compiler.context_pack import ContextPack, ContextSummary
 from codalith.compiler.entity_detector import detect_identifiers, detect_modules
 from codalith.compiler.intent_detector import detect_intent
@@ -81,7 +79,7 @@ class ContextCompiler:
                     source_reader=self.source_reader,
                 )
             )
-            for planned_query in build_queries(query, identifiers):
+            for planned_query in _build_queries(query, identifiers):
                 raw_hits.extend(
                     self.adapter.search_code(
                         corpus.corpus_id,
@@ -179,7 +177,7 @@ class ContextCompiler:
         hits: list[RetrievalHit],
         corpus_kinds: dict[str, str],
     ) -> list[dict[str, object]]:
-        spans = hits_to_source_spans(hits)
+        spans = _hits_to_source_spans(hits)
         for span in spans:
             corpus_id = str(span.get("corpus_id", ""))
             span["corpus_kind"] = corpus_kinds.get(corpus_id)
@@ -301,6 +299,32 @@ class ContextCompiler:
                     }
                 )
         return entries
+
+
+def _build_queries(query: str, identifiers: list[str] | None = None) -> list[str]:
+    queries = [query]
+    if identifiers:
+        queries.extend(identifiers)
+        queries.append(" ".join(identifiers))
+    return list(dict.fromkeys(item for item in queries if item.strip()))
+
+
+def _hits_to_source_spans(hits: list[RetrievalHit]) -> list[dict[str, object]]:
+    return [
+        {
+            "uri": hit.uri,
+            "corpus_id": hit.corpus_id,
+            "path": hit.path,
+            "start_line": hit.start_line,
+            "end_line": hit.end_line,
+            "reason": hit.reason,
+            "source": hit.source,
+            "module": hit.module,
+            "score": hit.score,
+            "guard": None,
+        }
+        for hit in hits
+    ]
 
 
 def _unique_hits(hits: list[RetrievalHit]) -> list[RetrievalHit]:

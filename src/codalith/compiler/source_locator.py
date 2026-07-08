@@ -7,7 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from codalith.coderag.adapter import RetrievalHit, language_for_path
+from codalith.coderag import RetrievalHit, language_for_path
 from codalith.config import load_config
 from codalith.corpus.registry import Corpus
 from codalith.corpus.source_reader import SourceReader
