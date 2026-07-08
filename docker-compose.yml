@@ -184,6 +184,7 @@ services:
       - ${CODALITH_EVAL_UE_PLUGINS_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Plugins}:${CODALITH_EVAL_UE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Plugins:ro
     command: >
       sh -lc "uv sync &&
+      uv run python -c \"from jobs.coderag_acceptance import ensure_coderag_installed; ensure_coderag_installed('openai')\" &&
       uv run python -m codalith.eval.runner --registry eval/configs/ue_5_7_4_registry.json --dataset eval/datasets/ue_eval_suite.jsonl --output-dir reports/eval/ue_eval_suite --version \"$${CODALITH_EVAL_UE_VERSION}\" --max-source-spans 20"
 
 volumes:
