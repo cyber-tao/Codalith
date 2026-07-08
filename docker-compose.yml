@@ -8,7 +8,8 @@ x-codalith-env: &codalith-env
   CODALITH_ENGINE_INDEXED_ROOT: ${CODALITH_ENGINE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}
   CODALITH_ENGINE_CARD_ROOT: ${CODALITH_ENGINE_CARD_ROOT:-/srv/codalith/cards/ue-5.7.4}
   CODALITH_ENGINE_ACCESS_SCOPE: ${CODALITH_ENGINE_ACCESS_SCOPE:-ue:5.7}
-  CODALITH_SCOPES: ${CODALITH_SCOPES:-source:read,index:status,cards:read,graph:read,ue:5.7}
+  # Empty grants base capabilities plus every corpus access scope from the registry.
+  CODALITH_SCOPES: ${CODALITH_SCOPES:-}
   UV_PROJECT_ENVIRONMENT: ${CODALITH_UV_ENV:-/tmp/codalith-venv}
   UV_LINK_MODE: copy
   UV_DEFAULT_INDEX: ${CODALITH_PYPI_INDEX:-https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/}

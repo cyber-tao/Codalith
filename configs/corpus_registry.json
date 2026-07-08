@@ -31,7 +31,10 @@
       "scope_prefixes": {
         "engine": ["Engine/Source/"],
         "plugins": ["Engine/Plugins/"]
-      }
+      },
+      "module_roots": ["Runtime", "Developer", "Editor"],
+      "index_ignore_dirs": ["Binaries", "Intermediate", "Saved", "DerivedDataCache", "ThirdParty"],
+      "index_suffixes": [".uplugin", ".uproject"]
     }
   },
   "projects": {
@@ -45,7 +48,10 @@
       "semantic_schema": "${CODALITH_PROJECT_SEMANTIC_SCHEMA:-project_a}",
       "semantic_profile": "unreal",
       "card_root": "${CODALITH_PROJECT_CARD_ROOT:-data/cards/project-a}",
-      "access_scopes": ["${CODALITH_PROJECT_ACCESS_SCOPE:-project:ProjectA}", "source:read"]
+      "access_scopes": ["${CODALITH_PROJECT_ACCESS_SCOPE:-project:ProjectA}", "source:read"],
+      "module_roots": ["Runtime", "Developer", "Editor"],
+      "index_ignore_dirs": ["Binaries", "Intermediate", "Saved", "DerivedDataCache", "ThirdParty"],
+      "index_suffixes": [".uplugin", ".uproject"]
     }
   },
   "generated": {
@@ -59,7 +65,10 @@
       "semantic_schema": "${CODALITH_GENERATED_SEMANTIC_SCHEMA:-generated_ue_5_7_4}",
       "semantic_profile": "unreal",
       "card_root": "${CODALITH_GENERATED_CARD_ROOT:-data/cards/generated-ue-5.7.4}",
-      "access_scopes": ["${CODALITH_GENERATED_ACCESS_SCOPE:-generated:read}", "source:read"]
+      "access_scopes": ["${CODALITH_GENERATED_ACCESS_SCOPE:-generated:read}", "source:read"],
+      "module_roots": ["Runtime", "Developer", "Editor"],
+      "index_ignore_dirs": ["Binaries", "Intermediate", "Saved", "DerivedDataCache", "ThirdParty"],
+      "index_suffixes": [".uplugin", ".uproject"]
     }
   }
 }

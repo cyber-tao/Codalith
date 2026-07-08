@@ -1,4 +1,4 @@
-"""Heuristic UE question intent detection."""
+"""Heuristic question intent detection."""
 
 from __future__ import annotations
 

@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS codalith_source_files (
   PRIMARY KEY(corpus_id, path)
 );
 
-CREATE TABLE IF NOT EXISTS ue_modules (
+CREATE TABLE IF NOT EXISTS codalith_modules (
   corpus_id TEXT NOT NULL,
   module_name TEXT NOT NULL,
   module_type TEXT,
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS ue_modules (
   PRIMARY KEY(corpus_id, module_name)
 );
 
-CREATE TABLE IF NOT EXISTS ue_module_deps (
+CREATE TABLE IF NOT EXISTS codalith_module_deps (
   corpus_id TEXT NOT NULL,
   from_module TEXT NOT NULL,
   to_module TEXT NOT NULL,
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS ue_module_deps (
   PRIMARY KEY(corpus_id, from_module, to_module, dep_kind)
 );
 
-CREATE TABLE IF NOT EXISTS ue_symbols (
+CREATE TABLE IF NOT EXISTS codalith_symbols (
   corpus_id TEXT NOT NULL,
   symbol_id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS ue_symbols (
   confidence DOUBLE PRECISION DEFAULT 1.0
 );
 
-CREATE TABLE IF NOT EXISTS ue_reflection_entities (
+CREATE TABLE IF NOT EXISTS codalith_reflection_entities (
   corpus_id TEXT NOT NULL,
   reflection_id TEXT PRIMARY KEY,
   kind TEXT NOT NULL,
@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS ue_reflection_entities (
   confidence DOUBLE PRECISION DEFAULT 1.0
 );
 
-CREATE TABLE IF NOT EXISTS ue_compile_guards (
+CREATE TABLE IF NOT EXISTS codalith_compile_guards (
   corpus_id TEXT NOT NULL,
   guard_id TEXT PRIMARY KEY,
   path TEXT NOT NULL,
@@ -86,7 +86,7 @@ CREATE TABLE IF NOT EXISTS ue_compile_guards (
   metadata JSONB DEFAULT '{}'::jsonb
 );
 
-CREATE TABLE IF NOT EXISTS ue_targets (
+CREATE TABLE IF NOT EXISTS codalith_targets (
   corpus_id TEXT NOT NULL,
   target_name TEXT NOT NULL,
   target_type TEXT,
@@ -97,7 +97,7 @@ CREATE TABLE IF NOT EXISTS ue_targets (
   PRIMARY KEY(corpus_id, target_name)
 );
 
-CREATE TABLE IF NOT EXISTS ue_plugins (
+CREATE TABLE IF NOT EXISTS codalith_plugins (
   corpus_id TEXT NOT NULL,
   plugin_name TEXT NOT NULL,
   path TEXT NOT NULL,
@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS ue_plugins (
   PRIMARY KEY(corpus_id, plugin_name)
 );
 
-CREATE TABLE IF NOT EXISTS ue_projects (
+CREATE TABLE IF NOT EXISTS codalith_projects (
   corpus_id TEXT NOT NULL,
   project_name TEXT NOT NULL,
   path TEXT NOT NULL,
@@ -148,14 +148,14 @@ ON codalith_graph_edges(corpus_id, from_node, edge_type);
 CREATE INDEX IF NOT EXISTS idx_codalith_graph_to
 ON codalith_graph_edges(corpus_id, to_node, edge_type);
 
-CREATE INDEX IF NOT EXISTS idx_ue_symbols_name
-ON ue_symbols(corpus_id, name, kind);
+CREATE INDEX IF NOT EXISTS idx_codalith_symbols_name
+ON codalith_symbols(corpus_id, name, kind);
 
-CREATE INDEX IF NOT EXISTS idx_ue_symbols_qualified_name
-ON ue_symbols(corpus_id, qualified_name);
+CREATE INDEX IF NOT EXISTS idx_codalith_symbols_qualified_name
+ON codalith_symbols(corpus_id, qualified_name);
 
-CREATE INDEX IF NOT EXISTS idx_ue_reflection_entities_name
-ON ue_reflection_entities(corpus_id, name);
+CREATE INDEX IF NOT EXISTS idx_codalith_reflection_entities_name
+ON codalith_reflection_entities(corpus_id, name);
 
-CREATE INDEX IF NOT EXISTS idx_ue_compile_guards_path
-ON ue_compile_guards(corpus_id, path, start_line, end_line);
+CREATE INDEX IF NOT EXISTS idx_codalith_compile_guards_path
+ON codalith_compile_guards(corpus_id, path, start_line, end_line);

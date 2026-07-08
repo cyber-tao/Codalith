@@ -12,7 +12,7 @@ from codalith.semantic.store.connection import ConnectionBase
 
 class SemanticQueries(ConnectionBase):
     def list_module_deps(self, corpus_id: str, module: str | None = None) -> list[dict[str, Any]]:
-        sql = "SELECT * FROM ue_module_deps WHERE corpus_id = ?"
+        sql = "SELECT * FROM codalith_module_deps WHERE corpus_id = ?"
         params: list[Any] = [corpus_id]
         if module:
             sql += " AND from_module = ?"
@@ -21,13 +21,20 @@ class SemanticQueries(ConnectionBase):
         return [_row(row) for row in rows]
 
     def list_reflection_entities(self, corpus_id: str, kind: str | None = None) -> list[dict[str, Any]]:
-        sql = "SELECT * FROM ue_reflection_entities WHERE corpus_id = ?"
+        sql = "SELECT * FROM codalith_reflection_entities WHERE corpus_id = ?"
         params: list[Any] = [corpus_id]
         if kind:
             sql += " AND kind = ?"
             params.append(kind)
         rows = self._execute(sql, params).fetchall()
         return [_row(row) for row in rows]
+
+    def reflection_kinds(self, corpus_id: str) -> list[str]:
+        rows = self._execute(
+            "SELECT DISTINCT kind FROM codalith_reflection_entities WHERE corpus_id = ? ORDER BY kind",
+            (corpus_id,),
+        ).fetchall()
+        return [str(row["kind"]) for row in (dict(item) for item in rows)]
 
     def list_graph_edges(
         self,
@@ -39,7 +46,10 @@ class SemanticQueries(ConnectionBase):
     ) -> list[GraphEdge]:
         sql = "SELECT * FROM codalith_graph_edges WHERE corpus_id = ?"
         params: list[Any] = [corpus_id]
-        candidates = node_candidates(node) if node else []
+        candidates: list[str] = []
+        if node:
+            kinds = self.reflection_kinds(corpus_id) if ":" not in node.strip() else []
+            candidates = node_candidates(node, kinds)
         if candidates:
             placeholders = ",".join("?" for _ in candidates)
             sql += f" AND (from_node IN ({placeholders}) OR to_node IN ({placeholders}))"
@@ -57,14 +67,14 @@ class SemanticQueries(ConnectionBase):
 
     def get_module(self, corpus_id: str, module_name: str) -> dict[str, Any] | None:
         row = self._execute(
-            "SELECT * FROM ue_modules WHERE corpus_id = ? AND module_name = ?",
+            "SELECT * FROM codalith_modules WHERE corpus_id = ? AND module_name = ?",
             (corpus_id, module_name),
         ).fetchone()
         return _row(row) if row is not None else None
 
     def module_exists(self, corpus_id: str, module_name: str) -> bool:
         row = self._execute(
-            "SELECT 1 AS ok FROM ue_modules WHERE corpus_id = ? AND module_name = ?",
+            "SELECT 1 AS ok FROM codalith_modules WHERE corpus_id = ? AND module_name = ?",
             (corpus_id, module_name),
         ).fetchone()
         return row is not None
@@ -79,7 +89,7 @@ class SemanticQueries(ConnectionBase):
     ) -> list[dict[str, Any]]:
         normalized = name.split("::")[-1]
         sql = """
-            SELECT * FROM ue_symbols
+            SELECT * FROM codalith_symbols
             WHERE corpus_id = ? AND (name = ? OR qualified_name = ? OR qualified_name LIKE ?)
             """
         params: list[Any] = [corpus_id, normalized, name, f"%::{normalized}"]
@@ -96,7 +106,7 @@ class SemanticQueries(ConnectionBase):
             return True
         row = self._execute(
             """
-            SELECT 1 AS ok FROM ue_reflection_entities
+            SELECT 1 AS ok FROM codalith_reflection_entities
             WHERE corpus_id = ? AND (name = ? OR ? = kind || ':' || name)
             LIMIT 1
             """,
@@ -113,7 +123,7 @@ class SemanticQueries(ConnectionBase):
     ) -> list[dict[str, Any]]:
         rows = self._execute(
             """
-            SELECT * FROM ue_compile_guards
+            SELECT * FROM codalith_compile_guards
             WHERE corpus_id = ?
               AND path = ?
               AND start_line <= ?
@@ -163,11 +173,11 @@ class SemanticQueries(ConnectionBase):
             (corpus_id, corpus_id),
         ).fetchone()
         module_deps = self._execute(
-            "SELECT COUNT(*) AS count FROM ue_module_deps WHERE corpus_id = ?",
+            "SELECT COUNT(*) AS count FROM codalith_module_deps WHERE corpus_id = ?",
             (corpus_id,),
         ).fetchone()
         modules = self._execute(
-            "SELECT COUNT(*) AS count FROM ue_modules WHERE corpus_id = ?",
+            "SELECT COUNT(*) AS count FROM codalith_modules WHERE corpus_id = ?",
             (corpus_id,),
         ).fetchone()
         source_files = self._execute(
@@ -175,27 +185,27 @@ class SemanticQueries(ConnectionBase):
             (corpus_id,),
         ).fetchone()
         reflection = self._execute(
-            "SELECT COUNT(*) AS count FROM ue_reflection_entities WHERE corpus_id = ?",
+            "SELECT COUNT(*) AS count FROM codalith_reflection_entities WHERE corpus_id = ?",
             (corpus_id,),
         ).fetchone()
         cpp_symbols = self._execute(
-            "SELECT COUNT(*) AS count FROM ue_symbols WHERE corpus_id = ?",
+            "SELECT COUNT(*) AS count FROM codalith_symbols WHERE corpus_id = ?",
             (corpus_id,),
         ).fetchone()
         compile_guards = self._execute(
-            "SELECT COUNT(*) AS count FROM ue_compile_guards WHERE corpus_id = ?",
+            "SELECT COUNT(*) AS count FROM codalith_compile_guards WHERE corpus_id = ?",
             (corpus_id,),
         ).fetchone()
         targets = self._execute(
-            "SELECT COUNT(*) AS count FROM ue_targets WHERE corpus_id = ?",
+            "SELECT COUNT(*) AS count FROM codalith_targets WHERE corpus_id = ?",
             (corpus_id,),
         ).fetchone()
         plugins = self._execute(
-            "SELECT COUNT(*) AS count FROM ue_plugins WHERE corpus_id = ?",
+            "SELECT COUNT(*) AS count FROM codalith_plugins WHERE corpus_id = ?",
             (corpus_id,),
         ).fetchone()
         projects = self._execute(
-            "SELECT COUNT(*) AS count FROM ue_projects WHERE corpus_id = ?",
+            "SELECT COUNT(*) AS count FROM codalith_projects WHERE corpus_id = ?",
             (corpus_id,),
         ).fetchone()
         return {

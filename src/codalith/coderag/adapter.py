@@ -233,7 +233,7 @@ class CodeRAGAdapter:
                     kind=str(hit.kind),
                     language=str(hit.language),
                     symbol=hit.symbol,
-                    module=_module_from_path(path),
+                    module=module_from_path(path, corpus.module_roots),
                     reason="CodeRAG hybrid retrieval hit.",
                     metadata={"coderag_similarity": float(hit.similarity)},
                 )
@@ -308,7 +308,7 @@ class CodeRAGAdapter:
                     score=score,
                     kind="window",
                     language=language_for_path(file.path),
-                    module=_module_from_path(file.path),
+                    module=module_from_path(file.path, corpus.module_roots),
                     reason="Local deterministic retrieval hit.",
                     metadata={"local_score": score},
                 )
@@ -327,12 +327,14 @@ class CodeRAGAdapter:
         scan_root = (root / subpath).resolve() if subpath else root
         if root.resolve() not in scan_root.parents and scan_root != root.resolve():
             raise CodeRAGAdapterError(f"Path escapes corpus root: {subpath}")
+        ignore_dirs = _BUILTIN_IGNORE_DIRS | set(corpus.index_ignore_dirs)
+        suffixes = _BUILTIN_TEXT_SUFFIXES | set(corpus.index_suffixes)
         files: list[_IndexedFile] = []
-        paths = [scan_root] if scan_root.is_file() else _iter_text_paths(scan_root)
+        paths = [scan_root] if scan_root.is_file() else _iter_text_paths(scan_root, ignore_dirs)
         for full_path in paths:
-            if not full_path.is_file() or not _is_text_candidate(full_path):
+            if not full_path.is_file() or full_path.suffix.lower() not in suffixes:
                 continue
-            if any(part in _IGNORED_DIRS for part in full_path.parts):
+            if any(part in ignore_dirs for part in full_path.parts):
                 continue
             try:
                 text = full_path.read_text(encoding="utf-8")
@@ -371,24 +373,19 @@ class CodeRAGAdapter:
             status["updated_at"] = _iso_timestamp(indexed_at)
 
 
-_IGNORED_DIRS = {
+# VCS/store internals only; corpus-specific ignores come from Corpus.index_ignore_dirs.
+_BUILTIN_IGNORE_DIRS = {
     ".git",
     ".coderag",
-    "Binaries",
-    "Intermediate",
-    "Saved",
-    "DerivedDataCache",
-    "ThirdParty",
 }
-_TEXT_SUFFIXES = {
+# Generic plain-text formats; corpus-specific suffixes come from Corpus.index_suffixes.
+_BUILTIN_TEXT_SUFFIXES = {
     ".h",
     ".hpp",
     ".inl",
     ".cpp",
     ".c",
     ".cs",
-    ".uplugin",
-    ".uproject",
     ".ini",
     ".json",
     ".md",
@@ -396,9 +393,9 @@ _TEXT_SUFFIXES = {
 }
 
 
-def _iter_text_paths(scan_root: Path) -> Iterator[Path]:
+def _iter_text_paths(scan_root: Path, ignore_dirs: set[str]) -> Iterator[Path]:
     for dirpath, dirnames, filenames in os.walk(scan_root):
-        dirnames[:] = [dirname for dirname in dirnames if dirname not in _IGNORED_DIRS]
+        dirnames[:] = [dirname for dirname in dirnames if dirname not in ignore_dirs]
         for filename in filenames:
             yield Path(dirpath) / filename
 
@@ -442,10 +439,6 @@ def _index_terms(raw_text: str) -> Iterator[str]:
                 yield term
 
 
-def _is_text_candidate(path: Path) -> bool:
-    return path.suffix.lower() in _TEXT_SUFFIXES or path.name in {"Build.cs", "Target.cs"}
-
-
 def language_for_path(path: str) -> str:
     suffix = Path(path).suffix.lower()
     return {
@@ -460,20 +453,16 @@ def language_for_path(path: str) -> str:
     }.get(suffix, "text")
 
 
-def _module_from_path(path: str) -> str | None:
+def module_from_path(path: str, module_roots: tuple[str, ...]) -> str | None:
+    """Module name hinted by the path segment following a configured module root."""
+    if not module_roots:
+        return None
     parts = path.split("/")
-    if "Runtime" in parts:
-        index = parts.index("Runtime")
-        if index + 1 < len(parts):
-            return parts[index + 1]
-    if "Developer" in parts:
-        index = parts.index("Developer")
-        if index + 1 < len(parts):
-            return parts[index + 1]
-    if "Editor" in parts:
-        index = parts.index("Editor")
-        if index + 1 < len(parts):
-            return parts[index + 1]
+    for root in module_roots:
+        if root in parts:
+            index = parts.index(root)
+            if index + 1 < len(parts):
+                return parts[index + 1]
     return None
 
 

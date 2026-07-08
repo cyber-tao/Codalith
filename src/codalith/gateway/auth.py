@@ -5,13 +5,28 @@ from __future__ import annotations
 import contextvars
 import hmac
 import os
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
+from codalith.corpus.registry import CorpusRegistry
 from codalith.errors import CodalithError
 
 # Shared default for AuthContext.local and audit records when no client is known.
 DEFAULT_CLIENT_ID = "codex"
+
+# Capability scopes every deployment needs; corpus access scopes come from the registry.
+_BASE_SCOPES = frozenset({"source:read", "index:status", "cards:read", "graph:read"})
+
+
+def default_scopes(registry: CorpusRegistry | None = None) -> frozenset[str]:
+    """Scopes granted when CODALITH_SCOPES is unset: base capabilities plus every
+    access scope declared by the configured corpora (self-hosted default)."""
+    scopes = set(_BASE_SCOPES)
+    if registry is not None:
+        for collection in (registry.engines, registry.projects, registry.generated):
+            for corpus in collection.values():
+                scopes |= corpus.access_scopes
+    return frozenset(scopes)
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,12 +37,12 @@ class AuthContext:
     scopes: frozenset[str]
 
     @classmethod
-    def local(cls) -> AuthContext:
+    def local(cls, fallback_scopes: Iterable[str] | None = None) -> AuthContext:
         return cls(
             user_id=os.getenv("CODALITH_USER_ID", "local-user"),
             session_id=os.getenv("CODALITH_SESSION_ID", "local-session"),
             client=os.getenv("CODALITH_CLIENT_ID", DEFAULT_CLIENT_ID),
-            scopes=frozenset(scopes_from_env()),
+            scopes=frozenset(scopes_from_env(fallback_scopes)),
         )
 
 
@@ -41,9 +56,11 @@ _CURRENT_AUTH: contextvars.ContextVar[AuthContext | None] = contextvars.ContextV
 )
 
 
-def scopes_from_env() -> set[str]:
-    raw = os.getenv("CODALITH_SCOPES", "source:read,index:status,cards:read,graph:read,ue:5.7")
-    return {item.strip() for item in raw.split(",") if item.strip()}
+def scopes_from_env(fallback: Iterable[str] | None = None) -> set[str]:
+    raw = os.getenv("CODALITH_SCOPES", "")
+    if raw.strip():
+        return {item.strip() for item in raw.split(",") if item.strip()}
+    return set(fallback) if fallback is not None else set(_BASE_SCOPES)
 
 
 def current_auth_context(default: AuthContext | None = None) -> AuthContext:
@@ -58,7 +75,10 @@ def reset_current_auth_context(token: contextvars.Token[AuthContext | None]) -> 
     _CURRENT_AUTH.reset(token)
 
 
-def authenticate_http_headers(headers: Mapping[str, str]) -> AuthContext:
+def authenticate_http_headers(
+    headers: Mapping[str, str],
+    fallback_scopes: Iterable[str] | None = None,
+) -> AuthContext:
     expected_token = os.getenv("CODALITH_HTTP_BEARER_TOKEN", "").strip()
     identity_header = os.getenv("CODALITH_HTTP_IDENTITY_HEADER", "").strip()
 
@@ -79,5 +99,5 @@ def authenticate_http_headers(headers: Mapping[str, str]) -> AuthContext:
         user_id=user_id,
         session_id=headers.get("MCP-Session-Id", "http-session"),
         client=headers.get("User-Agent", "mcp-http"),
-        scopes=frozenset(scopes_from_env()),
+        scopes=frozenset(scopes_from_env(fallback_scopes)),
     )

@@ -24,23 +24,25 @@ class SemanticWriters(SemanticQueries):
         corpus_id: str,
         dependency: ModuleDependency,
         evidence_uri: str,
+        extractor: str = "module_deps",
+        observed_from: str | None = None,
         commit: bool = True,
     ) -> None:
         self.upsert_module(
             corpus_id=corpus_id,
             module_name=dependency.from_module,
-            metadata={"observed_from": "Build.cs"},
+            metadata={"observed_from": observed_from} if observed_from else {},
             commit=False,
         )
         self.upsert_module(
             corpus_id=corpus_id,
             module_name=dependency.to_module,
-            metadata={"observed_from": "Build.cs dependency"},
+            metadata={"observed_from": f"{observed_from} dependency"} if observed_from else {},
             commit=False,
         )
         if self.dialect == "postgresql":
             sql = """
-                INSERT INTO ue_module_deps
+                INSERT INTO codalith_module_deps
                   (corpus_id, from_module, to_module, dep_kind, evidence_uri, metadata)
                 VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT (corpus_id, from_module, to_module, dep_kind)
@@ -49,7 +51,7 @@ class SemanticWriters(SemanticQueries):
                 """
         else:
             sql = """
-                INSERT OR REPLACE INTO ue_module_deps
+                INSERT OR REPLACE INTO codalith_module_deps
                   (corpus_id, from_module, to_module, dep_kind, evidence_uri, metadata)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """
@@ -70,7 +72,7 @@ class SemanticWriters(SemanticQueries):
             edge_type=f"module_{dependency.dep_kind}_dependency",
             to_node=f"module:{dependency.to_module}",
             evidence_uri=evidence_uri,
-            extractor="build_cs",
+            extractor=extractor,
             metadata=dependency.metadata,
             commit=False,
         )
@@ -188,7 +190,7 @@ class SemanticWriters(SemanticQueries):
         merged_metadata = _merge_dict(existing.get("metadata") if existing else None, metadata or {})
         if self.dialect == "postgresql":
             sql = """
-                INSERT INTO ue_modules
+                INSERT INTO codalith_modules
                   (corpus_id, module_name, module_type, loading_phase,
                    supported_platforms, public_include_paths, private_include_paths,
                    source_uri, metadata)
@@ -204,7 +206,7 @@ class SemanticWriters(SemanticQueries):
                 """
         else:
             sql = """
-                INSERT OR REPLACE INTO ue_modules
+                INSERT OR REPLACE INTO codalith_modules
                   (corpus_id, module_name, module_type, loading_phase,
                    supported_platforms, public_include_paths, private_include_paths,
                    source_uri, metadata)
@@ -235,7 +237,7 @@ class SemanticWriters(SemanticQueries):
     ) -> None:
         if self.dialect == "postgresql":
             sql = """
-                INSERT INTO ue_reflection_entities
+                INSERT INTO codalith_reflection_entities
                   (corpus_id, reflection_id, kind, name, owner_name,
                    module_name, declaration_uri, generated_uri, specifiers, metadata, confidence)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -252,7 +254,7 @@ class SemanticWriters(SemanticQueries):
                 """
         else:
             sql = """
-                INSERT OR REPLACE INTO ue_reflection_entities
+                INSERT OR REPLACE INTO codalith_reflection_entities
                   (corpus_id, reflection_id, kind, name, owner_name,
                    module_name, declaration_uri, generated_uri, specifiers, metadata, confidence)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -349,7 +351,7 @@ class SemanticWriters(SemanticQueries):
         guard_id = _edge_id(corpus_id, f"source:{path}:{guard.line}", guard.macro, guard.expression, evidence_uri)
         if self.dialect == "postgresql":
             sql = """
-                INSERT INTO ue_compile_guards
+                INSERT INTO codalith_compile_guards
                   (corpus_id, guard_id, path, macro, expression, start_line,
                    end_line, evidence_uri, metadata)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -364,7 +366,7 @@ class SemanticWriters(SemanticQueries):
                 """
         else:
             sql = """
-                INSERT OR REPLACE INTO ue_compile_guards
+                INSERT OR REPLACE INTO codalith_compile_guards
                   (corpus_id, guard_id, path, macro, expression, start_line,
                    end_line, evidence_uri, metadata)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -411,7 +413,7 @@ class SemanticWriters(SemanticQueries):
         symbol_id = f"{corpus_id}:{symbol.kind}:{symbol.qualified_name or symbol.name}:{path}:{symbol.line}"
         if self.dialect == "postgresql":
             sql = """
-                INSERT INTO ue_symbols
+                INSERT INTO codalith_symbols
                   (corpus_id, symbol_id, name, qualified_name, kind, module_name,
                    declaration_uri, definition_uri, signature, build_guard, metadata, confidence)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -429,7 +431,7 @@ class SemanticWriters(SemanticQueries):
                 """
         else:
             sql = """
-                INSERT OR REPLACE INTO ue_symbols
+                INSERT OR REPLACE INTO codalith_symbols
                   (corpus_id, symbol_id, name, qualified_name, kind, module_name,
                    declaration_uri, definition_uri, signature, build_guard, metadata, confidence)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -486,7 +488,7 @@ class SemanticWriters(SemanticQueries):
     ) -> None:
         if self.dialect == "postgresql":
             sql = """
-                INSERT INTO ue_targets
+                INSERT INTO codalith_targets
                   (corpus_id, target_name, target_type, extra_modules,
                    build_settings, declaration_uri, metadata)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -499,7 +501,7 @@ class SemanticWriters(SemanticQueries):
                 """
         else:
             sql = """
-                INSERT OR REPLACE INTO ue_targets
+                INSERT OR REPLACE INTO codalith_targets
                   (corpus_id, target_name, target_type, extra_modules,
                    build_settings, declaration_uri, metadata)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -543,7 +545,7 @@ class SemanticWriters(SemanticQueries):
     ) -> None:
         if self.dialect == "postgresql":
             sql = """
-                INSERT INTO ue_plugins
+                INSERT INTO codalith_plugins
                   (corpus_id, plugin_name, path, modules, supported_platforms, metadata)
                 VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT (corpus_id, plugin_name)
@@ -554,7 +556,7 @@ class SemanticWriters(SemanticQueries):
                 """
         else:
             sql = """
-                INSERT OR REPLACE INTO ue_plugins
+                INSERT OR REPLACE INTO codalith_plugins
                   (corpus_id, plugin_name, path, modules, supported_platforms, metadata)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """
@@ -605,7 +607,7 @@ class SemanticWriters(SemanticQueries):
     ) -> None:
         if self.dialect == "postgresql":
             sql = """
-                INSERT INTO ue_projects
+                INSERT INTO codalith_projects
                   (corpus_id, project_name, path, modules, plugins, metadata)
                 VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT (corpus_id, project_name)
@@ -616,7 +618,7 @@ class SemanticWriters(SemanticQueries):
                 """
         else:
             sql = """
-                INSERT OR REPLACE INTO ue_projects
+                INSERT OR REPLACE INTO codalith_projects
                   (corpus_id, project_name, path, modules, plugins, metadata)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """

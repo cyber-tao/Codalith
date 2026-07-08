@@ -193,6 +193,9 @@ def registry_path(tmp_path: Path, fake_engine_root: Path) -> Path:
                     "engine": ["Engine/Source/"],
                     "plugins": ["Engine/Plugins/"],
                 },
+                "module_roots": ["Runtime", "Developer", "Editor"],
+                "index_ignore_dirs": ["Binaries", "Intermediate", "Saved", "DerivedDataCache", "ThirdParty"],
+                "index_suffixes": [".uplugin", ".uproject"],
             },
             "ue-5.7.5": {
                 "kind": "engine",
@@ -205,6 +208,9 @@ def registry_path(tmp_path: Path, fake_engine_root: Path) -> Path:
                 "card_root": str(tmp_path / "cards-next"),
                 "default": False,
                 "access_scopes": ["ue:5.7", "source:read"],
+                "module_roots": ["Runtime", "Developer", "Editor"],
+                "index_ignore_dirs": ["Binaries", "Intermediate", "Saved", "DerivedDataCache", "ThirdParty"],
+                "index_suffixes": [".uplugin", ".uproject"],
             }
         },
         "projects": {
@@ -217,6 +223,9 @@ def registry_path(tmp_path: Path, fake_engine_root: Path) -> Path:
                 "semantic_schema": "project_a",
                 "card_root": str(tmp_path / "project-cards"),
                 "access_scopes": ["project:ProjectA", "source:read"],
+                "module_roots": ["Runtime", "Developer", "Editor"],
+                "index_ignore_dirs": ["Binaries", "Intermediate", "Saved", "DerivedDataCache", "ThirdParty"],
+                "index_suffixes": [".uplugin", ".uproject"],
             }
         },
         "generated": {

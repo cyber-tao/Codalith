@@ -32,6 +32,15 @@ class Corpus:
     scope_prefixes: dict[str, tuple[str, ...]] = field(default_factory=dict)
     # Name of the domain extractor profile used to build the semantic graph.
     semantic_profile: str | None = None
+    # Directory names whose next path segment is the module name (e.g. UE's
+    # "Runtime"/"Developer"/"Editor"). Empty means no path-based module hints.
+    module_roots: tuple[str, ...] = ()
+    # Extra directory names skipped while indexing, on top of the built-in
+    # neutral ignores (VCS/store internals).
+    index_ignore_dirs: tuple[str, ...] = ()
+    # Extra file suffixes indexed by the local fallback, on top of the
+    # built-in plain-text set (e.g. ".uplugin"/".uproject").
+    index_suffixes: tuple[str, ...] = ()
 
     @classmethod
     def from_config(cls, corpus_id: str, raw: dict[str, Any]) -> Corpus:
@@ -56,6 +65,9 @@ class Corpus:
                 for scope, prefixes in raw.get("scope_prefixes", {}).items()
             },
             semantic_profile=raw.get("semantic_profile"),
+            module_roots=tuple(str(item) for item in raw.get("module_roots", [])),
+            index_ignore_dirs=tuple(str(item) for item in raw.get("index_ignore_dirs", [])),
+            index_suffixes=tuple(str(item).lower() for item in raw.get("index_suffixes", [])),
         )
 
     @property

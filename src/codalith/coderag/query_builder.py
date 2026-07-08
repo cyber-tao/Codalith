@@ -1,4 +1,4 @@
-"""Query expansion helpers for UE-aware retrieval."""
+"""Query expansion helpers for corpus retrieval."""
 
 from __future__ import annotations
 

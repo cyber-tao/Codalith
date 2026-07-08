@@ -16,7 +16,7 @@ from codalith.corpus.source_policy import SourcePolicy, SourceReadRateLimiter
 from codalith.corpus.uri_resolver import ResolvedURI, URIResolver
 from codalith.errors import CorpusNotFoundError, SourcePolicyError
 from codalith.gateway.audit import AuditLogger, AuditRecord
-from codalith.gateway.auth import AuthContext, AuthError, current_auth_context
+from codalith.gateway.auth import AuthContext, AuthError, current_auth_context, default_scopes
 from codalith.semantic.graph import query_graph
 from codalith.semantic.store import SemanticStore
 
@@ -65,7 +65,7 @@ def create_runtime(
         adapter=adapter,
         compiler=compiler,
         audit=audit,
-        identity=AuthContext.local(),
+        identity=AuthContext.local(default_scopes(registry)),
         semantic_store=semantic_store,
         rate_limiter=SourceReadRateLimiter(policy),
     )

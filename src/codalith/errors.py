@@ -14,7 +14,7 @@ class CorpusNotFoundError(CodalithError):
 
 
 class URIResolutionError(CodalithError):
-    """Raised when an external UE URI is invalid or unsupported."""
+    """Raised when an external corpus URI is invalid or unsupported."""
 
 
 class SourcePolicyError(CodalithError):

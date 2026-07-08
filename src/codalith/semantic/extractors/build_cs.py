@@ -55,6 +55,8 @@ class ModuleDepStore(Protocol):
         corpus_id: str,
         dependency: ModuleDependency,
         evidence_uri: str,
+        extractor: str = "module_deps",
+        observed_from: str | None = None,
         commit: bool = True,
     ) -> None: ...
 
@@ -74,6 +76,8 @@ def write_module_deps(
             corpus_id=corpus_id,
             dependency=dependency,
             evidence_uri=evidence_uri,
+            extractor="build_cs",
+            observed_from="Build.cs",
             commit=False,
         )
     if commit:

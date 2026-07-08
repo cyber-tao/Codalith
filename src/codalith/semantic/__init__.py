@@ -1,1 +1,1 @@
-"""UE semantic graph and extractor support."""
+"""Semantic graph and extractor-profile support."""

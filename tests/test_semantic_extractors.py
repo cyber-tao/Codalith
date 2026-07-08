@@ -26,6 +26,51 @@ def test_build_cs_extractor_outputs_dependencies():
     assert any(edge["to"] == "module:Engine" for edge in graph["edges"])
 
 
+def test_initialize_schema_renames_legacy_ue_tables(tmp_path):
+    import sqlite3
+
+    db_path = tmp_path / "legacy.sqlite"
+    legacy = sqlite3.connect(db_path)
+    legacy.executescript(
+        """
+        CREATE TABLE codalith_corpora (
+          corpus_id TEXT PRIMARY KEY,
+          kind TEXT NOT NULL,
+          ue_version TEXT,
+          source_commit TEXT,
+          source_root TEXT,
+          indexed_root TEXT,
+          semantic_schema TEXT,
+          metadata TEXT DEFAULT '{}',
+          updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO codalith_corpora (corpus_id, kind, ue_version) VALUES ('ue-5.7.4', 'engine', '5.7.4');
+        CREATE TABLE ue_modules (
+          corpus_id TEXT NOT NULL,
+          module_name TEXT NOT NULL,
+          module_type TEXT,
+          loading_phase TEXT,
+          supported_platforms TEXT DEFAULT '[]',
+          public_include_paths TEXT DEFAULT '[]',
+          private_include_paths TEXT DEFAULT '[]',
+          source_uri TEXT,
+          metadata TEXT DEFAULT '{}',
+          PRIMARY KEY(corpus_id, module_name)
+        );
+        INSERT INTO ue_modules (corpus_id, module_name) VALUES ('ue-5.7.4', 'Engine');
+        """
+    )
+    legacy.commit()
+    legacy.close()
+
+    store = SemanticStore(db_path)
+    assert store.module_exists("ue-5.7.4", "Engine")
+    row = store._execute(
+        "SELECT version FROM codalith_corpora WHERE corpus_id = ?", ("ue-5.7.4",)
+    ).fetchone()
+    assert dict(row)["version"] == "5.7.4"
+
+
 def test_uht_reflection_extractor_detects_replicated_using():
     text = """
     #include "Thing.generated.h"

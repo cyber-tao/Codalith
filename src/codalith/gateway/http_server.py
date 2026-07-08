@@ -16,6 +16,7 @@ from codalith.gateway.auth import (
     AuthContext,
     AuthError,
     authenticate_http_headers,
+    default_scopes,
     reset_current_auth_context,
     set_current_auth_context,
 )
@@ -175,7 +176,10 @@ class StreamableHTTPHandler(BaseHTTPRequestHandler):
 
     def _authenticate(self) -> AuthContext | None:
         try:
-            return authenticate_http_headers({key: value for key, value in self.headers.items()})
+            return authenticate_http_headers(
+                {key: value for key, value in self.headers.items()},
+                default_scopes(self.server.tools.runtime.registry),
+            )
         except AuthError as exc:
             self._write_json_error(HTTPStatus.UNAUTHORIZED, str(exc))
             return None
