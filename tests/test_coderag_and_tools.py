@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 from dataclasses import dataclass
 from dataclasses import replace as dataclass_replace
@@ -13,6 +14,7 @@ import pytest
 
 from codalith.coderag.adapter import (
     _configure_native_batch_embedding,
+    _configure_native_env_aliases,
     _limit_chunk_texts,
     _native_store_dir,
 )
@@ -94,6 +96,33 @@ def test_native_store_dir_uses_corpus_store_not_global_env(registry, monkeypatch
     monkeypatch.setenv("CODERAG_STORE_DIR", str(tmp_path / "wrong-store"))
 
     assert _native_store_dir(corpus) == Path(corpus.coderag_store)
+
+
+def test_configure_native_env_aliases_uses_codalith_names(monkeypatch):
+    monkeypatch.delenv("CODERAG_PROVIDER", raising=False)
+    monkeypatch.delenv("CODERAG_OPENAI_MODEL", raising=False)
+    monkeypatch.delenv("CODERAG_OPENAI_BATCH", raising=False)
+    monkeypatch.delenv("CODERAG_WORKERS", raising=False)
+    monkeypatch.setenv("CODALITH_CODERAG_PROVIDER", "openai")
+    monkeypatch.setenv("CODALITH_CODERAG_EMBEDDING_MODEL", "Qwen3-Embedding-8B")
+    monkeypatch.setenv("CODALITH_CODERAG_EMBEDDING_BATCH_SIZE", "32")
+    monkeypatch.setenv("CODALITH_CODERAG_WORKERS", "4")
+
+    _configure_native_env_aliases()
+
+    assert os.environ["CODERAG_PROVIDER"] == "openai"
+    assert os.environ["CODERAG_OPENAI_MODEL"] == "Qwen3-Embedding-8B"
+    assert os.environ["CODERAG_OPENAI_BATCH"] == "32"
+    assert os.environ["CODERAG_WORKERS"] == "4"
+
+
+def test_configure_native_env_aliases_preserves_upstream_names(monkeypatch):
+    monkeypatch.setenv("CODERAG_PROVIDER", "hash")
+    monkeypatch.setenv("CODALITH_CODERAG_PROVIDER", "openai")
+
+    _configure_native_env_aliases()
+
+    assert os.environ["CODERAG_PROVIDER"] == "hash"
 
 
 def test_runtime_loads_registry_from_environment(monkeypatch, tmp_path):

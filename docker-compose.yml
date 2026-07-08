@@ -164,7 +164,9 @@ services:
     env_file:
       - .env
     environment:
-      <<: *codalith-env
+      <<:
+        - *codalith-env
+        - *coderag-openai-env
       CODALITH_USE_NATIVE_CODERAG: "1"
       CODALITH_NATIVE_CODERAG_STRICT: "1"
       CODALITH_EVAL_UE_VERSION: ${CODALITH_EVAL_UE_VERSION:-5.7.4}
@@ -176,6 +178,7 @@ services:
         condition: service_healthy
     volumes:
       - ${CODALITH_REPO_ROOT:-.}:${CODALITH_WORKSPACE_DIR:-/workspace}
+      - ${CODALITH_CODERAG_OPENAI_HOST_ROOT:-coderag-openai-store}:${CODALITH_CODERAG_VOLUME_ROOT:-/var/lib/codalith/coderag}
       - ${CODALITH_EVAL_UE_HOST_ROOT:-E:/UnrealEngine_5.7}:${CODALITH_EVAL_UE_SOURCE_ROOT:-/srv/ue/5.7.4}:ro
       - ${CODALITH_EVAL_UE_SOURCE_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Source}:${CODALITH_EVAL_UE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Source:ro
       - ${CODALITH_EVAL_UE_PLUGINS_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Plugins}:${CODALITH_EVAL_UE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Plugins:ro

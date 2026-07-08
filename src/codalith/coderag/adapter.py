@@ -16,8 +16,9 @@ from collections.abc import Iterator
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from hashlib import sha256
+from importlib import import_module
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from codalith.corpus.registry import Corpus, CorpusRegistry
 from codalith.corpus.source_reader import SourceReader
@@ -225,10 +226,13 @@ class CodeRAGAdapter:
         if corpus.corpus_id in self._native:
             return self._native[corpus.corpus_id]
         try:
-            from coderag.api import CodeRAG  # type: ignore[import-not-found]
-            from coderag.config import Config  # type: ignore[import-not-found]
+            api_module: Any = import_module("coderag.api")
+            config_module: Any = import_module("coderag.config")
+            CodeRAG = api_module.CodeRAG
+            Config = config_module.Config
         except Exception as exc:
             raise CodeRAGAdapterError("The coderag package is not installed") from exc
+        _configure_native_env_aliases()
         _configure_native_chunk_limit()
         _configure_native_index_policy_hash()
         _configure_native_openai_timeout()
@@ -464,12 +468,27 @@ def _native_store_dir(corpus: Corpus) -> Path:
     return corpus.coderag_store
 
 
+def _configure_native_env_aliases() -> None:
+    _set_env_default("CODERAG_PROVIDER", "CODALITH_CODERAG_PROVIDER")
+    _set_env_default("CODERAG_OPENAI_MODEL", "CODALITH_CODERAG_EMBEDDING_MODEL")
+    _set_env_default("CODERAG_OPENAI_BATCH", "CODALITH_CODERAG_EMBEDDING_BATCH_SIZE")
+    _set_env_default("CODERAG_WORKERS", "CODALITH_CODERAG_WORKERS")
+
+
+def _set_env_default(target: str, source: str) -> None:
+    if os.getenv(target):
+        return
+    value = os.getenv(source)
+    if value:
+        os.environ[target] = value
+
+
 def _configure_native_chunk_limit() -> None:
     max_chars, max_bytes = _native_chunk_budget_from_env()
     if max_chars <= 0 and max_bytes <= 0:
         return
 
-    import coderag.indexer as indexer  # type: ignore[import-not-found]
+    indexer: Any = import_module("coderag.indexer")
 
     budget = (max_chars, max_bytes)
     if getattr(indexer.chunk_file, "_codalith_chunk_budget", None) == budget:
@@ -598,7 +617,7 @@ def _configure_native_index_policy_hash() -> None:
     if not signature:
         return
 
-    import coderag.indexer as indexer
+    indexer: Any = import_module("coderag.indexer")
 
     current = indexer.Indexer._maybe_work
     if getattr(current, "_codalith_chunk_policy_signature", None) == signature:
@@ -662,7 +681,7 @@ def _configure_native_openai_timeout() -> None:
         raise CodeRAGAdapterError("CODALITH_CODERAG_OPENAI_RETRY_ATTEMPTS must be an integer") from exc
     retry_attempts = max(1, retry_attempts)
 
-    import coderag.embeddings.openai_provider as openai_provider  # type: ignore[import-not-found]
+    openai_provider: Any = import_module("coderag.embeddings.openai_provider")
 
     np_module = openai_provider.np
     retry = openai_provider.retry
@@ -718,9 +737,7 @@ def _configure_native_batch_embedding() -> None:
     min_batch_chunks = max(1, min_batch_chunks)
 
     from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
-    from typing import cast
-
-    import coderag.indexer as indexer
+    indexer: Any = import_module("coderag.indexer")
 
     current = indexer.Indexer._embed_and_write
     if (
