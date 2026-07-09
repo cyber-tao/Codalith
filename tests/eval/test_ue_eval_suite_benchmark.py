@@ -4,20 +4,10 @@ import threading
 from pathlib import Path
 from typing import Any
 
-import pytest
-
-from codalith.coderag import CodeRAGAdapter
-from codalith.compiler.context_compiler import ContextCompiler
-from codalith.corpus.registry import CorpusRegistry
-from codalith.corpus.source_policy import SourcePolicy
-from codalith.corpus.source_reader import SourceReader
-from codalith.corpus.uri_resolver import URIResolver
 from codalith.eval.mcp_runner import run_mcp_eval
 from codalith.eval.metrics import file_recall_at_k, module_accuracy
-from codalith.gateway.audit import AuditLogger
-from codalith.gateway.auth import AuthContext
 from codalith.gateway.http_server import StreamableHTTPConfig, create_http_server
-from codalith.gateway.tools import CodalithTools, ToolRuntime
+from codalith.gateway.tools import CodalithTools
 
 EXPECTED_SUITE_SIZE = 80
 
@@ -86,34 +76,3 @@ def test_ue_eval_suite_passes_http_mcp_eval(
     assert report.candidate_file_recall == 1.0
     assert report.module_accuracy == 1.0
     assert {row["failure_class"] for row in report.rows} == {"pass"}
-
-
-def _ue_eval_tools(registry_path: Path, tmp_path: Path) -> CodalithTools:
-    registry = CorpusRegistry.from_file(registry_path)
-    resolver = URIResolver(registry)
-    policy = SourcePolicy()
-    source_reader = SourceReader(registry)
-    adapter = CodeRAGAdapter(registry)
-    compiler = ContextCompiler(registry, adapter, source_reader=source_reader)
-    runtime = ToolRuntime(
-        registry=registry,
-        resolver=resolver,
-        policy=policy,
-        source_reader=source_reader,
-        adapter=adapter,
-        compiler=compiler,
-        audit=AuditLogger(tmp_path / "ue-audit.jsonl"),
-        identity=AuthContext(
-            user_id="test-user",
-            session_id="test-session",
-            client="pytest",
-            scopes=frozenset({"source:read", "index:status", "cards:read", "graph:read"}),
-        ),
-        semantic_store=None,
-    )
-    return CodalithTools(runtime)
-
-
-@pytest.fixture()
-def ue_eval_tools(ue_eval_registry_path: Path, tmp_path: Path) -> CodalithTools:
-    return _ue_eval_tools(ue_eval_registry_path, tmp_path)
