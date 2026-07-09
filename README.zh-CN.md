@@ -76,10 +76,16 @@ http://127.0.0.1:8765/mcp
 docker compose run --rm test
 ```
 
-启动 HTTP MCP 服务：
+启动 HTTP MCP 服务（默认 sample corpus）：
 
 ```bash
 docker compose up -d mcp-http
+```
+
+运行可选的完整 UE 5.7.4 语料 MCP（使用 `configs/ue_5_7_4_registry.json` 与本地 embedding store）：
+
+```bash
+docker compose --profile ue up -d mcp-http-ue
 ```
 
 运行默认 sample corpus acceptance：
@@ -100,13 +106,13 @@ docker compose --profile coderag run --rm coderag-acceptance
 docker compose --profile coderag run --rm coderag-openai-acceptance
 ```
 
-显式运行 UE eval profile：
+显式运行 UE Eval Suite profile（仅验收；复用产品 UE registry）：
 
 ```bash
 docker compose --profile eval-ue run --rm ue-eval
 ```
 
-UE profile 使用 `eval/configs/ue_5_7_4_registry.json`、`eval/configs/ue_source_priors.json`、`eval/configs/ue_seed_cards.json` 和 `eval/datasets/ue_eval_suite.jsonl`。
+UE 语料配置在 `configs/ue_5_7_4_registry.json`、`configs/ue_source_priors.json`、`configs/ue_seed_cards.json`。Eval Suite 数据集仍在 `eval/datasets/ue_eval_suite.jsonl`。
 
 ## CLI
 
@@ -133,8 +139,8 @@ docker compose config --quiet
 docker compose --env-file .env.example config --quiet
 ```
 
-UE 源码/checkpoint store 可用时的显式 eval：
+UE 源码/checkpoint store 可用时的显式 Eval Suite：
 
 ```bash
-uv run python -m codalith.eval.runner --registry eval/configs/ue_5_7_4_registry.json --dataset eval/datasets/ue_eval_suite.jsonl --output-dir reports/eval/ue_eval_suite --version 5.7.4 --max-source-spans 20
+uv run python -m codalith.eval.runner --registry configs/ue_5_7_4_registry.json --dataset eval/datasets/ue_eval_suite.jsonl --output-dir reports/eval/ue_eval_suite --version 5.7.4 --max-source-spans 20
 ```

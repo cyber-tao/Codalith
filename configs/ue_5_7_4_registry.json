@@ -1,0 +1,36 @@
+{
+  "corpora": {
+    "ue-${CODALITH_UE_VERSION:-5.7.4}": {
+      "kind": "source",
+      "version": "${CODALITH_UE_VERSION:-5.7.4}",
+      "display_name": "${CODALITH_UE_DISPLAY_NAME:-UE 5.7 Source Corpus}",
+      "description": "${CODALITH_UE_DESCRIPTION:-Full Unreal Engine 5.7.4 source corpus backed by the local CodeRAG embedding store}",
+      "keywords": [
+        "Unreal Engine",
+        "UE5",
+        "source code",
+        "UObject",
+        "replication"
+      ],
+      "source_commit": "${CODALITH_UE_SOURCE_COMMIT:-UNKNOWN}",
+      "source_root": "${CODALITH_UE_SOURCE_ROOT:-/srv/ue/5.7.4}",
+      "indexed_root": "${CODALITH_UE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}",
+      "coderag_store": "${CODALITH_UE_CODERAG_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4}",
+      "semantic_schema": "${CODALITH_UE_SEMANTIC_SCHEMA:-ue_5_7_4}",
+      "card_root": "${CODALITH_UE_CARD_ROOT:-data/cards/ue-5.7.4}",
+      "source_priors_path": "${CODALITH_UE_SOURCE_PRIORS:-configs/ue_source_priors.json}",
+      "seed_cards_path": "${CODALITH_UE_SEED_CARDS:-configs/ue_seed_cards.json}",
+      "default": true,
+      "access_scopes": ["source:read"],
+      "scope_prefixes": {
+        "source": ["Engine/Source/"],
+        "plugins": ["Engine/Plugins/"]
+      },
+      "module_roots": ["Runtime", "Developer", "Editor"],
+      "index_ignore_dirs": ["Binaries", "Intermediate", "Saved", "DerivedDataCache", "ThirdParty"],
+      "index_suffixes": [".uplugin", ".uproject", ".Build.cs", ".Target.cs"]
+    }
+  },
+  "projects": {},
+  "generated": {}
+}

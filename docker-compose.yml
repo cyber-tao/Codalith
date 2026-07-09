@@ -39,6 +39,15 @@ x-coderag-openai-env: &coderag-openai-env
   CODALITH_CODERAG_OPENAI_RETRY_ATTEMPTS: ${CODALITH_CODERAG_OPENAI_RETRY_ATTEMPTS:-3}
   PYTHONWARNINGS: ignore::SyntaxWarning
 
+x-ue-env: &ue-env
+  CODALITH_UE_VERSION: ${CODALITH_UE_VERSION:-5.7.4}
+  CODALITH_UE_SOURCE_ROOT: ${CODALITH_UE_SOURCE_ROOT:-/srv/ue/5.7.4}
+  CODALITH_UE_INDEXED_ROOT: ${CODALITH_UE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}
+  CODALITH_UE_CODERAG_STORE_DIR: ${CODALITH_UE_CODERAG_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4}
+  CODALITH_UE_CARD_ROOT: ${CODALITH_UE_CARD_ROOT:-data/cards/ue-5.7.4}
+  CODALITH_UE_SOURCE_PRIORS: ${CODALITH_UE_SOURCE_PRIORS:-configs/ue_source_priors.json}
+  CODALITH_UE_SEED_CARDS: ${CODALITH_UE_SEED_CARDS:-configs/ue_seed_cards.json}
+
 services:
   postgres:
     image: postgres:16-bookworm
@@ -92,6 +101,41 @@ services:
       - ${CODALITH_REPO_ROOT:-.}:${CODALITH_WORKSPACE_DIR:-/workspace}
     command: >
       sh -lc "uv sync &&
+      uv run codalith-mcp-http"
+
+  mcp-http-ue:
+    image: ghcr.io/astral-sh/uv:python3.12-bookworm
+    profiles: ["ue"]
+    working_dir: ${CODALITH_WORKSPACE_DIR:-/workspace}
+    env_file:
+      - .env
+    environment:
+      <<:
+        - *codalith-env
+        - *coderag-openai-env
+        - *ue-env
+      CODALITH_CORPUS_REGISTRY: ${CODALITH_UE_CORPUS_REGISTRY:-configs/ue_5_7_4_registry.json}
+      CODALITH_HTTP_HOST: ${CODALITH_HTTP_HOST:-0.0.0.0}
+      CODALITH_HTTP_PORT: ${CODALITH_HTTP_PORT:-8765}
+      CODALITH_HTTP_ENDPOINT: ${CODALITH_HTTP_ENDPOINT:-/mcp}
+      CODALITH_HTTP_ALLOWED_ORIGINS: ${CODALITH_HTTP_ALLOWED_ORIGINS:-}
+      CODALITH_USE_NATIVE_CODERAG: ${CODALITH_USE_NATIVE_CODERAG:-1}
+      CODALITH_NATIVE_CODERAG_STRICT: ${CODALITH_NATIVE_CODERAG_STRICT:-}
+      CODERAG_STORE_DIR: ${CODALITH_UE_CODERAG_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${CODALITH_HTTP_BIND:-127.0.0.1}:${CODALITH_HTTP_PORT:-8765}:${CODALITH_HTTP_PORT:-8765}"
+    volumes:
+      - ${CODALITH_REPO_ROOT:-.}:${CODALITH_WORKSPACE_DIR:-/workspace}
+      - ${CODALITH_CODERAG_OPENAI_HOST_ROOT:-coderag-openai-store}:${CODALITH_CODERAG_VOLUME_ROOT:-/var/lib/codalith/coderag}
+      - ${CODALITH_UE_HOST_ROOT:-E:/UnrealEngine_5.7}:${CODALITH_UE_SOURCE_ROOT:-/srv/ue/5.7.4}:ro
+      - ${CODALITH_UE_SOURCE_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Source}:${CODALITH_UE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Source:ro
+      - ${CODALITH_UE_PLUGINS_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Plugins}:${CODALITH_UE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Plugins:ro
+    command: >
+      sh -lc "uv sync &&
+      uv run python -c \"from jobs.coderag_acceptance import ensure_coderag_installed; ensure_coderag_installed('openai')\" &&
       uv run codalith-mcp-http"
 
   corpus-acceptance:
@@ -167,25 +211,24 @@ services:
       <<:
         - *codalith-env
         - *coderag-openai-env
+        - *ue-env
+      CODALITH_CORPUS_REGISTRY: ${CODALITH_UE_CORPUS_REGISTRY:-configs/ue_5_7_4_registry.json}
       CODALITH_USE_NATIVE_CODERAG: "1"
       CODALITH_NATIVE_CODERAG_STRICT: "1"
-      CODALITH_EVAL_UE_VERSION: ${CODALITH_EVAL_UE_VERSION:-5.7.4}
-      CODALITH_EVAL_UE_SOURCE_ROOT: ${CODALITH_EVAL_UE_SOURCE_ROOT:-/srv/ue/5.7.4}
-      CODALITH_EVAL_UE_INDEXED_ROOT: ${CODALITH_EVAL_UE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}
-      CODALITH_EVAL_UE_CODERAG_STORE_DIR: ${CODALITH_EVAL_UE_CODERAG_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4}
+      CODERAG_STORE_DIR: ${CODALITH_UE_CODERAG_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4}
     depends_on:
       postgres:
         condition: service_healthy
     volumes:
       - ${CODALITH_REPO_ROOT:-.}:${CODALITH_WORKSPACE_DIR:-/workspace}
       - ${CODALITH_CODERAG_OPENAI_HOST_ROOT:-coderag-openai-store}:${CODALITH_CODERAG_VOLUME_ROOT:-/var/lib/codalith/coderag}
-      - ${CODALITH_EVAL_UE_HOST_ROOT:-E:/UnrealEngine_5.7}:${CODALITH_EVAL_UE_SOURCE_ROOT:-/srv/ue/5.7.4}:ro
-      - ${CODALITH_EVAL_UE_SOURCE_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Source}:${CODALITH_EVAL_UE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Source:ro
-      - ${CODALITH_EVAL_UE_PLUGINS_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Plugins}:${CODALITH_EVAL_UE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Plugins:ro
+      - ${CODALITH_UE_HOST_ROOT:-E:/UnrealEngine_5.7}:${CODALITH_UE_SOURCE_ROOT:-/srv/ue/5.7.4}:ro
+      - ${CODALITH_UE_SOURCE_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Source}:${CODALITH_UE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Source:ro
+      - ${CODALITH_UE_PLUGINS_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Plugins}:${CODALITH_UE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Plugins:ro
     command: >
       sh -lc "uv sync &&
       uv run python -c \"from jobs.coderag_acceptance import ensure_coderag_installed; ensure_coderag_installed('openai')\" &&
-      uv run python -m codalith.eval.runner --registry eval/configs/ue_5_7_4_registry.json --dataset eval/datasets/ue_eval_suite.jsonl --output-dir reports/eval/ue_eval_suite --version \"$${CODALITH_EVAL_UE_VERSION}\" --max-source-spans 20"
+      uv run python -m codalith.eval.runner --registry configs/ue_5_7_4_registry.json --dataset eval/datasets/ue_eval_suite.jsonl --output-dir reports/eval/ue_eval_suite --version \"$${CODALITH_UE_VERSION}\" --max-source-spans 20"
 
 volumes:
   codalith-postgres:

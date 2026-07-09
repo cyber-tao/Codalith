@@ -76,10 +76,16 @@ Run default checks:
 docker compose run --rm test
 ```
 
-Run the HTTP MCP service:
+Run the HTTP MCP service (sample corpus by default):
 
 ```bash
 docker compose up -d mcp-http
+```
+
+Run the optional full UE 5.7.4 corpus MCP (uses `configs/ue_5_7_4_registry.json` and the local embedding store):
+
+```bash
+docker compose --profile ue up -d mcp-http-ue
 ```
 
 Run default sample corpus acceptance:
@@ -100,13 +106,13 @@ Optional OpenAI-backed CodeRAG acceptance (same profile):
 docker compose --profile coderag run --rm coderag-openai-acceptance
 ```
 
-Run the explicit UE eval profile:
+Run the explicit UE Eval Suite profile (acceptance only; reuses the product UE registry):
 
 ```bash
 docker compose --profile eval-ue run --rm ue-eval
 ```
 
-The UE profile uses `eval/configs/ue_5_7_4_registry.json`, `eval/configs/ue_source_priors.json`, `eval/configs/ue_seed_cards.json`, and `eval/datasets/ue_eval_suite.jsonl`.
+The UE corpus lives under `configs/ue_5_7_4_registry.json`, `configs/ue_source_priors.json`, and `configs/ue_seed_cards.json`. The Eval Suite dataset stays at `eval/datasets/ue_eval_suite.jsonl`.
 
 ## CLI
 
@@ -133,8 +139,8 @@ docker compose config --quiet
 docker compose --env-file .env.example config --quiet
 ```
 
-UE eval, when the UE source/checkpoint store is available:
+UE Eval Suite, when the UE source/checkpoint store is available:
 
 ```bash
-uv run python -m codalith.eval.runner --registry eval/configs/ue_5_7_4_registry.json --dataset eval/datasets/ue_eval_suite.jsonl --output-dir reports/eval/ue_eval_suite --version 5.7.4 --max-source-spans 20
+uv run python -m codalith.eval.runner --registry configs/ue_5_7_4_registry.json --dataset eval/datasets/ue_eval_suite.jsonl --output-dir reports/eval/ue_eval_suite --version 5.7.4 --max-source-spans 20
 ```
