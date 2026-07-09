@@ -406,6 +406,16 @@ def test_mcp_tool_schema_version_default_follows_registry_default(tools):
         assert version_property["default"] == "sample"
     descriptions = " ".join(str(schema["description"]) for schema in schemas.values())
     assert "Unreal" not in descriptions and "UE" not in descriptions
+    examples_scopes = schemas["codalith_examples"]["inputSchema"]["properties"]["scope"]["enum"]
+    assert "source" in examples_scopes
+    assert "docs" in examples_scopes
+    assert "all" in examples_scopes
+    assert "engine" not in examples_scopes
+
+
+def test_codalith_examples_rejects_unknown_scope(tools):
+    with pytest.raises(ValueError, match="Unknown examples scope"):
+        tools.codalith_examples(symbol_or_api="CachedValue", scope="engine")
 
 
 def test_codalith_context_defaults_to_registry_default_engine(tools):

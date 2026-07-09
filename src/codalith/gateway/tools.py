@@ -362,6 +362,11 @@ class CodalithTools:
         scope: str = "all",
         max_examples: int = 8,
     ) -> dict[str, Any]:
+        allowed_scopes = set(example_scopes(self.runtime.registry))
+        if scope not in allowed_scopes:
+            raise ValueError(
+                f"Unknown examples scope: {scope!r}; expected one of {sorted(allowed_scopes)}"
+            )
         resolution = self.runtime.registry.resolve(
             version,
             project,
@@ -373,7 +378,11 @@ class CodalithTools:
         hits: list[RetrievalHit] = []
         for corpus in resolution.ordered:
             corpus_hits = self.runtime.adapter.search_code(corpus.corpus_id, symbol_or_api, top_k=max_examples * 2)
-            hits.extend(hit for hit in corpus_hits if _scope_matches(scope, hit.path, corpus))
+            hits.extend(
+                hit
+                for hit in corpus_hits
+                if _scope_matches(scope, hit.path, corpus, allowed_scopes=allowed_scopes)
+            )
         return {"symbol_or_api": symbol_or_api, "examples": [hit.as_dict() for hit in hits[:max_examples]]}
 
     def codalith_compare_versions(
@@ -491,7 +500,34 @@ class CodalithTools:
         }
 
 
-def _scope_matches(scope: str, path: str, corpus: Corpus) -> bool:
+_FIXED_EXAMPLE_SCOPES = ("tests", "project", "generated", "all")
+
+
+def example_scopes(registry: CorpusRegistry) -> list[str]:
+    """Union of configured path-prefix scopes plus fixed overlay/all scopes."""
+    configured: set[str] = set()
+    for corpus in registry.corpora.values():
+        configured.update(corpus.scope_prefixes)
+    for corpus in registry.projects.values():
+        configured.update(corpus.scope_prefixes)
+    for corpus in registry.generated.values():
+        configured.update(corpus.scope_prefixes)
+    ordered = sorted(configured)
+    for fixed in _FIXED_EXAMPLE_SCOPES:
+        if fixed not in configured:
+            ordered.append(fixed)
+    return ordered
+
+
+def _scope_matches(
+    scope: str,
+    path: str,
+    corpus: Corpus,
+    *,
+    allowed_scopes: set[str] | None = None,
+) -> bool:
+    if allowed_scopes is not None and scope not in allowed_scopes:
+        raise ValueError(f"Unknown examples scope: {scope!r}")
     if scope == "all":
         return True
     if scope == "project":
@@ -503,12 +539,10 @@ def _scope_matches(scope: str, path: str, corpus: Corpus) -> bool:
     if scope == "tests":
         lowered = path.lower()
         return "/test" in lowered or "/tests/" in lowered or "automation" in lowered
-    # Path-prefix scopes (e.g. "engine", "plugins") are corpus configuration;
-    # a scope without configured prefixes does not filter by path.
     prefixes = corpus.scope_prefixes.get(scope)
-    if prefixes:
-        return any(path.startswith(prefix) for prefix in prefixes)
-    return True
+    if not prefixes:
+        raise ValueError(f"Unknown examples scope: {scope!r}")
+    return any(path.startswith(prefix) for prefix in prefixes)
 
 
 def _module_dep_key(row: dict[str, Any]) -> tuple[object, ...]:
@@ -526,7 +560,11 @@ def _version_property(default_version: str | None) -> dict[str, Any]:
     return prop
 
 
-def _tool_schema_data(default_version: str | None) -> list[dict[str, Any]]:
+def _tool_schema_data(
+    default_version: str | None,
+    scopes: tuple[str, ...],
+) -> list[dict[str, Any]]:
+    scope_enum = list(scopes) if scopes else list(_FIXED_EXAMPLE_SCOPES)
     return [
         {
             "name": "codalith_context",
@@ -618,7 +656,10 @@ def _tool_schema_data(default_version: str | None) -> list[dict[str, Any]]:
         },
         {
             "name": "codalith_examples",
-            "description": "Find real usages of an API or symbol in engine source, plugins, tests, samples, and project overlay.",
+            "description": (
+                "Find real usages of an API or symbol across configured corpus scopes "
+                "(path-prefix scopes from the registry, plus tests, project, generated, and all)."
+            ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -627,7 +668,7 @@ def _tool_schema_data(default_version: str | None) -> list[dict[str, Any]]:
                     "project": {"type": "string"},
                     "scope": {
                         "type": "string",
-                        "enum": ["engine", "plugins", "tests", "project", "generated", "all"],
+                        "enum": scope_enum,
                         "default": "all",
                     },
                     "max_examples": {"type": "integer", "default": 8, "minimum": 1, "maximum": 50},
@@ -637,7 +678,7 @@ def _tool_schema_data(default_version: str | None) -> list[dict[str, Any]]:
         },
         {
             "name": "codalith_compare_versions",
-            "description": "Compare a symbol, module, file, or mechanism across corpus versions.",
+            "description": "Compare a symbol, module, or file across corpus versions.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -658,10 +699,13 @@ def _tool_schema_data(default_version: str | None) -> list[dict[str, Any]]:
 
 # Single source of truth: tools/list schemas and call_tool dispatch both derive
 # from this registry, so a tool cannot be listed without being callable. The
-# default version is injected from the corpus registry instead of hardcoded.
+# default version and example scopes are injected from the corpus registry.
 @lru_cache(maxsize=8)
-def _tool_registry(default_version: str | None) -> dict[str, dict[str, Any]]:
-    return {schema["name"]: schema for schema in _tool_schema_data(default_version)}
+def _tool_registry(
+    default_version: str | None,
+    scopes: tuple[str, ...],
+) -> dict[str, dict[str, Any]]:
+    return {schema["name"]: schema for schema in _tool_schema_data(default_version, scopes)}
 
 
 def _default_version(registry: CorpusRegistry) -> str | None:
@@ -671,12 +715,18 @@ def _default_version(registry: CorpusRegistry) -> str | None:
         return None
 
 
+def _registry_cache_key(registry: CorpusRegistry) -> tuple[str | None, tuple[str, ...]]:
+    return _default_version(registry), tuple(example_scopes(registry))
+
+
 def tool_schemas(registry: CorpusRegistry) -> list[dict[str, Any]]:
-    return list(_tool_registry(_default_version(registry)).values())
+    default_version, scopes = _registry_cache_key(registry)
+    return list(_tool_registry(default_version, scopes).values())
 
 
 def call_tool(tools: CodalithTools, name: str, arguments: dict[str, Any]) -> Any:
-    schema = _tool_registry(_default_version(tools.runtime.registry)).get(name)
+    default_version, scopes = _registry_cache_key(tools.runtime.registry)
+    schema = _tool_registry(default_version, scopes).get(name)
     if schema is None:
         raise ValueError(f"Unknown tool: {name}")
     _validate_arguments(name, schema["inputSchema"], arguments)

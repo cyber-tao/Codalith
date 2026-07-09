@@ -166,7 +166,7 @@ def registry_path(
                 "seed_cards_path": str(seed_cards_path),
                 "default": True,
                 "access_scopes": ["source:read"],
-                "scope_prefixes": {"source": ["src/"]},
+                "scope_prefixes": {"source": ["src/"], "docs": ["docs/"]},
                 "module_roots": ["src"],
                 "index_ignore_dirs": ["build", "dist", "__pycache__"],
                 "index_suffixes": [".py", ".md", ".json"],
