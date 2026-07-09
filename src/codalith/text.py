@@ -29,11 +29,6 @@ def tokenize(text: str, *, min_length: int = 1) -> list[str]:
     return [token for token in _TOKEN_RE.findall(normalize(text)) if len(token) >= min_length]
 
 
-def token_set(text: str, *, min_length: int = 1) -> set[str]:
-    """Unique identifier-style tokens of the normalized text."""
-    return set(tokenize(text, min_length=min_length))
-
-
 def contains_word(term: str, lower_text: str) -> bool:
     """Whether ``term`` occurs in ``lower_text`` (which must be lowercased).
 

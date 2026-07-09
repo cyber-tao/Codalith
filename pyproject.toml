@@ -27,7 +27,7 @@ codalith-mcp-eval = "codalith.eval.mcp_runner:main"
 codalith-generate-cards = "jobs.generate_cards:main"
 codalith-verify-cards = "jobs.verify_cards:main"
 codalith-index-corpus = "jobs.index_corpus:main"
-codalith-extract-semantic = "jobs.extract_semantic:main"
+codalith-semantic-status = "jobs.semantic_status:main"
 codalith-coderag-acceptance = "jobs.coderag_acceptance:main"
 codalith-backup-coderag-store = "jobs.backup_coderag_store:main"
 

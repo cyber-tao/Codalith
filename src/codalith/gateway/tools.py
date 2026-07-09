@@ -350,7 +350,7 @@ class CodalithTools:
             "edges": list(edges.values()),
             "caveat": None
             if edges
-            else "No semantic graph edges matched this node. Run codalith-extract-semantic with --semantic-db for this corpus.",
+            else "No semantic graph edges matched this node. Run codalith-semantic-status with --semantic-db for this corpus.",
         }
 
     def codalith_examples(

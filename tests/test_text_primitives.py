@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from codalith.text import camel_words, contains_word, normalize, token_set, tokenize
+from codalith.text import camel_words, contains_word, normalize, tokenize
 
 
 def test_normalize_lowercases_and_folds_hyphens():
@@ -23,10 +23,6 @@ def test_tokenize_skips_bare_numbers_but_keeps_numeric_tails():
 
 def test_tokenize_honors_min_length():
     assert tokenize("a an the FName", min_length=2) == ["an", "the", "fname"]
-
-
-def test_token_set_deduplicates():
-    assert token_set("actor Actor ACTOR") == {"actor"}
 
 
 def test_contains_word_requires_boundaries_for_ascii_terms():

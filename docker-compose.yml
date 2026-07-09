@@ -110,7 +110,7 @@ services:
     command: >
       sh -lc "uv sync --extra dev &&
       uv run codalith-index-corpus --corpus \"$${CODALITH_SAMPLE_CORPUS_ID}\" --smoke --smoke-file src/core/cache.py &&
-      uv run codalith-extract-semantic --corpus \"$${CODALITH_SAMPLE_CORPUS_ID}\" --semantic-db \"$${CODALITH_SEMANTIC_DSN}\" &&
+      uv run codalith-semantic-status --corpus \"$${CODALITH_SAMPLE_CORPUS_ID}\" --semantic-db \"$${CODALITH_SEMANTIC_DSN}\" &&
       uv run codalith-verify-cards --corpus \"$${CODALITH_SAMPLE_CORPUS_ID}\" &&
       uv run pytest -m corpus_acceptance"
 

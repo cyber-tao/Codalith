@@ -21,8 +21,6 @@ build/
 *.egg-info/
 data/
 reports/
-eval/benchmarks/
 # Rendered card output that acceptance jobs write into the sample corpus.
-fixtures/sample_corpus/KNOWLEDGE/
-.codalith/
+fixtures/sample_corpus/cards/
 .local/

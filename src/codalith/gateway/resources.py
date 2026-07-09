@@ -45,12 +45,6 @@ def resources(registry: CorpusRegistry) -> list[dict[str, str]]:
                     "description": "Verified knowledge card collection summary.",
                     "mimeType": "application/json",
                 },
-                {
-                    "uri": f"{base}/mechanisms",
-                    "name": f"{label} mechanisms",
-                    "description": "Curated mechanism summaries backed by cards and source evidence.",
-                    "mimeType": "application/json",
-                },
             ]
         )
     for project_id in registry.projects:
@@ -106,7 +100,7 @@ def read_resource(uri: str, tools: CodalithTools) -> dict[str, Any]:
                 "source_commit": corpus.source_commit,
                 "semantic": _semantic_status(tools, corpus.corpus_id),
             }
-        if uri in {f"{base}/modules", f"{base}/cards", f"{base}/mechanisms"}:
+        if uri in {f"{base}/modules", f"{base}/cards"}:
             return {
                 "uri": uri,
                 "corpus_id": corpus.corpus_id,

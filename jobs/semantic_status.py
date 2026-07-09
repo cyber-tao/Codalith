@@ -1,9 +1,8 @@
 """Record corpus metadata and report semantic store status for a corpus.
 
-Codalith core ships no domain extractors: a corpus without a semantic profile
-is a valid generic source corpus and yields an empty semantic summary.
-Populating the graph is delegated to external extractor pipelines writing
-through SemanticStore.
+Codalith core ships no domain extractors. Populating the graph is delegated to
+external extractor pipelines writing through SemanticStore; this job only
+upserts corpus metadata and reports store counts.
 """
 
 from __future__ import annotations
@@ -14,7 +13,6 @@ from pathlib import Path
 from typing import Any
 
 from codalith.corpus.registry import Corpus
-from codalith.errors import ConfigurationError
 from codalith.semantic.store import SemanticStore
 from jobs.common import add_corpus_arguments, resolve_corpus
 
@@ -28,11 +26,6 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     _, corpus = resolve_corpus(args)
-    if corpus.semantic_profile is not None:
-        raise ConfigurationError(
-            f"Unknown semantic profile: {corpus.semantic_profile}. "
-            "Codalith core ships no domain extractors."
-        )
     corpus_id = args.corpus_id or corpus.corpus_id
     summary = _summarize(corpus_id, args.semantic_db, corpus)
     output = Path(args.output)
@@ -50,7 +43,6 @@ def _summarize(corpus_id: str, semantic_db: str | None, corpus: Corpus) -> dict[
         if semantic_db:
             store.upsert_corpus(corpus)
         return {
-            "profile": None,
             "semantic_store": semantic_db,
             **store.semantic_status(corpus_id),
         }

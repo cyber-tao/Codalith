@@ -30,8 +30,6 @@ class Corpus:
     # Maps a search scope name (e.g. "source", "docs") to the path prefixes
     # that belong to it under this corpus.
     scope_prefixes: dict[str, tuple[str, ...]] = field(default_factory=dict)
-    # Name of the domain extractor profile used to build the semantic graph.
-    semantic_profile: str | None = None
     # Directory names whose next path segment is the module name. Empty means
     # no path-based module hints.
     module_roots: tuple[str, ...] = ()
@@ -68,7 +66,6 @@ class Corpus:
                 str(scope): tuple(str(prefix) for prefix in prefixes)
                 for scope, prefixes in raw.get("scope_prefixes", {}).items()
             },
-            semantic_profile=raw.get("semantic_profile"),
             module_roots=tuple(str(item) for item in raw.get("module_roots", [])),
             index_ignore_dirs=tuple(str(item) for item in raw.get("index_ignore_dirs", [])),
             index_suffixes=tuple(str(item).lower() for item in raw.get("index_suffixes", [])),

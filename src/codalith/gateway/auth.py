@@ -12,7 +12,7 @@ from codalith.corpus.registry import CorpusRegistry
 from codalith.errors import CodalithError
 
 # Shared default for AuthContext.local and audit records when no client is known.
-DEFAULT_CLIENT_ID = "codex"
+DEFAULT_CLIENT_ID = "codalith"
 
 # Capability scopes every deployment needs; corpus access scopes come from the registry.
 _BASE_SCOPES = frozenset({"source:read", "index:status", "cards:read", "graph:read"})
