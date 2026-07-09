@@ -55,15 +55,18 @@ def missing_source_citation_rate(pack: dict[str, Any]) -> float:
     return missing / len(spans)
 
 
+_OVERLAY_CORPUS_KINDS = frozenset({"project", "generated"})
+
+
 def wrong_version_rate(pack: dict[str, Any], expected_version: str) -> float:
     """Fraction of spans not anchored to the expected version.
 
-    Engine-corpus spans must come from the pack's own engine corpus, and the
-    pack itself must have resolved to the expected version. Project and
-    generated overlay spans are not version-anchored to the engine, so they
-    never count as wrong. Mirrors missing_source_citation_rate for empty
-    packs: no spans means the pack cannot demonstrate version anchoring, so
-    it counts as 1.0.
+    Non-overlay spans (anything other than project/generated) must come from
+    the pack's own base corpus, and the pack itself must have resolved to the
+    expected version. Overlay spans are not version-anchored to the base
+    corpus, so they never count as wrong. Mirrors missing_source_citation_rate
+    for empty packs: no spans means the pack cannot demonstrate version
+    anchoring, so it counts as 1.0.
     """
     spans = pack.get("source_spans", [])
     if not spans:
@@ -75,7 +78,7 @@ def wrong_version_rate(pack: dict[str, Any], expected_version: str) -> float:
         if not isinstance(span, dict):
             wrong += 1
             continue
-        if str(span.get("corpus_kind") or "") != "engine":
+        if str(span.get("corpus_kind") or "") in _OVERLAY_CORPUS_KINDS:
             continue
         if pack_version != expected_version or str(span.get("corpus_id", "")) != base_corpus_id:
             wrong += 1

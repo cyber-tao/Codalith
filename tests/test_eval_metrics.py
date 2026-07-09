@@ -13,6 +13,7 @@ def _pack(
     *,
     version: str = "5.7.4",
     corpus_id: str = "ue-5.7.4",
+    corpus_kind: str = "source",
 ) -> dict[str, object]:
     return {
         "version": version,
@@ -22,7 +23,7 @@ def _pack(
                 "path": path,
                 "uri": f"codalith://{corpus_id}/source/{path}#L1-L5",
                 "corpus_id": corpus_id,
-                "corpus_kind": "engine",
+                "corpus_kind": corpus_kind,
             }
             for path in paths
         ],
@@ -74,7 +75,7 @@ def test_citation_and_version_rates_on_populated_packs():
     assert wrong_version_rate(project_span, "5.7.4") == 0.0
 
 
-def test_wrong_version_rate_flags_engine_spans_from_other_corpora():
+def test_wrong_version_rate_flags_base_spans_from_other_corpora():
     leaked = _pack(["Actor.h"])
     spans = leaked["source_spans"]
     assert isinstance(spans, list)
@@ -83,10 +84,32 @@ def test_wrong_version_rate_flags_engine_spans_from_other_corpora():
             "path": "Other.h",
             "uri": "codalith://ue-5.7.5/source/Other.h#L1-L5",
             "corpus_id": "ue-5.7.5",
-            "corpus_kind": "engine",
+            "corpus_kind": "source",
         }
     )
     assert wrong_version_rate(leaked, "5.7.4") == 0.5
+
+
+def test_wrong_version_rate_ignores_generated_overlay_spans():
+    pack = {
+        "version": "5.7.4",
+        "corpus_id": "ue-5.7.4",
+        "source_spans": [
+            {
+                "path": "A.h",
+                "uri": "codalith://ue-5.7.4/source/A.h#L1-L2",
+                "corpus_id": "ue-5.7.4",
+                "corpus_kind": "source",
+            },
+            {
+                "path": "gen.h",
+                "uri": "codalith://generated-a/source/gen.h#L1-L2",
+                "corpus_id": "generated-a",
+                "corpus_kind": "generated",
+            },
+        ],
+    }
+    assert wrong_version_rate(pack, "5.7.4") == 0.0
 
 
 def test_p95_uses_nearest_rank_definition():
