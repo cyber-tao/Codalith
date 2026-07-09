@@ -62,6 +62,7 @@ http://127.0.0.1:8765/mcp
 | `CODALITH_SAMPLE_SOURCE_ROOT` | 默认 sample corpus 的源码根。 |
 | `CODALITH_SAMPLE_INDEXED_ROOT` | 搜索/索引使用的 indexed root。 |
 | `CODALITH_SAMPLE_CODERAG_STORE_DIR` | sample corpus 的 CodeRAG store 路径。 |
+| `CODALITH_SAMPLE_CARD_ROOT` | sample corpus 的渲染 Knowledge Card 根目录。 |
 | `CODALITH_SAMPLE_SOURCE_PRIORS` | 可选 deterministic source prior 配置。 |
 | `CODALITH_SAMPLE_SEED_CARDS` | 可选 seed card 配置。 |
 | `CODALITH_SCOPES` | 显式 scope 覆盖；留空则授予基础 scope 加 registry 里的 access scopes。 |
@@ -93,6 +94,12 @@ docker compose --profile acceptance run --rm corpus-acceptance
 docker compose --profile coderag run --rm coderag-acceptance
 ```
 
+可选 OpenAI 后端 CodeRAG acceptance（同一 profile）：
+
+```bash
+docker compose --profile coderag run --rm coderag-openai-acceptance
+```
+
 显式运行 UE eval profile：
 
 ```bash
@@ -108,10 +115,12 @@ UE profile 使用 `eval/configs/ue_5_7_4_registry.json`、`eval/configs/ue_sourc
 | `codalith-mcp` | stdio MCP server。 |
 | `codalith-mcp-http` | Streamable HTTP MCP server。 |
 | `codalith-index-corpus --corpus <id>` | 索引任意已配置 corpus。 |
-| `codalith-extract-semantic --corpus <id>` | 记录 corpus 元数据并输出语义库状态摘要；core 不包含领域 extractor。 |
+| `codalith-semantic-status --corpus <id>` | 记录 corpus 元数据并输出语义库状态摘要；core 不包含领域 extractor。 |
 | `codalith-generate-cards --corpus <id>` | 生成并校验配置的 seed cards。 |
 | `codalith-verify-cards --corpus <id>` | 校验配置的 seed cards。 |
-| `codalith-eval --dataset <path>` | 进程内 eval。 |
+| `codalith-coderag-acceptance` | 对已配置 corpus 运行 native CodeRAG acceptance。 |
+| `codalith-backup-coderag-store` | 备份 CodeRAG store 目录。 |
+| `codalith-eval --dataset <path>` | 进程内 eval（可选 `--semantic-db`）。 |
 | `codalith-mcp-eval --endpoint <url> --dataset <path>` | 通过 MCP HTTP endpoint 运行 eval。 |
 
 ## 验证

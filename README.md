@@ -62,6 +62,7 @@ Common variables:
 | `CODALITH_SAMPLE_SOURCE_ROOT` | Source root for the default sample corpus. |
 | `CODALITH_SAMPLE_INDEXED_ROOT` | Indexed root used for search/index operations. |
 | `CODALITH_SAMPLE_CODERAG_STORE_DIR` | CodeRAG store path for the sample corpus. |
+| `CODALITH_SAMPLE_CARD_ROOT` | Rendered knowledge-card root for the sample corpus. |
 | `CODALITH_SAMPLE_SOURCE_PRIORS` | Optional source-prior config for deterministic source entry points. |
 | `CODALITH_SAMPLE_SEED_CARDS` | Optional seed-card config. |
 | `CODALITH_SCOPES` | Explicit scope override; empty grants base scopes plus registry access scopes. |
@@ -93,6 +94,12 @@ Run native CodeRAG acceptance against the sample dataset:
 docker compose --profile coderag run --rm coderag-acceptance
 ```
 
+Optional OpenAI-backed CodeRAG acceptance (same profile):
+
+```bash
+docker compose --profile coderag run --rm coderag-openai-acceptance
+```
+
 Run the explicit UE eval profile:
 
 ```bash
@@ -108,10 +115,12 @@ The UE profile uses `eval/configs/ue_5_7_4_registry.json`, `eval/configs/ue_sour
 | `codalith-mcp` | stdio MCP server. |
 | `codalith-mcp-http` | Streamable HTTP MCP server. |
 | `codalith-index-corpus --corpus <id>` | Index any configured corpus. |
-| `codalith-extract-semantic --corpus <id>` | Record corpus metadata and report semantic store status; the core ships no domain extractors. |
+| `codalith-semantic-status --corpus <id>` | Record corpus metadata and report semantic store status; the core ships no domain extractors. |
 | `codalith-generate-cards --corpus <id>` | Generate and verify configured seed cards. |
 | `codalith-verify-cards --corpus <id>` | Verify configured seed cards. |
-| `codalith-eval --dataset <path>` | Run in-process eval. |
+| `codalith-coderag-acceptance` | Native CodeRAG acceptance against a configured corpus. |
+| `codalith-backup-coderag-store` | Backup a CodeRAG store directory. |
+| `codalith-eval --dataset <path>` | Run in-process eval (optional `--semantic-db`). |
 | `codalith-mcp-eval --endpoint <url> --dataset <path>` | Run eval through an MCP HTTP endpoint. |
 
 ## Validation
