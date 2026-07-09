@@ -481,7 +481,7 @@ def test_mcp_resource_templates_resolve_module_symbol_source_and_card(tools):
     assert source["content"]
 
     card_root = tools.runtime.registry.corpora["sample-codebase"].card_root
-    card_file = card_root / "KNOWLEDGE" / "Module" / "module-core-cache.md"
+    card_file = card_root / "cards" / "Module" / "module-core-cache.md"
     card_file.parent.mkdir(parents=True, exist_ok=True)
     card_file.write_text("# Core Cache API\n", encoding="utf-8")
     card = _read_resource_via_rpc(tools, "codalith://sample-codebase/card/module/module-core-cache")

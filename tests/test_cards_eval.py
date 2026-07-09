@@ -48,7 +48,7 @@ def test_written_cards_are_searchable_from_indexed_root(registry, adapter, sampl
     write_cards(cards, sample_corpus_root)
     adapter.reindex(corpus.corpus_id)
     hits = adapter.search_code(corpus.corpus_id, "Core Cache API seed knowledge card", top_k=5)
-    assert any("KNOWLEDGE" in hit.path for hit in hits)
+    assert any("cards" in hit.path for hit in hits)
 
 
 def test_context_pack_reads_card_verification_status_from_front_matter(

@@ -345,7 +345,7 @@ class SemanticWriters(SemanticQueries):
     def upsert_knowledge_card(self, card: KnowledgeCard) -> None:
         if self.dialect == "postgresql":
             sql = """
-                INSERT INTO knowledge_cards
+                INSERT INTO codalith_knowledge_cards
                   (corpus_id, card_id, card_type, title, version,
                    verification_status, related_nodes, source_hashes, metadata)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -360,7 +360,7 @@ class SemanticWriters(SemanticQueries):
                 """
         else:
             sql = """
-                INSERT OR REPLACE INTO knowledge_cards
+                INSERT OR REPLACE INTO codalith_knowledge_cards
                   (corpus_id, card_id, card_type, title, version,
                    verification_status, related_nodes, source_hashes, metadata)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)

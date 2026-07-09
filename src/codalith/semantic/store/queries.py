@@ -105,18 +105,6 @@ class SemanticQueries(ConnectionBase):
         ).fetchall()
         return [_row(row) for row in rows]
 
-    def list_source_files(self, corpus_id: str, *, limit: int = 200) -> list[dict[str, Any]]:
-        rows = self._execute(
-            """
-            SELECT * FROM codalith_source_files
-            WHERE corpus_id = ?
-            ORDER BY path
-            LIMIT ?
-            """,
-            (corpus_id, limit),
-        ).fetchall()
-        return [_row(row) for row in rows]
-
     def source_file_exists(self, corpus_id: str, path: str) -> bool:
         row = self._execute(
             """
@@ -151,7 +139,7 @@ class SemanticQueries(ConnectionBase):
                 ("module_dependencies", "codalith_module_deps"),
                 ("symbols", "codalith_symbols"),
                 ("compile_guards", "codalith_compile_guards"),
-                ("cards", "knowledge_cards"),
+                ("cards", "codalith_knowledge_cards"),
             )
         }
         return {

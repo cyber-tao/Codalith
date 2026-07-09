@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS codalith_compile_guards (
   metadata JSONB DEFAULT '{}'::jsonb
 );
 
-CREATE TABLE IF NOT EXISTS knowledge_cards (
+CREATE TABLE IF NOT EXISTS codalith_knowledge_cards (
   corpus_id TEXT NOT NULL,
   card_id TEXT NOT NULL,
   card_type TEXT NOT NULL,
