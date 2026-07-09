@@ -484,6 +484,10 @@ def test_mcp_resource_templates_resolve_module_symbol_source_and_card(tools):
     card_file = card_root / "cards" / "Module" / "module-core-cache.md"
     card_file.parent.mkdir(parents=True, exist_ok=True)
     card_file.write_text("# Core Cache API\n", encoding="utf-8")
+    cards = _read_resource_via_rpc(tools, "codalith://sample-codebase/cards")
+    assert cards["kind"] == "cards"
+    assert cards["count"] == 1
+    assert cards["cards"][0]["uri"] == "codalith://sample-codebase/card/module/module-core-cache"
     card = _read_resource_via_rpc(tools, "codalith://sample-codebase/card/module/module-core-cache")
     assert card["kind"] == "card"
     assert card["markdown"].startswith("# Core Cache API")

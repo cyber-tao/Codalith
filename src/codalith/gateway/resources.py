@@ -100,17 +100,19 @@ def read_resource(uri: str, tools: CodalithTools) -> dict[str, Any]:
                 "source_commit": corpus.source_commit,
                 "semantic": _semantic_status(tools, corpus.corpus_id),
             }
-        if uri in {f"{base}/modules", f"{base}/cards"}:
+        if uri == f"{base}/modules":
             return {
                 "uri": uri,
                 "corpus_id": corpus.corpus_id,
-                "kind": uri.rsplit("/", 1)[-1],
+                "kind": "modules",
                 "semantic": _semantic_status(tools, corpus.corpus_id),
                 "caveat": (
                     "Use codalith_context, codalith_graph, codalith_examples, "
                     "or codalith_read_source for bounded evidence retrieval."
                 ),
             }
+        if uri == f"{base}/cards":
+            return _cards_collection_resource(tools, corpus, uri)
         if uri.startswith(f"{base}/module/"):
             return _module_resource(tools, corpus, uri, uri.removeprefix(f"{base}/module/"))
         if uri.startswith(f"{base}/symbol/"):
@@ -137,6 +139,46 @@ def read_resource(uri: str, tools: CodalithTools) -> dict[str, Any]:
 def _semantic_status(tools: CodalithTools, corpus_id: str) -> dict[str, Any] | None:
     store = tools.runtime.semantic_store
     return store.semantic_status(corpus_id) if store is not None else None
+
+
+def _cards_collection_resource(
+    tools: CodalithTools,
+    corpus: Corpus,
+    uri: str,
+) -> dict[str, Any]:
+    if "cards:read" not in tools.scopes():
+        raise AuthError("Missing required scope: cards:read")
+    cards_root = corpus.card_root / CARDS_DIR
+    cards: list[dict[str, str]] = []
+    if cards_root.is_dir():
+        for path in sorted(cards_root.glob("*/*.md")):
+            card_type = path.parent.name.lower()
+            card_id = path.stem
+            if not (
+                _SAFE_SEGMENT_RE.fullmatch(card_type) and _SAFE_SEGMENT_RE.fullmatch(card_id)
+            ):
+                continue
+            cards.append(
+                {
+                    "uri": card_uri(corpus.corpus_id, card_type, card_id),
+                    "card_type": card_type,
+                    "card_id": card_id,
+                    "title": path.stem.replace("-", " "),
+                    "path": str(path.relative_to(corpus.card_root)).replace("\\", "/"),
+                }
+            )
+    return {
+        "uri": uri,
+        "corpus_id": corpus.corpus_id,
+        "kind": "cards",
+        "count": len(cards),
+        "cards": cards,
+        "semantic": _semantic_status(tools, corpus.corpus_id),
+        "caveat": (
+            "Read individual cards via codalith://{corpus}/card/{card_type}/{card_id}, "
+            "or use codalith_context for bounded evidence retrieval."
+        ),
+    }
 
 
 def _module_resource(
