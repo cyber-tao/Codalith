@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+import logging
 import re
-from typing import Any
 
 from codalith.cards import is_card_path
 from codalith.cards.hashing import source_sha256
 from codalith.coderag import CodeRAGAdapter, RetrievalHit, language_for_path
-from codalith.compiler.context_pack import ContextPack, ContextSummary
+from codalith.compiler.context_pack import (
+    CardEntry,
+    ContextPack,
+    ContextSummary,
+    ModuleEntry,
+    RecommendedCall,
+    SourceSpanEntry,
+    SymbolEntry,
+)
 from codalith.compiler.entity_detector import detect_identifiers, detect_modules
 from codalith.compiler.intent_detector import detect_intent
 from codalith.compiler.reranker import rerank
@@ -16,9 +24,12 @@ from codalith.compiler.source_locator import load_source_domain_config, locate_s
 from codalith.corpus.registry import CorpusRegistry
 from codalith.corpus.source_reader import SourceReader
 from codalith.corpus.uris import SCHEME, module_uri, parse_source_uri, symbol_uri
-from codalith.semantic.graph import query_graph
+from codalith.errors import CorpusNotFoundError, SourceReadError
+from codalith.semantic.graph import aggregate_graph_neighborhood
+from codalith.semantic.store import SemanticStore
 
 _FRONT_MATTER_STATUS_RE = re.compile(r"^verification_status:\s*(?P<status>\S+)\s*$", re.MULTILINE)
+_LOG = logging.getLogger(__name__)
 
 
 class ContextCompiler:
@@ -27,7 +38,7 @@ class ContextCompiler:
         registry: CorpusRegistry,
         adapter: CodeRAGAdapter,
         *,
-        semantic_store: Any | None = None,
+        semantic_store: SemanticStore | None = None,
         source_reader: SourceReader | None = None,
     ) -> None:
         self.registry = registry
@@ -110,7 +121,7 @@ class ContextCompiler:
             [corpus.corpus_id for corpus in resolution.ordered],
             [*identifiers, *(module["name"] for module in inferred_modules)],
         )
-        cards = [
+        cards: list[CardEntry] = [
             {
                 "uri": hit.uri,
                 "title": hit.title,
@@ -141,45 +152,35 @@ class ContextCompiler:
                 "Exact behavior can depend on compile guards, platform conditionals, and project overlays.",
             ],
             recommended_next_calls=[
-                {
-                    "tool": "codalith_read_source",
-                    "args": {"uri": span["uri"]},
-                }
+                RecommendedCall(tool="codalith_read_source", args={"uri": span["uri"]})
                 for span in source_spans[:3]
             ],
         )
 
-    def _graph_edges(self, corpus_ids: list[str], nodes: list[str], max_edges: int = 24) -> list[dict[str, object]]:
+    def _graph_edges(
+        self, corpus_ids: list[str], nodes: list[str], max_edges: int = 24
+    ) -> list[dict[str, object]]:
         if self.semantic_store is None:
             return []
-        edges: dict[tuple[object, object, object], dict[str, object]] = {}
-        for corpus_id in corpus_ids:
-            for node in nodes:
-                result = query_graph(
-                    self.semantic_store,
-                    corpus_id=corpus_id,
-                    node=node,
-                    depth=1,
-                    max_nodes=24,
-                )
-                for edge in result["edges"]:
-                    if not isinstance(edge, dict):
-                        continue
-                    key = (edge.get("from"), edge.get("edge_type"), edge.get("to"))
-                    edge = {**edge, "corpus_id": corpus_id}
-                    edges[key] = edge
-                    if len(edges) >= max_edges:
-                        return list(edges.values())
-        return list(edges.values())
+        result = aggregate_graph_neighborhood(
+            self.semantic_store,
+            corpus_ids=corpus_ids,
+            seed_nodes=nodes,
+            depth=1,
+            max_nodes=24,
+            max_edges=max_edges,
+            include_corpus_id=True,
+        )
+        return list(result["edges"])
 
     def _enriched_source_spans(
         self,
         hits: list[RetrievalHit],
         corpus_kinds: dict[str, str],
-    ) -> list[dict[str, object]]:
+    ) -> list[SourceSpanEntry]:
         spans = _hits_to_source_spans(hits)
         for span in spans:
-            corpus_id = str(span.get("corpus_id", ""))
+            corpus_id = str(span.get("corpus_id") or "")
             span["corpus_kind"] = corpus_kinds.get(corpus_id)
             path = str(span.get("path", ""))
             raw_start = span.get("start_line", 0)
@@ -225,13 +226,21 @@ class ContextCompiler:
         """
         try:
             head = self.source_reader.read_source(hit.corpus_id, hit.path, 1, 10)
+        except (CorpusNotFoundError, SourceReadError):
+            return "unknown"
         except Exception:
+            _LOG.warning(
+                "Unexpected failure reading card head for %s:%s",
+                hit.corpus_id,
+                hit.path,
+                exc_info=True,
+            )
             return "unknown"
         match = _FRONT_MATTER_STATUS_RE.search(head)
         return match.group("status") if match else "unknown"
 
-    def _card_evidence_spans(self, hits: list[RetrievalHit]) -> list[dict[str, object]]:
-        spans: list[dict[str, object]] = []
+    def _card_evidence_spans(self, hits: list[RetrievalHit]) -> list[SourceSpanEntry]:
+        spans: list[SourceSpanEntry] = []
         for hit in hits:
             if not is_card_path(hit.path):
                 continue
@@ -240,7 +249,7 @@ class ContextCompiler:
                 if parsed is None:
                     continue
                 corpus_id, path, start, end = parsed
-                span: dict[str, object] = {
+                span: SourceSpanEntry = {
                     "uri": uri,
                     "path": path,
                     "start_line": start,
@@ -260,12 +269,22 @@ class ContextCompiler:
         path: str,
         start: int,
         end: int,
-    ) -> dict[str, object]:
+    ) -> SourceSpanEntry:
         try:
             corpus = self.registry.get_corpus(corpus_id)
             snippet = self.source_reader.read_source(corpus.corpus_id, path, start, end)
-        except Exception:
+        except (CorpusNotFoundError, SourceReadError):
             # Evidence pointing at an unavailable corpus stays cited but unhashed.
+            return {"corpus_id": None, "corpus_kind": None, "source_hash": None}
+        except Exception:
+            _LOG.warning(
+                "Unexpected failure reading card evidence %s:%s#%s-%s",
+                corpus_id,
+                path,
+                start,
+                end,
+                exc_info=True,
+            )
             return {"corpus_id": None, "corpus_kind": None, "source_hash": None}
         return {
             "corpus_id": corpus.corpus_id,
@@ -278,8 +297,8 @@ class ContextCompiler:
         corpus_ids: list[str],
         identifiers: list[str],
         base_corpus_id: str,
-    ) -> list[dict[str, object]]:
-        entries: list[dict[str, object]] = []
+    ) -> list[SymbolEntry]:
+        entries: list[SymbolEntry] = []
         seen: set[tuple[str, str, str | None]] = set()
         for identifier in identifiers:
             found = False
@@ -292,9 +311,9 @@ class ContextCompiler:
                         seen.add(key)
                         entries.append(
                             {
-                                "name": row["name"],
+                                "name": str(row["name"]),
                                 "qualified_name": row.get("qualified_name"),
-                                "kind": row["kind"],
+                                "kind": str(row["kind"]),
                                 "module": row.get("module_name"),
                                 "uri": row.get("declaration_uri")
                                 or symbol_uri(base_corpus_id, identifier),
@@ -322,7 +341,7 @@ def _build_queries(query: str, identifiers: list[str] | None = None) -> list[str
     return list(dict.fromkeys(item for item in queries if item.strip()))
 
 
-def _hits_to_source_spans(hits: list[RetrievalHit]) -> list[dict[str, object]]:
+def _hits_to_source_spans(hits: list[RetrievalHit]) -> list[SourceSpanEntry]:
     return [
         {
             "uri": hit.uri,
@@ -355,7 +374,7 @@ def _module_entries(
     base_corpus_id: str,
     detected_modules: list[str],
     hits: list[RetrievalHit],
-) -> list[dict[str, str]]:
+) -> list[ModuleEntry]:
     names = list(dict.fromkeys(detected_modules + [hit.module for hit in hits if hit.module]))
     return [
         {

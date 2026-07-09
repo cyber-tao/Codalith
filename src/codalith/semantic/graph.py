@@ -97,6 +97,55 @@ def query_graph(
     }
 
 
+def aggregate_graph_neighborhood(
+    store: GraphStore,
+    *,
+    corpus_ids: Iterable[str],
+    seed_nodes: Iterable[str],
+    edge_types: Iterable[str] | None = None,
+    depth: int = 1,
+    max_nodes: int = 80,
+    max_edges: int | None = None,
+    include_corpus_id: bool = False,
+) -> GraphQueryResult:
+    """Merge neighborhoods for multiple seed nodes across corpora.
+
+    Edges are deduplicated by ``(from, edge_type, to)``. When
+    ``include_corpus_id`` is true, each edge dict gains a ``corpus_id`` field
+    (last corpus wins on collision).
+    """
+    nodes: dict[str, GraphNodeDict] = {}
+    edges: dict[tuple[object, object, object], dict[str, object]] = {}
+    seeds = [node for node in seed_nodes if node]
+    for corpus_id in corpus_ids:
+        for node in seeds:
+            result = query_graph(
+                store,
+                corpus_id=corpus_id,
+                node=node,
+                edge_types=edge_types,
+                depth=depth,
+                max_nodes=max_nodes,
+            )
+            for result_node in result["nodes"]:
+                nodes[str(result_node["id"])] = result_node
+            for edge in result["edges"]:
+                key = (edge.get("from"), edge.get("edge_type"), edge.get("to"))
+                payload = dict(edge)
+                if include_corpus_id:
+                    payload["corpus_id"] = corpus_id
+                edges[key] = payload
+                if max_edges is not None and len(edges) >= max_edges:
+                    return {
+                        "nodes": list(nodes.values())[:max_nodes],
+                        "edges": list(edges.values()),
+                    }
+    return {
+        "nodes": list(nodes.values())[:max_nodes],
+        "edges": list(edges.values()),
+    }
+
+
 def node_candidates(node: str) -> list[str]:
     """Expand a bare name into namespaced candidate node ids."""
     normalized = node.strip()

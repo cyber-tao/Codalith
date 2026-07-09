@@ -18,7 +18,7 @@ from codalith.corpus.uri_resolver import ResolvedURI, URIResolver
 from codalith.errors import CorpusNotFoundError, SourcePolicyError
 from codalith.gateway.audit import AuditLogger, AuditRecord
 from codalith.gateway.auth import AuthContext, AuthError, current_auth_context, default_scopes
-from codalith.semantic.graph import query_graph
+from codalith.semantic.graph import aggregate_graph_neighborhood
 from codalith.semantic.store import SemanticStore
 
 
@@ -321,24 +321,15 @@ class CodalithTools:
                 "edges": [],
                 "caveat": "Semantic graph store is not configured.",
             }
-        nodes: dict[str, dict[str, Any]] = {}
-        edges: dict[tuple[object, object, object], dict[str, Any]] = {}
-        for corpus in resolution.ordered:
-            result = query_graph(
-                self.runtime.semantic_store,
-                corpus_id=corpus.corpus_id,
-                node=node,
-                edge_types=edge_types,
-                depth=depth,
-                max_nodes=max_nodes,
-            )
-            for result_node in result["nodes"]:
-                if isinstance(result_node, dict):
-                    nodes[str(result_node["id"])] = dict(result_node)
-            for edge in result["edges"]:
-                if isinstance(edge, dict):
-                    key = (edge.get("from"), edge.get("edge_type"), edge.get("to"))
-                    edges[key] = edge
+        result = aggregate_graph_neighborhood(
+            self.runtime.semantic_store,
+            corpus_ids=[corpus.corpus_id for corpus in resolution.ordered],
+            seed_nodes=[node],
+            edge_types=edge_types,
+            depth=depth,
+            max_nodes=max_nodes,
+        )
+        edges = result["edges"]
         return {
             "node": node,
             "version": resolved_version,
@@ -346,8 +337,8 @@ class CodalithTools:
             "edge_types": edge_types or [],
             "depth": depth,
             "max_nodes": max_nodes,
-            "nodes": list(nodes.values())[:max_nodes],
-            "edges": list(edges.values()),
+            "nodes": result["nodes"],
+            "edges": edges,
             "caveat": None
             if edges
             else "No semantic graph edges matched this node. Run codalith-semantic-status with --semantic-db for this corpus.",
@@ -377,12 +368,31 @@ class CodalithTools:
         self._require_resolution_access(resolution)
         hits: list[RetrievalHit] = []
         for corpus in resolution.ordered:
-            corpus_hits = self.runtime.adapter.search_code(corpus.corpus_id, symbol_or_api, top_k=max_examples * 2)
-            hits.extend(
-                hit
-                for hit in corpus_hits
-                if _scope_matches(scope, hit.path, corpus, allowed_scopes=allowed_scopes)
-            )
+            prefixes = _search_path_prefixes(scope, corpus)
+            if prefixes is None:
+                continue
+            if not prefixes:
+                corpus_hits = self.runtime.adapter.search_code(
+                    corpus.corpus_id, symbol_or_api, top_k=max_examples * 2
+                )
+                hits.extend(
+                    hit
+                    for hit in corpus_hits
+                    if _scope_matches(scope, hit.path, corpus, allowed_scopes=allowed_scopes)
+                )
+                continue
+            for prefix in prefixes:
+                corpus_hits = self.runtime.adapter.search_code(
+                    corpus.corpus_id,
+                    symbol_or_api,
+                    top_k=max_examples * 2,
+                    filters={"path_prefix": prefix},
+                )
+                hits.extend(
+                    hit
+                    for hit in corpus_hits
+                    if _scope_matches(scope, hit.path, corpus, allowed_scopes=allowed_scopes)
+                )
         return {"symbol_or_api": symbol_or_api, "examples": [hit.as_dict() for hit in hits[:max_examples]]}
 
     def codalith_compare_versions(
@@ -517,6 +527,28 @@ def example_scopes(registry: CorpusRegistry) -> list[str]:
         if fixed not in configured:
             ordered.append(fixed)
     return ordered
+
+
+def _search_path_prefixes(scope: str, corpus: Corpus) -> list[str] | None:
+    """Return path prefixes to push into retrieval, or None to skip the corpus.
+
+    An empty list means search the whole corpus (still post-filtered by
+    ``_scope_matches``). Overlay scopes only search matching corpus kinds.
+    """
+    if scope == "all":
+        return []
+    if scope == "project":
+        return [] if corpus.kind == "project" else None
+    if scope == "generated":
+        return [] if corpus.kind == "generated" else None
+    if corpus.kind in {"project", "generated"}:
+        return None
+    if scope == "tests":
+        return []
+    prefixes = corpus.scope_prefixes.get(scope)
+    if not prefixes:
+        raise ValueError(f"Unknown examples scope: {scope!r}")
+    return list(prefixes)
 
 
 def _scope_matches(

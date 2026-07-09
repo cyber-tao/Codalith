@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, NotRequired, TypedDict
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,6 +19,51 @@ class ContextSummary:
     generated_by: str = "codalith"
 
 
+class ModuleEntry(TypedDict):
+    name: str
+    uri: str
+    reason: str
+
+
+class SymbolEntry(TypedDict, total=False):
+    name: str
+    uri: str
+    kind: str
+    reason: str
+    qualified_name: NotRequired[str | None]
+    module: NotRequired[str | None]
+
+
+class CardEntry(TypedDict):
+    uri: str
+    title: str
+    verification_status: str
+
+
+class SourceSpanEntry(TypedDict, total=False):
+    uri: str
+    path: str
+    start_line: int
+    end_line: int
+    reason: str
+    source: str
+    corpus_id: NotRequired[str | None]
+    corpus_kind: NotRequired[str | None]
+    source_hash: NotRequired[str | None]
+    language: NotRequired[str | None]
+    kind: NotRequired[str | None]
+    extractor: NotRequired[object]
+    confidence: NotRequired[float]
+    module: NotRequired[str | None]
+    score: NotRequired[float]
+    guard: NotRequired[object]
+
+
+class RecommendedCall(TypedDict):
+    tool: str
+    args: dict[str, Any]
+
+
 @dataclass(frozen=True, slots=True)
 class ContextPack:
     query: str
@@ -28,13 +73,13 @@ class ContextPack:
     project: str | None
     intent: str
     confidence: str
-    modules: list[dict[str, Any]]
-    symbols: list[dict[str, Any]]
-    cards: list[dict[str, Any]]
-    source_spans: list[dict[str, Any]]
+    modules: list[ModuleEntry]
+    symbols: list[SymbolEntry]
+    cards: list[CardEntry]
+    source_spans: list[SourceSpanEntry]
     graph_edges: list[dict[str, Any]]
     caveats: list[str]
-    recommended_next_calls: list[dict[str, Any]]
+    recommended_next_calls: list[RecommendedCall]
     schema_version: str = "0.2"
     answer_policy: AnswerPolicy = field(default_factory=AnswerPolicy)
     summary: ContextSummary | None = None

@@ -17,6 +17,7 @@ from codalith.eval.common import (
     evaluate_dataset,
     write_report_files,
 )
+from codalith.semantic.store import SemanticStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,18 +105,28 @@ def main(argv: list[str] | None = None) -> int:
         help="Source span budget per pack (matches the MCP tool default)",
     )
     parser.add_argument("--metric-k", type=int, default=DEFAULT_METRIC_K)
+    parser.add_argument(
+        "--semantic-db",
+        default=None,
+        help="Optional semantic store path/DSN so eval packs include symbols/graph/guards",
+    )
     args = parser.parse_args(argv)
     registry = CorpusRegistry.from_file(args.registry)
     adapter = CodeRAGAdapter(registry)
-    compiler = ContextCompiler(registry, adapter)
-    report = EvalRunner(compiler).run(
-        args.dataset,
-        version=args.version,
-        max_source_spans=args.max_source_spans,
-        metric_k=args.metric_k,
-    )
-    write_reports(report, args.output_dir)
-    print(json.dumps(report.as_dict(), indent=2, sort_keys=True))
+    semantic_store = SemanticStore(args.semantic_db) if args.semantic_db else None
+    try:
+        compiler = ContextCompiler(registry, adapter, semantic_store=semantic_store)
+        report = EvalRunner(compiler).run(
+            args.dataset,
+            version=args.version,
+            max_source_spans=args.max_source_spans,
+            metric_k=args.metric_k,
+        )
+        write_reports(report, args.output_dir)
+        print(json.dumps(report.as_dict(), indent=2, sort_keys=True))
+    finally:
+        if semantic_store is not None:
+            semantic_store.close()
     return 0
 
 
