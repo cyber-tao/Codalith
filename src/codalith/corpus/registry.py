@@ -28,7 +28,7 @@ class Corpus:
     description: str | None = None
     keywords: tuple[str, ...] = ()
     # Maps a search scope name (e.g. "source", "docs") to the path prefixes
-    # that belong to it; scopes without prefixes do not filter by path.
+    # that belong to it under this corpus.
     scope_prefixes: dict[str, tuple[str, ...]] = field(default_factory=dict)
     # Name of the domain extractor profile used to build the semantic graph.
     semantic_profile: str | None = None
@@ -181,11 +181,15 @@ class CorpusRegistry:
         include_project_overlay: bool = True,
         include_generated_overlay: bool = False,
     ) -> CorpusResolution:
-        if project and include_project_overlay:
+        project_corpus: Corpus | None = None
+        if project:
             project_corpus = self.get_project(project)
             base = self.get_base(project_corpus.base_corpus or version)
-            overlays = tuple(self.get_generated_for_base(base)) if include_generated_overlay else ()
-            return CorpusResolution(base=base, project=project_corpus, overlays=overlays)
-        base = self.get_base(version)
+        else:
+            base = self.get_base(version)
         overlays = tuple(self.get_generated_for_base(base)) if include_generated_overlay else ()
-        return CorpusResolution(base=base, overlays=overlays)
+        return CorpusResolution(
+            base=base,
+            project=project_corpus if project and include_project_overlay else None,
+            overlays=overlays,
+        )

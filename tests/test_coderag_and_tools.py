@@ -418,7 +418,7 @@ def test_codalith_examples_rejects_unknown_scope(tools):
         tools.codalith_examples(symbol_or_api="CachedValue", scope="engine")
 
 
-def test_codalith_context_defaults_to_registry_default_engine(tools):
+def test_codalith_context_defaults_to_registry_default_corpus(tools):
     pack = tools.codalith_context(query="EventBus dispatch")
     assert pack["version"] == "sample"
     assert pack["source_spans"]

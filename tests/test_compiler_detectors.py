@@ -116,5 +116,13 @@ def test_corpus_uris_are_scheme_uniform_across_corpus_kinds():
 def test_parse_source_uri_round_trips_and_rejects_other_facets():
     uri = source_uri("sample-codebase", "src/core/cache.py", 2, 9)
     assert parse_source_uri(uri) == ("sample-codebase", "src/core/cache.py", 2, 9)
+    assert parse_source_uri("codalith://sample-codebase/source/src/core/cache.py#L2") == (
+        "sample-codebase",
+        "src/core/cache.py",
+        2,
+        2,
+    )
     assert parse_source_uri(module_uri("sample-codebase", "core")) is None
     assert parse_source_uri("https://example.com/source/A.py#L1-L2") is None
+    assert parse_source_uri("codalith://sample-codebase/source/src/core/cache.py#Lx") is None
+    assert parse_source_uri("codalith://sample-codebase/source/src/core/cache.py") is None

@@ -326,7 +326,7 @@ def tools(
 
 
 @pytest.fixture()
-def fake_engine_root(tmp_path: Path) -> Path:
+def fake_corpus_root(tmp_path: Path) -> Path:
     root = tmp_path / "ue"
     files = {
         "Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h": "AActor UPROPERTY ReplicatedUsing OnRep BeginPlay\n",
@@ -343,7 +343,7 @@ def fake_engine_root(tmp_path: Path) -> Path:
 
 
 @pytest.fixture()
-def seeded_eval_sources(fake_engine_root: Path, eval_suite_rows: list[dict[str, Any]]) -> Path:
+def seeded_eval_sources(fake_corpus_root: Path, eval_suite_rows: list[dict[str, Any]]) -> Path:
     file_paths: dict[str, str] = {}
     file_texts: dict[str, list[str]] = {}
     for row in eval_suite_rows:
@@ -365,11 +365,11 @@ def seeded_eval_sources(fake_engine_root: Path, eval_suite_rows: list[dict[str, 
             file_texts.setdefault(name, []).append(str(row.get("query", "")))
 
     for name, relative in file_paths.items():
-        path = fake_engine_root / relative
+        path = fake_corpus_root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         body = "\n".join(file_texts.get(name, []))
         path.write_text(f"{name}\n{body}\n", encoding="utf-8")
-    return fake_engine_root
+    return fake_corpus_root
 
 
 @pytest.fixture()

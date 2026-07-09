@@ -138,7 +138,7 @@ class ContextCompiler:
             graph_edges=graph_edges,
             caveats=[
                 _graph_caveat(graph_edges, self.semantic_store is not None),
-                "Exact behavior can depend on build target, platform guards, and project overrides.",
+                "Exact behavior can depend on compile guards, platform conditionals, and project overlays.",
             ],
             recommended_next_calls=[
                 {

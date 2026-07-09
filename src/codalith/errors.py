@@ -10,7 +10,7 @@ class ConfigurationError(CodalithError):
 
 
 class CorpusNotFoundError(CodalithError):
-    """Raised when a requested engine or project corpus is unknown."""
+    """Raised when a requested base, project, or generated corpus is unknown."""
 
 
 class URIResolutionError(CodalithError):

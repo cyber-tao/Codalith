@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from urllib.parse import unquote, urlparse
 
 from codalith.corpus.registry import CorpusRegistry
-from codalith.corpus.uris import SCHEME
+from codalith.corpus.uris import SCHEME, parse_line_fragment
 from codalith.errors import CorpusNotFoundError, URIResolutionError
-
-_LINE_RE = re.compile(r"^L(?P<start>[1-9]\d*)(?:-L?(?P<end>[1-9]\d*))?$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,13 +63,7 @@ class URIResolver:
 
     @staticmethod
     def _line_fragment(fragment: str) -> tuple[int | None, int | None]:
-        if not fragment:
-            return None, None
-        match = _LINE_RE.match(fragment)
-        if not match:
-            raise URIResolutionError(f"Invalid line fragment: #{fragment}")
-        start = int(match.group("start"))
-        end = int(match.group("end") or start)
-        if end < start:
-            raise URIResolutionError(f"Invalid descending line range: #{fragment}")
-        return start, end
+        try:
+            return parse_line_fragment(fragment)
+        except ValueError as exc:
+            raise URIResolutionError(str(exc)) from exc

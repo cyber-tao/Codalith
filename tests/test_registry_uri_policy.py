@@ -4,6 +4,7 @@ import pytest
 
 from codalith.corpus.source_policy import SourcePolicy, SourceReadRateLimiter
 from codalith.corpus.uri_resolver import URIResolver
+from codalith.corpus.uris import parse_source_uri
 from codalith.errors import SourcePolicyError, URIResolutionError
 
 
@@ -14,6 +15,24 @@ def test_registry_resolves_base_and_project(registry):
     assert resolution.project is not None
     assert resolution.project.corpus_id == "SampleProject"
     assert not resolution.overlays
+
+
+def test_registry_resolve_uses_project_base_even_without_overlay(registry):
+    resolution = registry.resolve(
+        "sample",
+        "SampleProject",
+        include_project_overlay=False,
+    )
+    assert resolution.base.corpus_id == "sample-codebase"
+    assert resolution.project is None
+
+
+def test_uri_resolver_and_parse_source_uri_accept_single_line_fragment(registry):
+    uri = "codalith://sample-codebase/source/src/core/cache.py#L7"
+    assert parse_source_uri(uri) == ("sample-codebase", "src/core/cache.py", 7, 7)
+    resolved = URIResolver(registry).resolve_source(uri)
+    assert resolved.start_line == 7
+    assert resolved.end_line == 7
 
 
 def test_registry_resolves_generated_overlay_only_when_requested(registry):

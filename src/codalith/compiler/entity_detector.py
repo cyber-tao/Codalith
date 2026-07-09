@@ -89,7 +89,7 @@ def detect_modules(query: str, *, module_hints: frozenset[str] = frozenset()) ->
 
 
 def _module_variants(module: str) -> set[str]:
-    # "EnhancedInput" should match both "enhancedinput" and "enhanced input".
+    # "EventBus" should match both "eventbus" and "event bus".
     variants = {module.lower()}
     words = camel_words(module)
     if len(words) > 1 and "".join(words) == module:
