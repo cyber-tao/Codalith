@@ -4,7 +4,40 @@ import http.client
 import json
 import threading
 
-from codalith.gateway.http_server import StreamableHTTPConfig, create_http_server
+from codalith.gateway.http_server import (
+    StreamableHTTPConfig,
+    create_http_server,
+    format_rpc_log,
+    http_log_enabled,
+    should_log_access,
+)
+
+
+def test_http_log_enabled_truthy_values(monkeypatch):
+    for value in ("1", "true", "TRUE", "yes", "on", "verbose"):
+        monkeypatch.setenv("CODALITH_HTTP_LOG", value)
+        assert http_log_enabled() is True
+    for value in ("", "0", "false", "no", "off"):
+        monkeypatch.setenv("CODALITH_HTTP_LOG", value)
+        assert http_log_enabled() is False
+    monkeypatch.delenv("CODALITH_HTTP_LOG", raising=False)
+    assert http_log_enabled() is False
+
+
+def test_should_log_access_skips_get_polls():
+    assert should_log_access("GET") is False
+    assert should_log_access("get") is False
+    assert should_log_access("POST") is True
+    assert should_log_access("DELETE") is True
+    assert should_log_access(None) is True
+
+
+def test_format_rpc_log_truncates_large_payloads(monkeypatch):
+    monkeypatch.setenv("CODALITH_HTTP_LOG_MAX_CHARS", "40")
+    text = format_rpc_log({"query": "x" * 100})
+    assert text.endswith("chars>")
+    assert "truncated" in text
+    assert len(text) < 120
 
 
 def test_streamable_http_post_get_session_and_origin(tools):

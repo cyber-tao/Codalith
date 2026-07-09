@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 import uuid
 from dataclasses import dataclass
 from http import HTTPStatus
@@ -28,6 +29,8 @@ SUPPORTED_PROTOCOL_VERSIONS = {PROTOCOL_VERSION, "2025-06-18", "2025-03-26"}
 # 2025-03-26, as required by the Streamable HTTP backwards-compatibility rules.
 DEFAULT_PROTOCOL_VERSION = "2025-03-26"
 MAX_SESSIONS = 1024
+# Default truncate point for verbose JSON-RPC body dumps (Context Packs can be large).
+DEFAULT_HTTP_LOG_MAX_CHARS = 16_384
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +90,7 @@ class StreamableHTTPHandler(BaseHTTPRequestHandler):
         if not isinstance(request, dict):
             self._write_json_error(HTTPStatus.BAD_REQUEST, "Body must be a single JSON-RPC message")
             return
+        self._log_rpc("request", request)
         if not self._session_is_valid(request):
             return
         token = set_current_auth_context(auth)
@@ -95,6 +99,7 @@ class StreamableHTTPHandler(BaseHTTPRequestHandler):
         finally:
             reset_current_auth_context(token)
         if response is None:
+            self._log_rpc("response", {"status": "accepted", "id": request.get("id")})
             self.send_response(HTTPStatus.ACCEPTED)
             self.send_header("Content-Length", "0")
             self.end_headers()
@@ -104,6 +109,7 @@ class StreamableHTTPHandler(BaseHTTPRequestHandler):
             session_id = uuid.uuid4().hex
             self.server.register_session(session_id)
             headers["MCP-Session-Id"] = session_id
+        self._log_rpc("response", response)
         self._write_json(HTTPStatus.OK, response, headers=headers)
 
     def do_GET(self) -> None:
@@ -144,8 +150,19 @@ class StreamableHTTPHandler(BaseHTTPRequestHandler):
         self._write_json_error(HTTPStatus.NOT_FOUND, "Unknown MCP session")
 
     def log_message(self, format: str, *args: object) -> None:
-        if os.getenv("CODALITH_HTTP_LOG"):
+        # SSE/poll clients hit GET /mcp continuously; skip those access lines.
+        # JSON-RPC request/response bodies are still logged via _log_rpc on POST.
+        if http_log_enabled() and should_log_access(self.command):
             super().log_message(format, *args)
+
+    def _log_rpc(self, direction: str, payload: dict[str, Any]) -> None:
+        if not http_log_enabled():
+            return
+        print(
+            f"[codalith-http] {direction} {format_rpc_log(payload)}",
+            file=sys.stderr,
+            flush=True,
+        )
 
     def _preflight(self) -> bool:
         if urlparse(self.path).path != self.server.config.endpoint:
@@ -218,6 +235,33 @@ def origin_allowed(origin: str | None, allowed_origins: tuple[str, ...]) -> bool
         return True
     parsed = urlparse(origin)
     return parsed.scheme in {"http", "https"} and parsed.hostname in {"127.0.0.1", "localhost", "::1"}
+
+
+def http_log_enabled() -> bool:
+    """Whether access + JSON-RPC body logging is enabled via CODALITH_HTTP_LOG."""
+    value = os.getenv("CODALITH_HTTP_LOG", "").strip().lower()
+    return value not in {"", "0", "false", "no", "off"}
+
+
+def should_log_access(command: str | None) -> bool:
+    """Whether BaseHTTPRequestHandler access lines should be emitted.
+
+    GET is omitted because Streamable HTTP clients poll the MCP endpoint for
+    SSE and would flood stderr; POST/DELETE access lines remain useful.
+    """
+    return (command or "").upper() != "GET"
+
+
+def format_rpc_log(payload: dict[str, Any], *, max_chars: int | None = None) -> str:
+    """Compact single-line JSON for stderr; truncate oversized Context Pack dumps."""
+    limit = max_chars
+    if limit is None:
+        raw_limit = os.getenv("CODALITH_HTTP_LOG_MAX_CHARS", "").strip()
+        limit = int(raw_limit) if raw_limit.isdigit() else DEFAULT_HTTP_LOG_MAX_CHARS
+    text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str)
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}…<truncated {len(text) - limit} chars>"
 
 
 def create_http_server(
