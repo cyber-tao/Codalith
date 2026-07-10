@@ -7,9 +7,7 @@ import threading
 from codalith.gateway.http_server import (
     StreamableHTTPConfig,
     create_http_server,
-    format_rpc_log,
     http_log_enabled,
-    should_log_access,
 )
 
 
@@ -24,22 +22,6 @@ def test_http_log_enabled_truthy_values(monkeypatch):
     assert http_log_enabled() is False
 
 
-def test_should_log_access_skips_get_polls():
-    assert should_log_access("GET") is False
-    assert should_log_access("get") is False
-    assert should_log_access("POST") is True
-    assert should_log_access("DELETE") is True
-    assert should_log_access(None) is True
-
-
-def test_format_rpc_log_truncates_large_payloads(monkeypatch):
-    monkeypatch.setenv("CODALITH_HTTP_LOG_MAX_CHARS", "40")
-    text = format_rpc_log({"query": "x" * 100})
-    assert text.endswith("chars>")
-    assert "truncated" in text
-    assert len(text) < 120
-
-
 def test_streamable_http_post_get_session_and_origin(tools):
     server = create_http_server(tools, StreamableHTTPConfig(port=0))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -51,7 +33,11 @@ def test_streamable_http_post_get_session_and_origin(tools):
             "jsonrpc": "2.0",
             "id": 1,
             "method": "initialize",
-            "params": {"protocolVersion": "2025-11-25"},
+            "params": {
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": {"name": "pytest", "version": "1"},
+            },
         }
         response, payload = _post(host, port, initialize)
 
@@ -60,6 +46,13 @@ def test_streamable_http_post_get_session_and_origin(tools):
         assert payload["result"]["protocolVersion"] == "2025-11-25"
 
         session_id = response.getheader("MCP-Session-Id")
+        initialized_response, _ = _post(
+            host,
+            port,
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            session_id=session_id,
+        )
+        assert initialized_response.status == 202
         tools_response, tools_payload = _post(
             host,
             port,
@@ -86,7 +79,10 @@ def test_streamable_http_post_get_session_and_origin(tools):
         )
         assert status_response.status == 200
         assert "error" not in status_payload
-        assert status_payload["result"]["structuredContent"]["semantic"]["base"]["corpus_id"] == "sample-codebase"
+        assert (
+            status_payload["result"]["structuredContent"]["semantic"]["base"]["corpus_id"]
+            == "sample-codebase"
+        )
 
         graph_response, graph_payload = _post(
             host,
@@ -118,12 +114,7 @@ def test_streamable_http_post_get_session_and_origin(tools):
             {"jsonrpc": "2.0", "id": 5, "method": "tools/list"},
             session_id="not-a-registered-session",
         )
-        assert invalid_session.status == 400
-
-        get_response, get_body = _get(host, port, session_id=session_id)
-        assert get_response.status == 200
-        assert get_response.getheader("Content-Type", "").startswith("text/event-stream")
-        assert "event: ping" in get_body
+        assert invalid_session.status == 404
 
         forbidden, _ = _post(
             host,
@@ -135,8 +126,8 @@ def test_streamable_http_post_get_session_and_origin(tools):
         assert forbidden.status == 403
     finally:
         server.shutdown()
-        server.server_close()
         thread.join(timeout=5)
+        server.server_close()
 
 
 def test_streamable_http_requires_configured_bearer_token(tools, monkeypatch):
@@ -151,7 +142,11 @@ def test_streamable_http_requires_configured_bearer_token(tools, monkeypatch):
             "jsonrpc": "2.0",
             "id": 1,
             "method": "initialize",
-            "params": {"protocolVersion": "2025-11-25"},
+            "params": {
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": {"name": "pytest", "version": "1"},
+            },
         }
         anonymous, _ = _post(host, port, initialize)
         assert anonymous.status == 401
@@ -161,8 +156,36 @@ def test_streamable_http_requires_configured_bearer_token(tools, monkeypatch):
         assert payload["result"]["serverInfo"]["name"] == "codalith"
     finally:
         server.shutdown()
-        server.server_close()
         thread.join(timeout=5)
+        server.server_close()
+
+
+def test_streamable_http_rejects_oversized_requests(tools):
+    server = create_http_server(
+        tools,
+        StreamableHTTPConfig(port=0, max_request_bytes=32),
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    host, port = server.server_address
+
+    try:
+        response, payload = _post(
+            host,
+            port,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {"padding": "x" * 100},
+            },
+        )
+        assert response.status == 413
+        assert payload["error"] == "request_too_large"
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
 
 
 def _post(
@@ -189,25 +212,9 @@ def _post(
     response = connection.getresponse()
     body = response.read().decode("utf-8")
     connection.close()
-    return response, json.loads(body) if body else {}
-
-
-def _get(
-    host: str,
-    port: int,
-    *,
-    session_id: str | None = None,
-) -> tuple[http.client.HTTPResponse, str]:
-    headers = {
-        "Accept": "text/event-stream",
-        "Origin": "http://localhost",
-        "MCP-Protocol-Version": "2025-11-25",
-    }
-    if session_id:
-        headers["MCP-Session-Id"] = session_id
-    connection = http.client.HTTPConnection(host, port, timeout=5)
-    connection.request("GET", "/mcp", headers=headers)
-    response = connection.getresponse()
-    body = response.read().decode("utf-8")
-    connection.close()
-    return response, body
+    if not body:
+        return response, {}
+    try:
+        return response, json.loads(body)
+    except json.JSONDecodeError:
+        return response, {"raw": body}

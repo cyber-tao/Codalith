@@ -79,17 +79,18 @@ def authenticate_http_headers(
     headers: Mapping[str, str],
     fallback_scopes: Iterable[str] | None = None,
 ) -> AuthContext:
+    normalized_headers = {key.lower(): value for key, value in headers.items()}
     expected_token = os.getenv("CODALITH_HTTP_BEARER_TOKEN", "").strip()
     identity_header = os.getenv("CODALITH_HTTP_IDENTITY_HEADER", "").strip()
 
     if expected_token:
-        authorization = headers.get("Authorization", "")
+        authorization = normalized_headers.get("authorization", "")
         scheme, _, token = authorization.partition(" ")
         if scheme.lower() != "bearer" or not hmac.compare_digest(token, expected_token):
             raise AuthError("Missing or invalid bearer token")
 
     if identity_header:
-        user_id = headers.get(identity_header, "").strip()
+        user_id = normalized_headers.get(identity_header.lower(), "").strip()
         if not user_id:
             raise AuthError(f"Missing trusted identity header: {identity_header}")
     else:
@@ -97,7 +98,7 @@ def authenticate_http_headers(
 
     return AuthContext(
         user_id=user_id,
-        session_id=headers.get("MCP-Session-Id", "http-session"),
-        client=headers.get("User-Agent", "mcp-http"),
+        session_id=normalized_headers.get("mcp-session-id", "http-session"),
+        client=normalized_headers.get("user-agent", "mcp-http"),
         scopes=frozenset(scopes_from_env(fallback_scopes)),
     )

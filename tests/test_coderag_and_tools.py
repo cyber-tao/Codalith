@@ -10,7 +10,12 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
+import anyio
 import pytest
+from mcp import ClientSession
+from mcp.shared.exceptions import McpError
+from mcp.shared.memory import create_connected_server_and_client_session
+from pydantic import AnyUrl
 
 from codalith.cards.generator import built_in_cards, write_cards
 from codalith.cards.hashing import source_sha256
@@ -27,7 +32,8 @@ from codalith.corpus.source_policy import SourcePolicy, SourceReadRateLimiter
 from codalith.corpus.source_reader import SourceReader
 from codalith.errors import CodeRAGAdapterError, SourcePolicyError, SourceReadError
 from codalith.gateway.auth import AuthContext, AuthError
-from codalith.gateway.mcp_server import handle_request
+from codalith.gateway.mcp_server import build_instructions
+from codalith.gateway.sdk_server import create_sdk_server
 from codalith.gateway.tools import call_tool, create_runtime
 
 
@@ -44,6 +50,78 @@ class _LineChunk:
     language: str = "python"
     symbol: str | None = None
     kind: str = "window"
+
+
+async def _with_sdk_session(tools, operation):
+    server = create_sdk_server(
+        tools,
+        instructions=build_instructions(tools.runtime.registry),
+    )
+    async with create_connected_server_and_client_session(server) as session:
+        initialized = await session.initialize()
+        return await operation(session, initialized)
+
+
+def _sdk_initialize(tools):
+    async def operation(_session: ClientSession, initialized):
+        return initialized
+
+    return anyio.run(_with_sdk_session, tools, operation)
+
+
+def _sdk_list_tools(tools) -> list[dict[str, Any]]:
+    async def operation(session: ClientSession, _initialized):
+        result = await session.list_tools()
+        return [
+            tool.model_dump(by_alias=True, exclude_none=True)
+            for tool in result.tools
+        ]
+
+    return anyio.run(_with_sdk_session, tools, operation)
+
+
+def _sdk_call_tool(tools, name: str, arguments: dict[str, Any]):
+    async def operation(session: ClientSession, _initialized):
+        return await session.call_tool(name, arguments)
+
+    return anyio.run(_with_sdk_session, tools, operation)
+
+
+def _sdk_list_resources(tools) -> list[dict[str, Any]]:
+    async def operation(session: ClientSession, _initialized):
+        result = await session.list_resources()
+        return [
+            resource.model_dump(by_alias=True, exclude_none=True, mode="json")
+            for resource in result.resources
+        ]
+
+    return anyio.run(_with_sdk_session, tools, operation)
+
+
+def _sdk_list_resource_templates(tools) -> list[dict[str, Any]]:
+    async def operation(session: ClientSession, _initialized):
+        result = await session.list_resource_templates()
+        return [
+            template.model_dump(by_alias=True, exclude_none=True)
+            for template in result.resourceTemplates
+        ]
+
+    return anyio.run(_with_sdk_session, tools, operation)
+
+
+def _sdk_read_resource(tools, uri: str) -> dict[str, Any]:
+    async def operation(session: ClientSession, _initialized):
+        try:
+            result = await session.read_resource(AnyUrl(uri))
+        except McpError as exc:
+            return exc
+        content = result.contents[0]
+        return json.loads(content.text)
+
+    result = anyio.run(_with_sdk_session, tools, operation)
+    if isinstance(result, McpError):
+        raise result
+    return result
 
 
 def test_local_coderag_adapter_searches_sample_fixture(adapter):
@@ -526,9 +604,8 @@ def test_index_status_reports_semantic_store(tools):
 
 
 def test_mcp_tools_list_and_call(tools):
-    listed = handle_request({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, tools)
-    assert listed is not None
-    names = {item["name"] for item in listed["result"]["tools"]}
+    listed = _sdk_list_tools(tools)
+    names = {item["name"] for item in listed}
     assert {
         "codalith_context",
         "codalith_read_source",
@@ -538,37 +615,31 @@ def test_mcp_tools_list_and_call(tools):
         "codalith_examples",
         "codalith_compare_versions",
     } <= names
-    called = handle_request(
-        {
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "tools/call",
-            "params": {
-                "name": "codalith_context",
-                "arguments": {"query": "CachedValue ttl", "corpus": "sample"},
-            },
-        },
+    called = _sdk_call_tool(
         tools,
+        "codalith_context",
+        {"query": "CachedValue ttl", "corpus": "sample"},
     )
-    assert called is not None
-    assert called["result"]["structuredContent"]["source_spans"]
+    assert called.isError is False
+    assert called.structuredContent
+    assert called.structuredContent["source_spans"]
 
 
-def test_mcp_tools_call_rejects_null_params_as_invalid_params(tools):
-    for request in (
-        {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": None},
-        {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": None}},
-        {"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": "bogus"},
-    ):
-        response = handle_request(request, tools)
-        assert response is not None
-        assert response["error"]["code"] == -32602
+def test_mcp_sdk_reports_tool_input_validation_as_tool_error(tools):
+    response = _sdk_call_tool(
+        tools,
+        "codalith_context",
+        {"query": None},
+    )
+
+    assert response.isError is True
+    assert "Input validation error" in response.content[0].text
 
 
 def test_mcp_initialize_instructions_come_from_registry(tools):
-    initialized = handle_request({"jsonrpc": "2.0", "id": 1, "method": "initialize"}, tools)
-    assert initialized is not None
-    instructions = initialized["result"]["instructions"]
+    initialized = _sdk_initialize(tools)
+    instructions = initialized.instructions
+    assert instructions is not None
     assert "Sample Codebase sample (Neutral source corpus)" in instructions
     assert "cache" in instructions
     assert "SampleProject" in instructions
@@ -577,9 +648,7 @@ def test_mcp_initialize_instructions_come_from_registry(tools):
 
 
 def test_mcp_tool_schema_corpus_default_and_outputs_follow_registry(tools):
-    listed = handle_request({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, tools)
-    assert listed is not None
-    schemas = {item["name"]: item for item in listed["result"]["tools"]}
+    schemas = {item["name"]: item for item in _sdk_list_tools(tools)}
     for name in ("codalith_context", "codalith_lookup_symbol", "codalith_graph", "codalith_examples"):
         corpus_property = schemas[name]["inputSchema"]["properties"]["corpus"]
         assert corpus_property["default"] == "sample-codebase"
@@ -625,34 +694,17 @@ def test_codalith_context_defaults_to_auto_intent(tools):
 
 
 def test_mcp_resources_list_templates_and_read(tools):
-    listed = handle_request({"jsonrpc": "2.0", "id": 1, "method": "resources/list"}, tools)
-    assert listed is not None
-    resource_uris = {item["uri"] for item in listed["result"]["resources"]}
+    resource_uris = {item["uri"] for item in _sdk_list_resources(tools)}
     assert "codalith://sample-codebase/modules" in resource_uris
     assert "codalith://SampleProject/modules" in resource_uris
     assert "codalith://generated-sample/modules" in resource_uris
 
-    templates = handle_request(
-        {"jsonrpc": "2.0", "id": 2, "method": "resources/templates/list"},
-        tools,
-    )
-    assert templates is not None
     assert any(
         item["uriTemplate"] == "codalith://{corpus}/symbol/{symbol}"
-        for item in templates["result"]["resourceTemplates"]
+        for item in _sdk_list_resource_templates(tools)
     )
 
-    read = handle_request(
-        {
-            "jsonrpc": "2.0",
-            "id": 3,
-            "method": "resources/read",
-            "params": {"uri": "codalith://sample-codebase"},
-        },
-        tools,
-    )
-    assert read is not None
-    content = json.loads(read["result"]["contents"][0]["text"])
+    content = _sdk_read_resource(tools, "codalith://sample-codebase")
     assert content["semantic"]["graph_edges"] > 0
     modules = _read_resource_via_rpc(tools, "codalith://sample-codebase/modules")
     assert modules["count"] >= 1
@@ -674,14 +726,7 @@ def test_project_and_generated_resource_templates_resolve(tools):
 
 
 def _read_resource_via_rpc(tools, uri: str) -> dict[str, Any]:
-    response = handle_request(
-        {"jsonrpc": "2.0", "id": 1, "method": "resources/read", "params": {"uri": uri}},
-        tools,
-    )
-    assert response is not None
-    if "error" in response:
-        raise AssertionError(response["error"]["message"])
-    return json.loads(response["result"]["contents"][0]["text"])
+    return _sdk_read_resource(tools, uri)
 
 
 def test_mcp_resource_templates_resolve_module_symbol_source_and_card(tools):
@@ -723,12 +768,8 @@ def test_mcp_resource_read_rejects_unknown_and_traversal_uris(tools):
         "codalith://sample-codebase/card/../escape",
         "codalith://sample-codebase/card/module/../../escape",
     ):
-        response = handle_request(
-            {"jsonrpc": "2.0", "id": 1, "method": "resources/read", "params": {"uri": uri}},
-            tools,
-        )
-        assert response is not None
-        assert "error" in response, uri
+        with pytest.raises(McpError):
+            _sdk_read_resource(tools, uri)
 
 
 def test_call_tool_rejects_unknown_tools_and_invalid_arguments(tools):

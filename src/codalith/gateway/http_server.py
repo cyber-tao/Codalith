@@ -1,36 +1,47 @@
-"""Streamable HTTP transport for the Codalith MCP server."""
+"""Official MCP SDK Streamable HTTP entry point for Codalith."""
 
 from __future__ import annotations
 
 import argparse
-import json
+import logging
 import os
-import sys
-import uuid
+import socket
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
-from urllib.parse import urlparse
+
+import uvicorn
+from mcp.server.auth.middleware.auth_context import AuthContextMiddleware
+from mcp.server.auth.middleware.bearer_auth import (
+    AuthenticatedUser,
+    RequireAuthMiddleware,
+)
+from mcp.server.auth.provider import AccessToken
+from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+from mcp.server.transport_security import TransportSecuritySettings
+from starlette.applications import Starlette
+from starlette.authentication import (
+    AuthCredentials,
+    AuthenticationBackend,
+)
+from starlette.middleware import Middleware
+from starlette.middleware.authentication import AuthenticationMiddleware
+from starlette.requests import HTTPConnection
+from starlette.responses import JSONResponse
+from starlette.routing import Route
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from codalith.gateway.auth import (
-    AuthContext,
     AuthError,
     authenticate_http_headers,
     default_scopes,
-    reset_current_auth_context,
-    set_current_auth_context,
 )
-from codalith.gateway.mcp_server import PROTOCOL_VERSION, handle_request
+from codalith.gateway.mcp_server import build_instructions
+from codalith.gateway.sdk_server import create_sdk_server
 from codalith.gateway.tools import CodalithTools, create_runtime
 
-SUPPORTED_PROTOCOL_VERSIONS = {PROTOCOL_VERSION, "2025-06-18", "2025-03-26"}
-# Requests without an MCP-Protocol-Version header are assumed to speak
-# 2025-03-26, as required by the Streamable HTTP backwards-compatibility rules.
-DEFAULT_PROTOCOL_VERSION = "2025-03-26"
-MAX_SESSIONS = 1024
-# Default truncate point for verbose JSON-RPC body dumps (Context Packs can be large).
-DEFAULT_HTTP_LOG_MAX_CHARS = 16_384
+DEFAULT_MAX_REQUEST_BYTES = 1_048_576
+_LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,238 +50,201 @@ class StreamableHTTPConfig:
     port: int = 8765
     endpoint: str = "/mcp"
     allowed_origins: tuple[str, ...] = ()
+    max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTES
 
 
-class MCPHTTPServer(ThreadingHTTPServer):
-    def __init__(
-        self,
-        server_address: tuple[str, int],
-        request_handler_class: type[BaseHTTPRequestHandler],
-        *,
-        tools: CodalithTools,
-        config: StreamableHTTPConfig,
-    ) -> None:
-        super().__init__(server_address, request_handler_class)
+class CodalithAuthenticationBackend(AuthenticationBackend):
+    def __init__(self, tools: CodalithTools) -> None:
         self.tools = tools
-        self.config = config
-        # Insertion-ordered so the oldest session can be evicted at the cap.
-        self.sessions: dict[str, None] = {}
 
-    def register_session(self, session_id: str) -> None:
-        while len(self.sessions) >= MAX_SESSIONS:
-            self.sessions.pop(next(iter(self.sessions)))
-        self.sessions[session_id] = None
-
-
-class StreamableHTTPHandler(BaseHTTPRequestHandler):
-    server: MCPHTTPServer
-    protocol_version = "HTTP/1.1"
-
-    def do_POST(self) -> None:
-        if not self._preflight():
-            return
-        auth = self._authenticate()
-        if auth is None:
-            return
-        if not self._accepts("application/json") or not self._accepts("text/event-stream"):
-            self._write_json_error(
-                HTTPStatus.NOT_ACCEPTABLE,
-                "Accept header must include application/json and text/event-stream",
-            )
-            return
-        if not self._protocol_version_is_valid():
-            return
+    async def authenticate(
+        self,
+        conn: HTTPConnection,
+    ) -> tuple[AuthCredentials, AuthenticatedUser] | None:
         try:
-            length = int(self.headers.get("Content-Length", "0"))
-            body = self.rfile.read(length).decode("utf-8")
-            request = json.loads(body)
-        except (ValueError, UnicodeDecodeError):
-            self._write_json_error(HTTPStatus.BAD_REQUEST, "Request body must be UTF-8 JSON")
-            return
-        if not isinstance(request, dict):
-            self._write_json_error(HTTPStatus.BAD_REQUEST, "Body must be a single JSON-RPC message")
-            return
-        self._log_rpc("request", request)
-        if not self._session_is_valid(request):
-            return
-        token = set_current_auth_context(auth)
-        try:
-            response = handle_request(request, self.server.tools)
-        finally:
-            reset_current_auth_context(token)
-        if response is None:
-            self._log_rpc("response", {"status": "accepted", "id": request.get("id")})
-            self.send_response(HTTPStatus.ACCEPTED)
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-            return
-        headers: dict[str, str] = {}
-        if request.get("method") == "initialize":
-            session_id = uuid.uuid4().hex
-            self.server.register_session(session_id)
-            headers["MCP-Session-Id"] = session_id
-        self._log_rpc("response", response)
-        self._write_json(HTTPStatus.OK, response, headers=headers)
-
-    def do_GET(self) -> None:
-        if not self._preflight():
-            return
-        if self._authenticate() is None:
-            return
-        if not self._accepts("text/event-stream"):
-            self._write_json_error(
-                HTTPStatus.NOT_ACCEPTABLE,
-                "Accept header must include text/event-stream",
+            auth = authenticate_http_headers(
+                dict(conn.headers.items()),
+                default_scopes(self.tools.runtime.registry),
             )
-            return
-        if not self._protocol_version_is_valid():
-            return
-        payload = f"id: {uuid.uuid4().hex}\nevent: ping\ndata: {{}}\nretry: 1000\n\n"
-        raw = payload.encode("utf-8")
-        self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-        self.send_header("Cache-Control", "no-cache")
-        self.send_header("Connection", "close")
-        self.send_header("Content-Length", str(len(raw)))
-        self.end_headers()
-        self.wfile.write(raw)
+        except AuthError:
+            return None
+        access_token = AccessToken(
+            token=conn.headers.get("authorization", "local"),
+            client_id=auth.user_id,
+            subject=auth.user_id,
+            scopes=sorted(auth.scopes),
+            claims={
+                "client": auth.client,
+                "session_id": auth.session_id,
+                "iss": "codalith",
+            },
+        )
+        return AuthCredentials(sorted(auth.scopes)), AuthenticatedUser(access_token)
 
-    def do_DELETE(self) -> None:
-        if not self._preflight():
-            return
-        if self._authenticate() is None:
-            return
-        session_id = self.headers.get("MCP-Session-Id")
-        if session_id and session_id in self.server.sessions:
-            del self.server.sessions[session_id]
-            self.send_response(HTTPStatus.ACCEPTED)
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-            return
-        self._write_json_error(HTTPStatus.NOT_FOUND, "Unknown MCP session")
 
-    def log_message(self, format: str, *args: object) -> None:
-        # SSE/poll clients hit GET /mcp continuously; skip those access lines.
-        # JSON-RPC request/response bodies are still logged via _log_rpc on POST.
-        if http_log_enabled() and should_log_access(self.command):
-            super().log_message(format, *args)
+class RequestBodyLimitMiddleware:
+    def __init__(self, app: ASGIApp, *, max_bytes: int) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
 
-    def _log_rpc(self, direction: str, payload: dict[str, Any]) -> None:
-        if not http_log_enabled():
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http":
+            headers = {
+                key.decode("latin-1").lower(): value.decode("latin-1")
+                for key, value in scope.get("headers", [])
+            }
+            raw_length = headers.get("content-length")
+            if raw_length and raw_length.isdigit() and int(raw_length) > self.max_bytes:
+                response = JSONResponse(
+                    {"error": "request_too_large"},
+                    status_code=413,
+                )
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
+class RequestMetadataLogMiddleware:
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or not http_log_enabled():
+            await self.app(scope, receive, send)
             return
-        print(
-            f"[codalith-http] {direction} {format_rpc_log(payload)}",
-            file=sys.stderr,
-            flush=True,
+        status = 500
+
+        async def capture(message: Message) -> None:
+            nonlocal status
+            if message.get("type") == "http.response.start":
+                raw_status = message.get("status")
+                if isinstance(raw_status, int):
+                    status = raw_status
+            await send(message)
+
+        await self.app(scope, receive, capture)
+        _LOG.info(
+            "MCP HTTP %s %s -> %s",
+            scope.get("method", "?"),
+            scope.get("path", "?"),
+            status,
         )
 
-    def _preflight(self) -> bool:
-        if urlparse(self.path).path != self.server.config.endpoint:
-            self._write_json_error(HTTPStatus.NOT_FOUND, "MCP endpoint not found")
-            return False
-        if not origin_allowed(self.headers.get("Origin"), self.server.config.allowed_origins):
-            self._write_json_error(HTTPStatus.FORBIDDEN, "Origin is not allowed")
-            return False
-        return True
 
-    def _accepts(self, content_type: str) -> bool:
-        accept = self.headers.get("Accept", "")
-        return "*/*" in accept or content_type in {item.strip().split(";", 1)[0] for item in accept.split(",")}
+class SessionManagerASGI:
+    def __init__(self, manager: StreamableHTTPSessionManager) -> None:
+        self.manager = manager
 
-    def _protocol_version_is_valid(self) -> bool:
-        version = self.headers.get("MCP-Protocol-Version", DEFAULT_PROTOCOL_VERSION)
-        if version not in SUPPORTED_PROTOCOL_VERSIONS:
-            self._write_json_error(HTTPStatus.BAD_REQUEST, f"Unsupported MCP protocol version: {version}")
-            return False
-        return True
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        await self.manager.handle_request(scope, receive, send)
 
-    def _session_is_valid(self, request: dict[str, Any]) -> bool:
-        if request.get("method") == "initialize":
-            return True
-        session_id = self.headers.get("MCP-Session-Id")
-        if session_id is not None and session_id in self.server.sessions:
-            return True
-        self._write_json_error(HTTPStatus.BAD_REQUEST, "Missing or invalid MCP-Session-Id")
-        return False
 
-    def _authenticate(self) -> AuthContext | None:
-        try:
-            return authenticate_http_headers(
-                {key: value for key, value in self.headers.items()},
-                default_scopes(self.server.tools.runtime.registry),
+def create_http_app(
+    tools: CodalithTools,
+    config: StreamableHTTPConfig,
+) -> Starlette:
+    sdk_server = create_sdk_server(
+        tools,
+        instructions=build_instructions(tools.runtime.registry),
+    )
+    allowed_origins = list(config.allowed_origins) or [
+        "http://127.0.0.1",
+        "http://127.0.0.1:*",
+        "http://localhost",
+        "http://localhost:*",
+        "http://[::1]",
+        "http://[::1]:*",
+    ]
+    allowed_hosts = [
+        "127.0.0.1:*",
+        "localhost:*",
+        "[::1]:*",
+        f"{config.host}:*",
+    ]
+    manager = StreamableHTTPSessionManager(
+        sdk_server,
+        json_response=True,
+        stateless=False,
+        security_settings=TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=list(dict.fromkeys(allowed_hosts)),
+            allowed_origins=allowed_origins,
+        ),
+        session_idle_timeout=1800,
+    )
+    endpoint = RequireAuthMiddleware(SessionManagerASGI(manager), required_scopes=[])
+
+    @asynccontextmanager
+    async def lifespan(_: Starlette) -> AsyncIterator[None]:
+        async with manager.run():
+            yield
+
+    return Starlette(
+        routes=[
+            Route(
+                config.endpoint,
+                endpoint=endpoint,
+                methods=["GET", "POST", "DELETE"],
             )
-        except AuthError as exc:
-            self._write_json_error(HTTPStatus.UNAUTHORIZED, str(exc))
-            return None
-
-    def _write_json_error(self, status: HTTPStatus, message: str) -> None:
-        payload = {
-            "jsonrpc": "2.0",
-            "error": {"code": -32000, "message": message},
-        }
-        self._write_json(status, payload)
-
-    def _write_json(
-        self,
-        status: HTTPStatus,
-        payload: dict[str, Any],
-        *,
-        headers: dict[str, str] | None = None,
-    ) -> None:
-        raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(raw)))
-        if headers:
-            for key, value in headers.items():
-                self.send_header(key, value)
-        self.end_headers()
-        self.wfile.write(raw)
+        ],
+        middleware=[
+            Middleware(RequestMetadataLogMiddleware),
+            Middleware(
+                RequestBodyLimitMiddleware,
+                max_bytes=config.max_request_bytes,
+            ),
+            Middleware(
+                AuthenticationMiddleware,
+                backend=CodalithAuthenticationBackend(tools),
+            ),
+            Middleware(AuthContextMiddleware),
+        ],
+        lifespan=lifespan,
+    )
 
 
-def origin_allowed(origin: str | None, allowed_origins: tuple[str, ...]) -> bool:
-    if not origin:
-        return True
-    if "*" in allowed_origins or origin in allowed_origins:
-        return True
-    parsed = urlparse(origin)
-    return parsed.scheme in {"http", "https"} and parsed.hostname in {"127.0.0.1", "localhost", "::1"}
+class MCPHTTPServer:
+    """Small uvicorn lifecycle wrapper used by the CLI and integration tests."""
 
+    def __init__(self, tools: CodalithTools, config: StreamableHTTPConfig) -> None:
+        self.config = config
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.socket.bind((config.host, config.port))
+        self.socket.listen()
+        address = self.socket.getsockname()
+        self.server_address = (str(address[0]), int(address[1]))
+        self._server = uvicorn.Server(
+            uvicorn.Config(
+                create_http_app(tools, config),
+                log_level="info" if http_log_enabled() else "warning",
+                access_log=http_log_enabled(),
+            )
+        )
 
-def http_log_enabled() -> bool:
-    """Whether access + JSON-RPC body logging is enabled via CODALITH_HTTP_LOG."""
-    value = os.getenv("CODALITH_HTTP_LOG", "").strip().lower()
-    return value not in {"", "0", "false", "no", "off"}
+    def serve_forever(self) -> None:
+        self._server.run(sockets=[self.socket])
 
+    def shutdown(self) -> None:
+        self._server.should_exit = True
 
-def should_log_access(command: str | None) -> bool:
-    """Whether BaseHTTPRequestHandler access lines should be emitted.
-
-    GET is omitted because Streamable HTTP clients poll the MCP endpoint for
-    SSE and would flood stderr; POST/DELETE access lines remain useful.
-    """
-    return (command or "").upper() != "GET"
-
-
-def format_rpc_log(payload: dict[str, Any], *, max_chars: int | None = None) -> str:
-    """Compact single-line JSON for stderr; truncate oversized Context Pack dumps."""
-    limit = max_chars
-    if limit is None:
-        raw_limit = os.getenv("CODALITH_HTTP_LOG_MAX_CHARS", "").strip()
-        limit = int(raw_limit) if raw_limit.isdigit() else DEFAULT_HTTP_LOG_MAX_CHARS
-    text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str)
-    if len(text) <= limit:
-        return text
-    return f"{text[:limit]}…<truncated {len(text) - limit} chars>"
+    def server_close(self) -> None:
+        try:
+            self.socket.close()
+        except OSError:
+            pass
 
 
 def create_http_server(
     tools: CodalithTools,
     config: StreamableHTTPConfig,
 ) -> MCPHTTPServer:
-    return MCPHTTPServer((config.host, config.port), StreamableHTTPHandler, tools=tools, config=config)
+    return MCPHTTPServer(tools, config)
 
 
+def http_log_enabled() -> bool:
+    value = os.getenv("CODALITH_HTTP_LOG", "").strip().lower()
+    return value not in {"", "0", "false", "no", "off"}
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default=os.getenv("CODALITH_HTTP_HOST", "127.0.0.1"))
@@ -279,7 +253,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--allowed-origin",
         action="append",
-        default=[origin for origin in os.getenv("CODALITH_HTTP_ALLOWED_ORIGINS", "").split(",") if origin],
+        default=[
+            origin
+            for origin in os.getenv("CODALITH_HTTP_ALLOWED_ORIGINS", "").split(",")
+            if origin
+        ],
+    )
+    parser.add_argument(
+        "--max-request-bytes",
+        type=int,
+        default=int(
+            os.getenv(
+                "CODALITH_HTTP_MAX_REQUEST_BYTES",
+                str(DEFAULT_MAX_REQUEST_BYTES),
+            )
+        ),
     )
     args = parser.parse_args(argv)
     config = StreamableHTTPConfig(
@@ -287,6 +275,7 @@ def main(argv: list[str] | None = None) -> int:
         port=args.port,
         endpoint=args.endpoint,
         allowed_origins=tuple(args.allowed_origin),
+        max_request_bytes=args.max_request_bytes,
     )
     server = create_http_server(CodalithTools(create_runtime()), config)
     try:

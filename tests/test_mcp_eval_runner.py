@@ -37,8 +37,8 @@ def test_mcp_eval_runner_calls_streamable_http(tools, tmp_path):
         )
     finally:
         server.shutdown()
-        server.server_close()
         thread.join(timeout=5)
+        server.server_close()
 
     assert report.count == 1
     assert report.file_recall_at_k == 1.0

@@ -3,24 +3,29 @@
 from __future__ import annotations
 
 import argparse
-import http.client
 import json
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+
+import anyio
+import httpx
+from mcp import ClientSession
+from mcp.client.streamable_http import streamable_http_client
+from mcp.types import CallToolResult, TextContent
 
 from codalith.eval.common import (
     DEFAULT_METRIC_K,
     aggregate_rows,
     average,
-    evaluate_dataset,
     expected_strings,
+    pack_metrics,
+    read_jsonl,
     write_report_files,
 )
 from codalith.eval.metrics import file_recall_at_k
-from codalith.gateway.mcp_server import PROTOCOL_VERSION
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,85 +66,6 @@ class MCPEvalReport:
         return all(row.get("failure_class") == "pass" for row in self.rows)
 
 
-class MCPClient:
-    def __init__(
-        self,
-        endpoint: str,
-        *,
-        timeout_seconds: float = 120.0,
-        bearer_token: str | None = None,
-    ) -> None:
-        parsed = urlparse(endpoint)
-        if parsed.scheme not in {"http", "https"}:
-            raise ValueError("MCP endpoint must start with http:// or https://")
-        if parsed.scheme == "https":
-            raise ValueError("HTTPS MCP eval is not supported by the stdlib client")
-        self.host = parsed.hostname or "127.0.0.1"
-        self.port = parsed.port or 80
-        self.path = parsed.path or "/mcp"
-        self.timeout_seconds = timeout_seconds
-        self.bearer_token = bearer_token
-        self.session_id: str | None = None
-        self._next_id = 1
-
-    def initialize(self) -> None:
-        response, payload = self.post(
-            {"method": "initialize", "params": {"protocolVersion": PROTOCOL_VERSION}},
-            require_session=False,
-        )
-        session_id = response.getheader("MCP-Session-Id")
-        if not session_id:
-            raise RuntimeError(f"MCP initialize did not return a session: {payload}")
-        self.session_id = session_id
-
-    def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        if self.session_id is None:
-            self.initialize()
-        _, payload = self.post(
-            {
-                "method": "tools/call",
-                "params": {"name": name, "arguments": arguments},
-            }
-        )
-        if "error" in payload:
-            raise RuntimeError(json.dumps(payload["error"], ensure_ascii=False))
-        result = payload.get("result", {})
-        if not isinstance(result, dict):
-            raise RuntimeError(f"MCP result must be an object: {payload}")
-        structured = result.get("structuredContent")
-        if not isinstance(structured, dict):
-            raise RuntimeError(f"MCP result missing structuredContent: {payload}")
-        return structured
-
-    def post(
-        self,
-        payload: dict[str, Any],
-        *,
-        require_session: bool = True,
-    ) -> tuple[http.client.HTTPResponse, dict[str, Any]]:
-        request = {"jsonrpc": "2.0", "id": self._next_id, **payload}
-        self._next_id += 1
-        headers = {
-            "Accept": "application/json, text/event-stream",
-            "Content-Type": "application/json",
-            "Origin": "http://127.0.0.1",
-            "MCP-Protocol-Version": PROTOCOL_VERSION,
-        }
-        if require_session and self.session_id:
-            headers["MCP-Session-Id"] = self.session_id
-        if self.bearer_token:
-            headers["Authorization"] = f"Bearer {self.bearer_token}"
-        connection = http.client.HTTPConnection(self.host, self.port, timeout=self.timeout_seconds)
-        connection.request("POST", self.path, body=json.dumps(request), headers=headers)
-        response = connection.getresponse()
-        body = response.read().decode("utf-8")
-        connection.close()
-        parsed = json.loads(body) if body else {}
-        if response.status >= 400:
-            raise RuntimeError(f"MCP HTTP {response.status}: {parsed}")
-        return response, parsed
-
-
 def run_mcp_eval(
     *,
     endpoint: str,
@@ -150,51 +76,94 @@ def run_mcp_eval(
     metric_k: int = DEFAULT_METRIC_K,
     timeout_seconds: float = 120.0,
 ) -> MCPEvalReport:
-    client = MCPClient(
+    if not endpoint.startswith(("http://", "https://")):
+        raise ValueError("MCP endpoint must start with http:// or https://")
+    return anyio.run(
+        _run_mcp_eval_async,
         endpoint,
-        timeout_seconds=timeout_seconds,
-        bearer_token=os.getenv("CODALITH_HTTP_BEARER_TOKEN") or None,
+        Path(dataset_path),
+        label,
+        version,
+        max_source_spans,
+        metric_k,
+        timeout_seconds,
     )
-    client.initialize()
 
-    def run_pack(item: dict[str, Any], item_version: str | None) -> dict[str, Any]:
-        arguments: dict[str, Any] = {
-            "query": str(item["query"]),
-            "mode": str(item.get("mode", "explain")),
-            "max_source_spans": max_source_spans,
-        }
-        if item_version:
-            arguments["corpus"] = item_version
-        return client.call_tool("codalith_context", arguments)
 
-    def row_extras(
-        item: dict[str, Any],
-        pack: dict[str, Any],
-        metrics: dict[str, float],
-    ) -> dict[str, Any]:
-        expected_files = expected_strings(item, "expected_files")
-        candidate_recall = file_recall_at_k(pack, expected_files, k=max_source_spans)
-        source_spans = pack.get("source_spans", [])
-        return {
-            f"file_recall@{max_source_spans}": candidate_recall,
-            "failure_class": _failure_class(
-                metrics[f"file_recall@{metric_k}"],
-                candidate_recall,
-                metrics["module_accuracy"],
-            ),
-            "expected_files": expected_files,
-            "expected_modules": expected_strings(item, "expected_modules"),
-            "source_paths": [str(span.get("path", "")) for span in source_spans],
-            "modules": [str(module.get("name", "")) for module in pack.get("modules", [])],
-        }
-
-    rows, latencies = evaluate_dataset(
-        dataset_path,
-        run_pack,
-        version=version,
-        metric_k=metric_k,
-        row_extras=row_extras,
-    )
+async def _run_mcp_eval_async(
+    endpoint: str,
+    dataset_path: Path,
+    label: str,
+    version: str | None,
+    max_source_spans: int,
+    metric_k: int,
+    timeout_seconds: float,
+) -> MCPEvalReport:
+    headers = {"Origin": "http://127.0.0.1"}
+    bearer_token = os.getenv("CODALITH_HTTP_BEARER_TOKEN")
+    if bearer_token:
+        headers["Authorization"] = f"Bearer {bearer_token}"
+    rows: list[dict[str, Any]] = []
+    latencies: list[float] = []
+    async with httpx.AsyncClient(headers=headers, timeout=timeout_seconds) as http_client:
+        async with streamable_http_client(
+            endpoint,
+            http_client=http_client,
+        ) as (read_stream, write_stream, _):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                for item in read_jsonl(dataset_path):
+                    item_version = str(item["version"]) if item.get("version") else version
+                    arguments: dict[str, Any] = {
+                        "query": str(item["query"]),
+                        "mode": str(item.get("mode", "explain")),
+                        "max_source_spans": max_source_spans,
+                    }
+                    if item_version:
+                        arguments["corpus"] = item_version
+                    started = time.perf_counter()
+                    result = await session.call_tool("codalith_context", arguments)
+                    latencies.append((time.perf_counter() - started) * 1000)
+                    pack = _structured_tool_result(result)
+                    metrics = pack_metrics(
+                        pack,
+                        item,
+                        k=metric_k,
+                        default_version=version,
+                    )
+                    expected_files = expected_strings(item, "expected_files")
+                    candidate_recall = file_recall_at_k(
+                        pack,
+                        expected_files,
+                        k=max_source_spans,
+                    )
+                    source_spans = pack.get("source_spans", [])
+                    rows.append(
+                        {
+                            "id": item.get("id"),
+                            "query": item["query"],
+                            **metrics,
+                            "latency_ms": latencies[-1],
+                            f"file_recall@{max_source_spans}": candidate_recall,
+                            "failure_class": _failure_class(
+                                metrics[f"file_recall@{metric_k}"],
+                                candidate_recall,
+                                metrics["module_accuracy"],
+                            ),
+                            "expected_files": expected_files,
+                            "expected_modules": expected_strings(
+                                item,
+                                "expected_modules",
+                            ),
+                            "source_paths": [
+                                str(span.get("path", "")) for span in source_spans
+                            ],
+                            "modules": [
+                                str(module.get("name", ""))
+                                for module in pack.get("modules", [])
+                            ],
+                        }
+                    )
     return MCPEvalReport(
         label=label,
         endpoint=endpoint,
@@ -205,6 +174,17 @@ def run_mcp_eval(
         rows=rows,
         **aggregate_rows(rows, latencies, metric_k=metric_k),
     )
+
+
+def _structured_tool_result(result: CallToolResult) -> dict[str, Any]:
+    if result.isError:
+        message = "\n".join(
+            block.text for block in result.content if isinstance(block, TextContent)
+        )
+        raise RuntimeError(message or "MCP tool call failed")
+    if not isinstance(result.structuredContent, dict):
+        raise RuntimeError(f"MCP result missing structuredContent: {result}")
+    return result.structuredContent
 
 
 def write_reports(report: MCPEvalReport, output_dir: str | Path) -> tuple[Path, Path]:

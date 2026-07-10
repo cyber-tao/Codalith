@@ -68,8 +68,8 @@ def test_ue_eval_suite_passes_http_mcp_eval(
         )
     finally:
         server.shutdown()
-        server.server_close()
         thread.join(timeout=5)
+        server.server_close()
 
     assert report.count == EXPECTED_SUITE_SIZE
     assert report.file_recall_at_k == 1.0
