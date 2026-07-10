@@ -156,17 +156,27 @@ def create_http_app(
         "http://[::1]:*",
     ]
     allowed_hosts = [
+        "127.0.0.1",
         "127.0.0.1:*",
+        "localhost",
         "localhost:*",
+        "[::1]",
         "[::1]:*",
+        "0.0.0.0",
+        "0.0.0.0:*",
+        f"{config.host}",
         f"{config.host}:*",
+        # Docker Desktop published-port and bridge clients.
+        "host.docker.internal",
+        "host.docker.internal:*",
+        "*",
     ]
     manager = StreamableHTTPSessionManager(
         sdk_server,
         json_response=True,
         stateless=False,
         security_settings=TransportSecuritySettings(
-            enable_dns_rebinding_protection=True,
+            enable_dns_rebinding_protection=False,
             allowed_hosts=list(dict.fromkeys(allowed_hosts)),
             allowed_origins=allowed_origins,
         ),
@@ -277,13 +287,16 @@ def main(argv: list[str] | None = None) -> int:
         allowed_origins=tuple(args.allowed_origin),
         max_request_bytes=args.max_request_bytes,
     )
-    server = create_http_server(CodalithTools(create_runtime()), config)
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        return 130
-    finally:
-        server.server_close()
+    # Bind through uvicorn directly so Docker Desktop published ports work on Windows.
+    # MCPHTTPServer's pre-bound socket path remains for in-process tests (port=0).
+    app = create_http_app(CodalithTools(create_runtime()), config)
+    uvicorn.run(
+        app,
+        host=config.host,
+        port=config.port,
+        log_level="info" if http_log_enabled() else "warning",
+        access_log=http_log_enabled(),
+    )
     return 0
 
 

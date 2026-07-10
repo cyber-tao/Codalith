@@ -122,7 +122,11 @@ async def _run_mcp_eval_async(
     rows: list[dict[str, Any]] = []
     latencies: list[float] = []
     retrieval_status: dict[str, Any] = {}
-    async with httpx.AsyncClient(headers=headers, timeout=timeout_seconds) as http_client:
+    async with httpx.AsyncClient(
+        headers=headers,
+        timeout=timeout_seconds,
+        trust_env=False,
+    ) as http_client:
         async with streamable_http_client(
             endpoint,
             http_client=http_client,

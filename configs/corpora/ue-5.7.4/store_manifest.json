@@ -5,7 +5,7 @@
   "embedding_dimension": 4096,
   "store_schema_version": 1,
   "chunk_policy": {
-    "max_chars": 2048,
-    "max_bytes": null
+    "max_chars": 3072,
+    "max_bytes": 3584
   }
 }

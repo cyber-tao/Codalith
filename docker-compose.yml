@@ -129,7 +129,8 @@ services:
       - "${CODALITH_HTTP_BIND:-127.0.0.1}:${CODALITH_HTTP_PORT:-8765}:${CODALITH_HTTP_PORT:-8765}"
     volumes:
       - ${CODALITH_REPO_ROOT:-.}:${CODALITH_WORKSPACE_DIR:-/workspace}
-      - ${CODALITH_UE_CODERAG_HOST_DIR:-./.local/coderag-openai-store/ue-5.7.4-openai-qwen3-embedding-8b-3072c-3584b-full}:${CODALITH_UE_CODERAG_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4}:ro
+      # LanceDB/CodeRAG needs write access to open an existing store (meta/lock files).
+      - ${CODALITH_UE_CODERAG_HOST_DIR:-./.local/coderag-openai-store/ue-5.7.4-openai-qwen3-embedding-8b-3072c-3584b-full}:${CODALITH_UE_CODERAG_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4}
       - ${CODALITH_UE_HOST_ROOT:-./.local/ue-5.7.4}:${CODALITH_UE_SOURCE_ROOT:-/srv/ue/5.7.4}:ro
       - ${CODALITH_UE_SOURCE_HOST_ROOT:-./.local/ue-5.7.4/Engine/Source}:${CODALITH_UE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Source:ro
       - ${CODALITH_UE_PLUGINS_HOST_ROOT:-./.local/ue-5.7.4/Engine/Plugins}:${CODALITH_UE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Plugins:ro
@@ -221,7 +222,7 @@ services:
         condition: service_healthy
     volumes:
       - ${CODALITH_REPO_ROOT:-.}:${CODALITH_WORKSPACE_DIR:-/workspace}
-      - ${CODALITH_UE_CODERAG_HOST_DIR:-./.local/coderag-openai-store/ue-5.7.4-openai-qwen3-embedding-8b-3072c-3584b-full}:${CODALITH_UE_CODERAG_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4}:ro
+      - ${CODALITH_UE_CODERAG_HOST_DIR:-./.local/coderag-openai-store/ue-5.7.4-openai-qwen3-embedding-8b-3072c-3584b-full}:${CODALITH_UE_CODERAG_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4}
       - ${CODALITH_UE_HOST_ROOT:-./.local/ue-5.7.4}:${CODALITH_UE_SOURCE_ROOT:-/srv/ue/5.7.4}:ro
       - ${CODALITH_UE_SOURCE_HOST_ROOT:-./.local/ue-5.7.4/Engine/Source}:${CODALITH_UE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Source:ro
       - ${CODALITH_UE_PLUGINS_HOST_ROOT:-./.local/ue-5.7.4/Engine/Plugins}:${CODALITH_UE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Plugins:ro
