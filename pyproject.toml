@@ -43,6 +43,7 @@ testpaths = ["tests"]
 norecursedirs = ["external", ".venv", "build", "dist"]
 markers = [
     "corpus_acceptance: optional tests that require a mounted real source corpus",
+    "ue_acceptance: optional tests that require the real UE source and native embedding store",
 ]
 
 [tool.ruff]

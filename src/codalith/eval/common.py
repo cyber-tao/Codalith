@@ -25,6 +25,7 @@ def read_jsonl(path: str | Path) -> list[dict[str, Any]]:
     for line in Path(path).read_text(encoding="utf-8").splitlines():
         if line.strip():
             rows.append(json.loads(line))
+    _validate_dataset_rows(rows, Path(path))
     return rows
 
 
@@ -47,7 +48,7 @@ def pack_metrics(
     *,
     k: int,
     default_version: str | None = None,
-) -> dict[str, float]:
+) -> dict[str, float | None]:
     """Compute the per-item metric set shared by both eval runners.
 
     Without an expected version (dataset item or runner default) the pack's
@@ -64,8 +65,13 @@ def pack_metrics(
     }
 
 
-def average(rows: list[dict[str, Any]], key: str) -> float:
-    return sum(float(row[key]) for row in rows) / len(rows) if rows else 0.0
+def average(rows: list[dict[str, Any]], key: str) -> float | None:
+    values = [
+        float(row[key])
+        for row in rows
+        if row.get(key) is not None
+    ]
+    return sum(values) / len(values) if values else None
 
 
 def evaluate_dataset(
@@ -74,7 +80,10 @@ def evaluate_dataset(
     *,
     version: str | None = None,
     metric_k: int = DEFAULT_METRIC_K,
-    row_extras: Callable[[dict[str, Any], dict[str, Any], dict[str, float]], dict[str, Any]]
+    row_extras: Callable[
+        [dict[str, Any], dict[str, Any], dict[str, float | None]],
+        dict[str, Any],
+    ]
     | None = None,
 ) -> tuple[list[dict[str, Any]], list[float]]:
     """Run every dataset item through ``run_pack`` and collect metric rows.
@@ -109,7 +118,7 @@ def aggregate_rows(
     latencies: list[float],
     *,
     metric_k: int,
-) -> dict[str, float]:
+) -> dict[str, float | None]:
     """Aggregate the shared per-item metrics into report-level numbers."""
     return {
         "file_recall_at_k": average(rows, f"file_recall@{metric_k}"),
@@ -119,6 +128,63 @@ def aggregate_rows(
         "wrong_version_rate": average(rows, "wrong_version_rate"),
         "latency_p95_ms": p95(latencies),
     }
+
+
+def metric_coverage(rows: list[dict[str, Any]], key: str) -> int:
+    return sum(1 for row in rows if row.get(key) is not None)
+
+
+def classify_failure(
+    metrics: dict[str, float | None],
+    *,
+    metric_k: int,
+    candidate_recall: float | None,
+) -> str:
+    file_recall = metrics.get(f"file_recall@{metric_k}")
+    if file_recall is None:
+        return "missing_file_expectation"
+    if file_recall < 1.0:
+        if candidate_recall is not None and candidate_recall > file_recall:
+            return "expected_file_below_top_k"
+        return "expected_file_not_retrieved"
+    module_score = metrics.get("module_accuracy")
+    if module_score is not None and module_score < 1.0:
+        return "module_mismatch"
+    symbol_score = metrics.get("symbol_recall")
+    if symbol_score is not None and symbol_score < 1.0:
+        return "symbol_mismatch"
+    if float(metrics.get("missing_source_citation_rate") or 0.0) > 0.0:
+        return "missing_source_citation"
+    if float(metrics.get("wrong_version_rate") or 0.0) > 0.0:
+        return "wrong_version"
+    return "pass"
+
+
+def _validate_dataset_rows(rows: list[dict[str, Any]], path: Path) -> None:
+    seen_ids: set[str] = set()
+    for index, row in enumerate(rows, start=1):
+        case_id = str(row.get("id") or "")
+        if not case_id or case_id in seen_ids:
+            raise ValueError(f"{path}:{index} has a missing or duplicate id")
+        seen_ids.add(case_id)
+        if not isinstance(row.get("query"), str) or not str(row["query"]).strip():
+            raise ValueError(f"{path}:{index} must define a non-empty query")
+        expected_files = row.get("expected_files")
+        if not isinstance(expected_files, list) or not expected_files:
+            raise ValueError(f"{path}:{index} must define expected_files")
+        normalized_files = {str(item).replace("\\", "/") for item in expected_files}
+        if any("/" not in item or item.startswith("/") for item in normalized_files):
+            raise ValueError(
+                f"{path}:{index} expected_files must use corpus-relative paths"
+            )
+        verified_paths = {
+            str(source).rsplit(":", 1)[0].replace("\\", "/")
+            for source in row.get("verified_sources", [])
+        }
+        if not verified_paths <= normalized_files:
+            raise ValueError(
+                f"{path}:{index} verified_sources must be represented in expected_files"
+            )
 
 
 def write_report_files(

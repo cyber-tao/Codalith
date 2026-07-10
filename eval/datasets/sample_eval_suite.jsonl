@@ -1,2 +1,2 @@
-{"id":"sample-cache-001","query":"How does CachedValue handle ttl expiration?","mode":"api_usage","version":"sample","expected_files":["cache.py"],"expected_modules":["core"],"expected_symbols":["CachedValue"]}
-{"id":"sample-events-001","query":"How do I subscribe and dispatch an event through EventBus?","mode":"api_usage","version":"sample","expected_files":["events.py"],"expected_modules":["core"],"expected_symbols":["EventBus"]}
+{"id":"sample-cache-001","query":"How does CachedValue handle ttl expiration?","mode":"api_usage","version":"sample","expected_files":["src/core/cache.py"],"expected_modules":["core"],"expected_symbols":["CachedValue"]}
+{"id":"sample-events-001","query":"How do I subscribe and dispatch an event through EventBus?","mode":"api_usage","version":"sample","expected_files":["src/core/events.py"],"expected_modules":["core"],"expected_symbols":["EventBus"]}

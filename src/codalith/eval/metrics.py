@@ -5,9 +5,13 @@ from __future__ import annotations
 from typing import Any
 
 
-def file_recall_at_k(pack: dict[str, Any], expected_files: list[str], k: int = 5) -> float:
+def file_recall_at_k(
+    pack: dict[str, Any],
+    expected_files: list[str],
+    k: int = 5,
+) -> float | None:
     if not expected_files:
-        return 1.0
+        return None
     spans = pack.get("source_spans", [])[:k]
     found = {str(span.get("path", "")) for span in spans if isinstance(span, dict)}
     hits = sum(
@@ -18,17 +22,23 @@ def file_recall_at_k(pack: dict[str, Any], expected_files: list[str], k: int = 5
     return hits / len(expected_files)
 
 
-def module_accuracy(pack: dict[str, Any], expected_modules: list[str]) -> float:
+def module_accuracy(
+    pack: dict[str, Any],
+    expected_modules: list[str],
+) -> float | None:
     if not expected_modules:
-        return 1.0
+        return None
     modules = {str(item.get("name", "")) for item in pack.get("modules", [])}
     hits = sum(1 for expected in expected_modules if expected in modules)
     return hits / len(expected_modules)
 
 
-def symbol_recall(pack: dict[str, Any], expected_symbols: list[str]) -> float:
+def symbol_recall(
+    pack: dict[str, Any],
+    expected_symbols: list[str],
+) -> float | None:
     if not expected_symbols:
-        return 1.0
+        return None
     symbols = {
         str(item.get("name", ""))
         for item in pack.get("symbols", [])

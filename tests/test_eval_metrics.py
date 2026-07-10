@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from codalith.eval.common import p95
+from codalith.eval.common import classify_failure, p95
 from codalith.eval.metrics import (
     file_recall_at_k,
     missing_source_citation_rate,
+    module_accuracy,
+    symbol_recall,
     wrong_version_rate,
 )
 
@@ -49,6 +51,9 @@ def test_file_recall_normalizes_backslashes_and_k_window():
 def test_empty_packs_count_as_worst_case_for_citation_and_version():
     assert missing_source_citation_rate({}) == 1.0
     assert wrong_version_rate({}, "5.7.4") == 1.0
+    assert file_recall_at_k({}, []) is None
+    assert module_accuracy({}, []) is None
+    assert symbol_recall({}, []) is None
 
 
 def test_citation_and_version_rates_on_populated_packs():
@@ -117,3 +122,27 @@ def test_p95_uses_nearest_rank_definition():
     assert p95([5.0]) == 5.0
     assert p95([1.0, 2.0, 3.0, 4.0]) == 4.0
     assert p95([float(value) for value in range(1, 101)]) == 95.0
+
+
+def test_eval_gate_classifies_all_quality_failures():
+    passing = {
+        "file_recall@5": 1.0,
+        "module_accuracy": 1.0,
+        "symbol_recall": 1.0,
+        "missing_source_citation_rate": 0.0,
+        "wrong_version_rate": 0.0,
+    }
+    assert (
+        classify_failure(passing, metric_k=5, candidate_recall=1.0)
+        == "pass"
+    )
+    for key, value, expected in (
+        ("symbol_recall", 0.0, "symbol_mismatch"),
+        ("missing_source_citation_rate", 1.0, "missing_source_citation"),
+        ("wrong_version_rate", 1.0, "wrong_version"),
+    ):
+        metrics = {**passing, key: value}
+        assert (
+            classify_failure(metrics, metric_k=5, candidate_recall=1.0)
+            == expected
+        )

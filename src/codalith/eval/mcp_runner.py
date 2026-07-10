@@ -20,7 +20,9 @@ from codalith.eval.common import (
     DEFAULT_METRIC_K,
     aggregate_rows,
     average,
+    classify_failure,
     expected_strings,
+    metric_coverage,
     pack_metrics,
     read_jsonl,
     write_report_files,
@@ -35,13 +37,16 @@ class MCPEvalReport:
     metric_k: int
     max_source_spans: int
     count: int
-    file_recall_at_k: float
-    candidate_file_recall: float
-    module_accuracy: float
-    symbol_recall: float
-    missing_source_citation_rate: float
-    wrong_version_rate: float
+    file_recall_at_k: float | None
+    candidate_file_recall: float | None
+    module_accuracy: float | None
+    symbol_recall: float | None
+    missing_source_citation_rate: float | None
+    wrong_version_rate: float | None
     latency_p95_ms: float
+    metric_coverage: dict[str, int]
+    retrieval_status: dict[str, Any]
+    gate_failures: list[str]
     rows: list[dict[str, Any]]
 
     def as_dict(self) -> dict[str, Any]:
@@ -58,12 +63,17 @@ class MCPEvalReport:
             "missing_source_citation_rate": self.missing_source_citation_rate,
             "wrong_version_rate": self.wrong_version_rate,
             "latency_p95_ms": self.latency_p95_ms,
+            "metric_coverage": self.metric_coverage,
+            "retrieval_status": self.retrieval_status,
+            "gate_failures": self.gate_failures,
             "rows": self.rows,
         }
 
     @property
     def all_passed(self) -> bool:
-        return all(row.get("failure_class") == "pass" for row in self.rows)
+        return not self.gate_failures and all(
+            row.get("failure_class") == "pass" for row in self.rows
+        )
 
 
 def run_mcp_eval(
@@ -75,6 +85,8 @@ def run_mcp_eval(
     max_source_spans: int = 20,
     metric_k: int = DEFAULT_METRIC_K,
     timeout_seconds: float = 120.0,
+    expected_count: int | None = None,
+    require_native: bool = False,
 ) -> MCPEvalReport:
     if not endpoint.startswith(("http://", "https://")):
         raise ValueError("MCP endpoint must start with http:// or https://")
@@ -87,6 +99,8 @@ def run_mcp_eval(
         max_source_spans,
         metric_k,
         timeout_seconds,
+        expected_count,
+        require_native,
     )
 
 
@@ -98,6 +112,8 @@ async def _run_mcp_eval_async(
     max_source_spans: int,
     metric_k: int,
     timeout_seconds: float,
+    expected_count: int | None,
+    require_native: bool,
 ) -> MCPEvalReport:
     headers = {"Origin": "http://127.0.0.1"}
     bearer_token = os.getenv("CODALITH_HTTP_BEARER_TOKEN")
@@ -105,6 +121,7 @@ async def _run_mcp_eval_async(
         headers["Authorization"] = f"Bearer {bearer_token}"
     rows: list[dict[str, Any]] = []
     latencies: list[float] = []
+    retrieval_status: dict[str, Any] = {}
     async with httpx.AsyncClient(headers=headers, timeout=timeout_seconds) as http_client:
         async with streamable_http_client(
             endpoint,
@@ -112,6 +129,13 @@ async def _run_mcp_eval_async(
         ) as (read_stream, write_stream, _):
             async with ClientSession(read_stream, write_stream) as session:
                 await session.initialize()
+                status_arguments = {"corpus": version} if version else {}
+                retrieval_status = _structured_tool_result(
+                    await session.call_tool(
+                        "codalith_index_status",
+                        status_arguments,
+                    )
+                )
                 for item in read_jsonl(dataset_path):
                     item_version = str(item["version"]) if item.get("version") else version
                     arguments: dict[str, Any] = {
@@ -145,10 +169,10 @@ async def _run_mcp_eval_async(
                             **metrics,
                             "latency_ms": latencies[-1],
                             f"file_recall@{max_source_spans}": candidate_recall,
-                            "failure_class": _failure_class(
-                                metrics[f"file_recall@{metric_k}"],
-                                candidate_recall,
-                                metrics["module_accuracy"],
+                            "failure_class": classify_failure(
+                                metrics,
+                                metric_k=metric_k,
+                                candidate_recall=candidate_recall,
                             ),
                             "expected_files": expected_files,
                             "expected_modules": expected_strings(
@@ -164,15 +188,42 @@ async def _run_mcp_eval_async(
                             ],
                         }
                     )
+    aggregates = aggregate_rows(rows, latencies, metric_k=metric_k)
+    gate_failures = _retrieval_gate_failures(
+        retrieval_status,
+        count=len(rows),
+        expected_count=expected_count,
+        require_native=require_native,
+    )
     return MCPEvalReport(
         label=label,
         endpoint=endpoint,
         metric_k=metric_k,
         max_source_spans=max_source_spans,
         count=len(rows),
-        candidate_file_recall=average(rows, f"file_recall@{max_source_spans}"),
+        file_recall_at_k=aggregates["file_recall_at_k"],
+        candidate_file_recall=average(
+            rows,
+            f"file_recall@{max_source_spans}",
+        ),
+        module_accuracy=aggregates["module_accuracy"],
+        symbol_recall=aggregates["symbol_recall"],
+        missing_source_citation_rate=aggregates[
+            "missing_source_citation_rate"
+        ],
+        wrong_version_rate=aggregates["wrong_version_rate"],
+        latency_p95_ms=float(aggregates["latency_p95_ms"] or 0.0),
+        metric_coverage={
+            key: metric_coverage(rows, key)
+            for key in (
+                f"file_recall@{metric_k}",
+                "module_accuracy",
+                "symbol_recall",
+            )
+        },
+        retrieval_status=retrieval_status,
+        gate_failures=gate_failures,
         rows=rows,
-        **aggregate_rows(rows, latencies, metric_k=metric_k),
     )
 
 
@@ -209,6 +260,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-source-spans", type=int, default=20)
     parser.add_argument("--metric-k", type=int, default=DEFAULT_METRIC_K)
     parser.add_argument("--timeout-seconds", type=float, default=120.0)
+    parser.add_argument("--expected-count", type=int)
+    parser.add_argument(
+        "--require-native",
+        action="store_true",
+        help="Require a validated native store with zero fallbacks",
+    )
     parser.add_argument(
         "--require-pass",
         action="store_true",
@@ -223,6 +280,8 @@ def main(argv: list[str] | None = None) -> int:
         max_source_spans=args.max_source_spans,
         metric_k=args.metric_k,
         timeout_seconds=args.timeout_seconds,
+        expected_count=args.expected_count,
+        require_native=args.require_native,
     )
     write_reports(report, args.output_dir)
     print(json.dumps(report.as_dict(), indent=2, sort_keys=True))
@@ -233,14 +292,30 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _failure_class(file_recall: float, candidate_recall: float, module_score: float) -> str:
-    if file_recall < 1.0:
-        if candidate_recall > file_recall:
-            return "expected_file_below_top_k"
-        return "expected_file_not_retrieved"
-    if module_score < 1.0:
-        return "module_mismatch"
-    return "pass"
+def _retrieval_gate_failures(
+    status: dict[str, Any],
+    *,
+    count: int,
+    expected_count: int | None,
+    require_native: bool,
+) -> list[str]:
+    failures: list[str] = []
+    if expected_count is not None and count != expected_count:
+        failures.append(f"count {count} != {expected_count}")
+    if not require_native:
+        return failures
+    base = status.get("base")
+    if not isinstance(base, dict):
+        failures.append("base retrieval status is missing")
+        return failures
+    if base.get("backend") != "native":
+        failures.append(f"backend {base.get('backend')!r} is not native")
+    if int(base.get("native_fallbacks", 0)) != 0:
+        failures.append(f"native_fallbacks is {base.get('native_fallbacks')}")
+    manifest = base.get("store_manifest")
+    if not isinstance(manifest, dict) or manifest.get("validated") is not True:
+        failures.append("store manifest is not validated")
+    return failures
 
 
 def _markdown(report: MCPEvalReport) -> str:
@@ -249,24 +324,30 @@ def _markdown(report: MCPEvalReport) -> str:
         "",
         f"- endpoint: {report.endpoint}",
         f"- count: {report.count}",
-        f"- file_recall@k: {report.file_recall_at_k:.3f}",
-        f"- candidate_file_recall: {report.candidate_file_recall:.3f}",
-        f"- module_accuracy: {report.module_accuracy:.3f}",
-        f"- symbol_recall: {report.symbol_recall:.3f}",
-        f"- missing_source_citation_rate: {report.missing_source_citation_rate:.3f}",
-        f"- wrong_version_rate: {report.wrong_version_rate:.3f}",
+        f"- file_recall@k: {_metric(report.file_recall_at_k)}",
+        f"- candidate_file_recall: {_metric(report.candidate_file_recall)}",
+        f"- module_accuracy: {_metric(report.module_accuracy)}",
+        f"- symbol_recall: {_metric(report.symbol_recall)}",
+        f"- missing_source_citation_rate: {_metric(report.missing_source_citation_rate)}",
+        f"- wrong_version_rate: {_metric(report.wrong_version_rate)}",
         f"- latency_p95_ms: {report.latency_p95_ms:.1f}",
+        f"- gate_failures: {report.gate_failures}",
         "",
         "| id | file_recall@k | candidate_recall | module_accuracy | latency_ms | failure_class |",
         "| --- | ---: | ---: | ---: | ---: | --- |",
     ]
     for row in report.rows:
         lines.append(
-            f"| {row['id']} | {row[f'file_recall@{report.metric_k}']:.3f} | "
-            f"{row[f'file_recall@{report.max_source_spans}']:.3f} | {row['module_accuracy']:.3f} | "
+            f"| {row['id']} | {_metric(row[f'file_recall@{report.metric_k}'])} | "
+            f"{_metric(row[f'file_recall@{report.max_source_spans}'])} | "
+            f"{_metric(row['module_accuracy'])} | "
             f"{row['latency_ms']:.1f} | {row['failure_class']} |"
         )
     return "\n".join(lines) + "\n"
+
+
+def _metric(value: object) -> str:
+    return "N/A" if value is None else f"{float(str(value)):.3f}"
 
 
 if __name__ == "__main__":

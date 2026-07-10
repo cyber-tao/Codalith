@@ -11,6 +11,7 @@ from codalith.cards.verifier import KnowledgeCardVerifier
 from codalith.compiler.context_compiler import ContextCompiler
 from codalith.corpus.uri_resolver import URIResolver
 from codalith.eval.runner import EvalRunner, write_reports
+from codalith.eval.runner import main as eval_main
 from codalith.semantic.store import SemanticStore
 
 
@@ -217,7 +218,7 @@ def test_eval_runner_generates_json_and_markdown(registry, adapter, tmp_path):
                 "id": "case-1",
                 "query": "How does CachedValue handle ttl expiration?",
                 "version": "sample",
-                "expected_files": ["cache.py"],
+                "expected_files": ["src/core/cache.py"],
                 "expected_modules": ["core"],
                 "expected_symbols": ["CachedValue"],
             }
@@ -233,3 +234,34 @@ def test_eval_runner_generates_json_and_markdown(registry, adapter, tmp_path):
     json_path, md_path = write_reports(report, tmp_path / "reports")
     assert json.loads(json_path.read_text(encoding="utf-8"))["count"] == 1
     assert Path(md_path).read_text(encoding="utf-8").startswith("# Codalith Eval Report")
+
+
+def test_eval_cli_require_pass_returns_nonzero(registry_path, tmp_path):
+    dataset = tmp_path / "failing.jsonl"
+    dataset.write_text(
+        json.dumps(
+            {
+                "id": "failure",
+                "query": "No matching source",
+                "version": "sample",
+                "expected_files": ["src/core/does-not-exist.py"],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        eval_main(
+            [
+                "--registry",
+                str(registry_path),
+                "--dataset",
+                str(dataset),
+                "--output-dir",
+                str(tmp_path / "reports"),
+                "--require-pass",
+            ]
+        )
+        == 1
+    )

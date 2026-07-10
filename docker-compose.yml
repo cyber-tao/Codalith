@@ -120,7 +120,7 @@ services:
       CODALITH_HTTP_ENDPOINT: ${CODALITH_HTTP_ENDPOINT:-/mcp}
       CODALITH_HTTP_ALLOWED_ORIGINS: ${CODALITH_HTTP_ALLOWED_ORIGINS:-}
       CODALITH_USE_NATIVE_CODERAG: ${CODALITH_USE_NATIVE_CODERAG:-1}
-      CODALITH_NATIVE_CODERAG_STRICT: ${CODALITH_NATIVE_CODERAG_STRICT:-}
+      CODALITH_NATIVE_CODERAG_STRICT: "1"
       CODERAG_STORE_DIR: ${CODALITH_UE_CODERAG_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4}
     depends_on:
       postgres:
@@ -129,7 +129,7 @@ services:
       - "${CODALITH_HTTP_BIND:-127.0.0.1}:${CODALITH_HTTP_PORT:-8765}:${CODALITH_HTTP_PORT:-8765}"
     volumes:
       - ${CODALITH_REPO_ROOT:-.}:${CODALITH_WORKSPACE_DIR:-/workspace}
-      - ${CODALITH_CODERAG_OPENAI_HOST_ROOT:-coderag-openai-store}:${CODALITH_CODERAG_VOLUME_ROOT:-/var/lib/codalith/coderag}
+      - ${CODALITH_UE_CODERAG_HOST_DIR:-./.local/coderag-openai-store/ue-5.7.4-openai-qwen3-embedding-8b-3072c-3584b-full}:${CODALITH_UE_CODERAG_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4}:ro
       - ${CODALITH_UE_HOST_ROOT:-E:/UnrealEngine_5.7}:${CODALITH_UE_SOURCE_ROOT:-/srv/ue/5.7.4}:ro
       - ${CODALITH_UE_SOURCE_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Source}:${CODALITH_UE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Source:ro
       - ${CODALITH_UE_PLUGINS_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Plugins}:${CODALITH_UE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Plugins:ro
@@ -196,7 +196,7 @@ services:
         condition: service_healthy
     volumes:
       - ${CODALITH_REPO_ROOT:-.}:${CODALITH_WORKSPACE_DIR:-/workspace}
-      - ${CODALITH_CODERAG_OPENAI_HOST_ROOT:-coderag-openai-store}:${CODALITH_CODERAG_VOLUME_ROOT:-/var/lib/codalith/coderag}
+      - ${CODALITH_UE_CODERAG_HOST_DIR:-./.local/coderag-openai-store/ue-5.7.4-openai-qwen3-embedding-8b-3072c-3584b-full}:${CODALITH_UE_CODERAG_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4}:ro
     command: >
       sh -lc "uv sync &&
       uv run codalith-coderag-acceptance --version \"$${CODALITH_SAMPLE_VERSION}\" --provider openai --dataset eval/datasets/sample_eval_suite.jsonl --output-dir reports/coderag-openai --min-files 2 --min-chunks 2"
@@ -227,8 +227,15 @@ services:
       - ${CODALITH_UE_PLUGINS_HOST_ROOT:-E:/UnrealEngine_5.7/Engine/Plugins}:${CODALITH_UE_INDEXED_ROOT:-/srv/codalith/corpora/ue-5.7.4}/Engine/Plugins:ro
     command: >
       sh -lc "uv sync &&
-      uv run python -c \"from jobs.coderag_acceptance import ensure_coderag_installed; ensure_coderag_installed('openai')\" &&
-      uv run python -m codalith.eval.runner --registry configs/ue_5_7_4_registry.json --dataset eval/datasets/ue_eval_suite.jsonl --output-dir reports/eval/ue_eval_suite --version \"$${CODALITH_UE_VERSION}\" --max-source-spans 20"
+      uv run python -m jobs.ue_eval
+      --source-root \"$${CODALITH_UE_SOURCE_ROOT}\"
+      --indexed-root \"$${CODALITH_UE_INDEXED_ROOT}\"
+      --store-dir \"$${CODALITH_UE_CODERAG_STORE_DIR}\"
+      --registry \"$${CODALITH_CORPUS_REGISTRY}\"
+      --dataset eval/datasets/ue_eval_suite.jsonl
+      --output-dir reports/mcp-eval/ue_eval_suite
+      --version \"$${CODALITH_UE_VERSION}\"
+      --expected-count 80"
 
 volumes:
   codalith-postgres:

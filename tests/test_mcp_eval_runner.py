@@ -15,7 +15,7 @@ def test_mcp_eval_runner_calls_streamable_http(tools, tmp_path):
                 "id": "case-1",
                 "query": "CachedValue ttl expiration",
                 "version": "sample",
-                "expected_files": ["cache.py"],
+                "expected_files": ["src/core/cache.py"],
                 "expected_modules": ["core"],
             }
         )
