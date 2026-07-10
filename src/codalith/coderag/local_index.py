@@ -62,8 +62,6 @@ _RAW_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 @dataclass(slots=True)
 class IndexedFile:
     path: str
-    full_path: Path
-    text: str
     lines: list[str]
 
 
@@ -84,7 +82,14 @@ class LocalIndex:
     postings: dict[str, list[tuple[int, int]]]
 
 
-def scan_corpus(corpus: Corpus, root: Path, subpath: str | None = None) -> list[IndexedFile]:
+def scan_corpus(
+    corpus: Corpus,
+    root: Path,
+    subpath: str | None = None,
+    *,
+    max_files: int | None = None,
+    max_bytes: int | None = None,
+) -> list[IndexedFile]:
     resolved_root = root.resolve()
     if not resolved_root.exists():
         return []
@@ -94,25 +99,32 @@ def scan_corpus(corpus: Corpus, root: Path, subpath: str | None = None) -> list[
     ignore_dirs = _BUILTIN_IGNORE_DIRS | set(corpus.index_ignore_dirs)
     suffixes = _BUILTIN_TEXT_SUFFIXES | set(corpus.index_suffixes)
     files: list[IndexedFile] = []
+    total_bytes = 0
     paths = [scan_root] if scan_root.is_file() else _iter_text_paths(scan_root, ignore_dirs)
     for full_path in paths:
-        if not full_path.is_file() or full_path.suffix.lower() not in suffixes:
+        if not full_path.is_file() or not _matches_suffix(full_path, suffixes):
             continue
         if any(part in ignore_dirs for part in full_path.parts):
             continue
         try:
+            file_bytes = full_path.stat().st_size
+        except OSError:
+            continue
+        if max_files is not None and len(files) >= max_files:
+            raise CodeRAGAdapterError(
+                f"Local fallback exceeds file limit of {max_files} for {corpus.corpus_id}"
+            )
+        if max_bytes is not None and total_bytes + file_bytes > max_bytes:
+            raise CodeRAGAdapterError(
+                f"Local fallback exceeds byte limit of {max_bytes} for {corpus.corpus_id}"
+            )
+        try:
             text = full_path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
+        except (OSError, UnicodeDecodeError):
             continue
         relative = full_path.relative_to(resolved_root).as_posix()
-        files.append(
-            IndexedFile(
-                path=relative,
-                full_path=full_path,
-                text=text,
-                lines=text.splitlines(),
-            )
-        )
+        files.append(IndexedFile(path=relative, lines=text.splitlines()))
+        total_bytes += file_bytes
     return files
 
 
@@ -190,6 +202,11 @@ def _iter_text_paths(scan_root: Path, ignore_dirs: set[str]) -> Iterator[Path]:
         dirnames[:] = [dirname for dirname in dirnames if dirname not in ignore_dirs]
         for filename in filenames:
             yield Path(dirpath) / filename
+
+
+def _matches_suffix(path: Path, suffixes: set[str]) -> bool:
+    lowered = path.name.lower()
+    return any(lowered.endswith(suffix.lower()) for suffix in suffixes)
 
 
 def _index_terms(raw_text: str) -> Iterator[str]:

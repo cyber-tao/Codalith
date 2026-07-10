@@ -50,6 +50,7 @@ class SourceSpanEntry(TypedDict, total=False):
     corpus_id: NotRequired[str | None]
     corpus_kind: NotRequired[str | None]
     source_hash: NotRequired[str | None]
+    index_stale: NotRequired[bool]
     language: NotRequired[str | None]
     kind: NotRequired[str | None]
     extractor: NotRequired[object]

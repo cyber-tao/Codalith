@@ -23,7 +23,7 @@ from codalith.compiler.reranker import rerank
 from codalith.compiler.source_locator import load_source_domain_config, locate_source_priors
 from codalith.corpus.registry import CorpusRegistry
 from codalith.corpus.source_reader import SourceReader
-from codalith.corpus.uris import SCHEME, module_uri, parse_source_uri, symbol_uri
+from codalith.corpus.uris import SCHEME, module_uri, parse_source_uri, source_uri, symbol_uri
 from codalith.errors import CorpusNotFoundError, SourceReadError
 from codalith.semantic.graph import aggregate_graph_neighborhood
 from codalith.semantic.store import SemanticStore
@@ -178,34 +178,56 @@ class ContextCompiler:
         hits: list[RetrievalHit],
         corpus_kinds: dict[str, str],
     ) -> list[SourceSpanEntry]:
-        spans = _hits_to_source_spans(hits)
-        for span in spans:
-            corpus_id = str(span.get("corpus_id") or "")
-            span["corpus_kind"] = corpus_kinds.get(corpus_id)
-            path = str(span.get("path", ""))
-            raw_start = span.get("start_line", 0)
-            raw_end = span.get("end_line", raw_start)
-            start = int(raw_start) if isinstance(raw_start, int | str) else 0
-            end = int(raw_end) if isinstance(raw_end, int | str) else start
-            hit = next(
-                (
-                    item
-                    for item in hits
-                    if item.corpus_id == corpus_id
-                    and item.path == path
-                    and item.start_line == start
-                    and item.end_line == end
+        spans: list[SourceSpanEntry] = []
+        for hit in hits:
+            try:
+                source_slice = self.source_reader.read_slice(
+                    hit.corpus_id,
+                    hit.path,
+                    start_line=hit.start_line,
+                    end_line=hit.end_line,
+                )
+            except SourceReadError:
+                _LOG.warning(
+                    "Dropping retrieval hit whose canonical source is unavailable: %s:%s#L%s-L%s",
+                    hit.corpus_id,
+                    hit.path,
+                    hit.start_line,
+                    hit.end_line,
+                )
+                continue
+            canonical_hash = source_sha256(source_slice.content)
+            span: SourceSpanEntry = {
+                "uri": source_uri(
+                    hit.corpus_id,
+                    hit.path,
+                    source_slice.start_line,
+                    source_slice.end_line,
                 ),
-                None,
-            )
-            if hit is not None:
-                span["source_hash"] = source_sha256(hit.snippet)
-                span["language"] = hit.language
-                span["kind"] = hit.kind
-                span["extractor"] = hit.metadata.get("matched_by") or hit.source
-                span["confidence"] = min(1.0, max(0.0, hit.score / (hit.score + 1.0)))
-            if self.semantic_store is not None and corpus_id and path and start:
-                guards = self.semantic_store.guards_for_span(corpus_id, path, start, end)
+                "corpus_id": hit.corpus_id,
+                "corpus_kind": corpus_kinds.get(hit.corpus_id),
+                "path": hit.path,
+                "start_line": source_slice.start_line,
+                "end_line": source_slice.end_line,
+                "reason": hit.reason,
+                "source": hit.source,
+                "module": hit.module,
+                "score": hit.score,
+                "guard": None,
+                "source_hash": canonical_hash,
+                "index_stale": source_sha256(hit.snippet) != canonical_hash,
+                "language": hit.language,
+                "kind": hit.kind,
+                "extractor": hit.metadata.get("matched_by") or hit.source,
+                "confidence": min(1.0, max(0.0, hit.score / (hit.score + 1.0))),
+            }
+            if self.semantic_store is not None:
+                guards = self.semantic_store.guards_for_span(
+                    hit.corpus_id,
+                    hit.path,
+                    source_slice.start_line,
+                    source_slice.end_line,
+                )
                 if guards:
                     span["guard"] = [
                         {
@@ -216,6 +238,7 @@ class ContextCompiler:
                         }
                         for guard in guards
                     ]
+            spans.append(span)
         return spans
 
     def _card_verification_status(self, hit: RetrievalHit) -> str:
@@ -272,7 +295,12 @@ class ContextCompiler:
     ) -> SourceSpanEntry:
         try:
             corpus = self.registry.get_corpus(corpus_id)
-            snippet = self.source_reader.read_source(corpus.corpus_id, path, start, end)
+            source_slice = self.source_reader.read_slice(
+                corpus.corpus_id,
+                path,
+                start_line=start,
+                end_line=end,
+            )
         except (CorpusNotFoundError, SourceReadError):
             # Evidence pointing at an unavailable corpus stays cited but unhashed.
             return {"corpus_id": None, "corpus_kind": None, "source_hash": None}
@@ -289,7 +317,7 @@ class ContextCompiler:
         return {
             "corpus_id": corpus.corpus_id,
             "corpus_kind": corpus.kind,
-            "source_hash": source_sha256(snippet),
+            "source_hash": source_sha256(source_slice.content),
         }
 
     def _symbol_entries(
@@ -336,27 +364,8 @@ class ContextCompiler:
 def _build_queries(query: str, identifiers: list[str] | None = None) -> list[str]:
     queries = [query]
     if identifiers:
-        queries.extend(identifiers)
-        queries.append(" ".join(identifiers))
+        queries.append(" ".join(identifiers[:8]))
     return list(dict.fromkeys(item for item in queries if item.strip()))
-
-
-def _hits_to_source_spans(hits: list[RetrievalHit]) -> list[SourceSpanEntry]:
-    return [
-        {
-            "uri": hit.uri,
-            "corpus_id": hit.corpus_id,
-            "path": hit.path,
-            "start_line": hit.start_line,
-            "end_line": hit.end_line,
-            "reason": hit.reason,
-            "source": hit.source,
-            "module": hit.module,
-            "score": hit.score,
-            "guard": None,
-        }
-        for hit in hits
-    ]
 
 
 def _unique_hits(hits: list[RetrievalHit]) -> list[RetrievalHit]:

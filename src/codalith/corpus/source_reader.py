@@ -2,10 +2,24 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from codalith.corpus.registry import Corpus, CorpusRegistry
 from codalith.errors import SourceReadError
+
+
+@dataclass(frozen=True, slots=True)
+class SourceSlice:
+    corpus_id: str
+    path: str
+    start_line: int
+    end_line: int
+    content: str
+
+    @property
+    def line_count(self) -> int:
+        return self.end_line - self.start_line + 1
 
 
 class SourceReader:
@@ -29,11 +43,41 @@ class SourceReader:
         lines = self.read_lines(corpus_id, path)
         if start_line is None and end_line is None:
             return "\n".join(lines)
-        start = max(1, start_line or 1)
-        end = min(len(lines), end_line or len(lines))
-        if end < start:
-            return ""
-        return "\n".join(lines[start - 1 : end])
+        return self.read_slice(
+            corpus_id,
+            path,
+            start_line=start_line or 1,
+            end_line=end_line or len(lines),
+            lines=lines,
+        ).content
+
+    def read_slice(
+        self,
+        corpus_id: str,
+        path: str,
+        *,
+        start_line: int,
+        end_line: int,
+        lines: list[str] | None = None,
+    ) -> SourceSlice:
+        if start_line < 1:
+            raise SourceReadError(f"start_line must be >= 1: {start_line}")
+        if end_line < start_line:
+            raise SourceReadError(f"Descending line range: {start_line}-{end_line}")
+        source_lines = lines if lines is not None else self.read_lines(corpus_id, path)
+        if start_line > len(source_lines):
+            raise SourceReadError(
+                f"Source range starts after end of file: {path}#L{start_line} "
+                f"(file has {len(source_lines)} lines)"
+            )
+        actual_end = min(end_line, len(source_lines))
+        return SourceSlice(
+            corpus_id=corpus_id,
+            path=path,
+            start_line=start_line,
+            end_line=actual_end,
+            content="\n".join(source_lines[start_line - 1 : actual_end]),
+        )
 
     def read_lines(self, corpus_id: str, path: str) -> list[str]:
         resolved = self.resolve_path(corpus_id, path)

@@ -136,25 +136,27 @@ class CodalithTools:
             self.runtime.policy.check(resolved, self.scopes())
             assert resolved.start_line is not None
             assert resolved.end_line is not None
-            line_count = resolved.line_count or 0
+            requested_line_count = resolved.line_count or 0
             if self.runtime.rate_limiter is not None:
                 self.runtime.rate_limiter.record_read(
-                    line_count=line_count,
+                    line_count=requested_line_count,
                     path=resolved.relative_path,
                     start_line=resolved.start_line,
                     end_line=resolved.end_line,
                 )
-            content = self.runtime.source_reader.read_source(
+            source_slice = self.runtime.source_reader.read_slice(
                 resolved.corpus_id,
                 resolved.relative_path,
-                resolved.start_line,
-                resolved.end_line,
+                start_line=resolved.start_line,
+                end_line=resolved.end_line,
             )
+            line_count = source_slice.line_count
+            content = source_slice.content
             source_hash = source_sha256(content)
             auth = self._auth()
             if with_line_numbers:
                 content = "\n".join(
-                    f"{resolved.start_line + index}|{line}"
+                    f"{source_slice.start_line + index}|{line}"
                     for index, line in enumerate(content.splitlines())
                 )
             self.runtime.audit.write(
@@ -163,8 +165,8 @@ class CodalithTools:
                     uri=uri,
                     corpus_id=resolved.corpus_id,
                     path=resolved.relative_path,
-                    start_line=resolved.start_line,
-                    end_line=resolved.end_line,
+                    start_line=source_slice.start_line,
+                    end_line=source_slice.end_line,
                     line_count=line_count,
                     decision="allowed",
                     source_hash=source_hash,
@@ -177,8 +179,8 @@ class CodalithTools:
                 "uri": uri,
                 "corpus_id": resolved.corpus_id,
                 "path": resolved.relative_path,
-                "start_line": resolved.start_line,
-                "end_line": resolved.end_line,
+                "start_line": source_slice.start_line,
+                "end_line": source_slice.end_line,
                 "source_hash": source_hash,
                 "content": content,
             }

@@ -12,15 +12,19 @@ from typing import Any
 
 import pytest
 
+from codalith.cards.hashing import source_sha256
+from codalith.coderag import CodeRAGAdapter, RetrievalHit
 from codalith.coderag.native import (
     _configure_native_batch_embedding,
     _configure_native_env_aliases,
     _limit_chunk_texts,
     native_store_dir,
 )
+from codalith.coderag.native_backend import validate_native_store
+from codalith.compiler.context_compiler import ContextCompiler
 from codalith.corpus.source_policy import SourcePolicy, SourceReadRateLimiter
 from codalith.corpus.source_reader import SourceReader
-from codalith.errors import SourcePolicyError
+from codalith.errors import CodeRAGAdapterError, SourcePolicyError, SourceReadError
 from codalith.gateway.auth import AuthContext, AuthError
 from codalith.gateway.mcp_server import handle_request
 from codalith.gateway.tools import call_tool, create_runtime
@@ -91,11 +95,83 @@ def test_local_search_ranks_path_token_matches_higher(adapter):
     assert hits[0].path.endswith("events.py")
 
 
+def test_native_search_failure_builds_local_fallback(registry, monkeypatch):
+    monkeypatch.delenv("CODALITH_NATIVE_CODERAG_STRICT", raising=False)
+    adapter = CodeRAGAdapter(registry, prefer_native=True)
+
+    def fail_search(*args: object, **kwargs: object) -> list[RetrievalHit]:
+        raise RuntimeError("native unavailable")
+
+    def unexpected_reindex(*args: object, **kwargs: object) -> dict[str, object]:
+        pytest.fail("search fallback must not trigger native reindex")
+
+    monkeypatch.setattr(adapter.native, "search", fail_search)
+    monkeypatch.setattr(adapter.native, "reindex", unexpected_reindex)
+
+    hits = adapter.search_code("sample-codebase", "CachedValue ttl", top_k=3)
+
+    assert any(hit.path.endswith("cache.py") for hit in hits)
+
+
+def test_local_partial_reindex_preserves_other_files(adapter, sample_corpus_root):
+    adapter.reindex("sample-codebase")
+    cache_path = sample_corpus_root / "src/core/cache.py"
+    cache_path.write_text("ONLY_UPDATED_TOKEN = True\n", encoding="utf-8")
+
+    adapter.reindex("sample-codebase", path="src/core/cache.py")
+
+    assert adapter.search_code("sample-codebase", "ONLY_UPDATED_TOKEN", top_k=3)
+    assert any(
+        hit.path.endswith("events.py")
+        for hit in adapter.search_code("sample-codebase", "EventBus dispatch", top_k=3)
+    )
+
+
+def test_local_fallback_enforces_file_limit(registry, monkeypatch):
+    monkeypatch.setenv("CODALITH_LOCAL_INDEX_MAX_FILES", "1")
+    adapter = CodeRAGAdapter(registry)
+
+    with pytest.raises(CodeRAGAdapterError, match="file limit"):
+        adapter.search_code("sample-codebase", "cache", top_k=1)
+
+
 def test_native_store_dir_uses_corpus_store_not_global_env(registry, monkeypatch, tmp_path):
     corpus = registry.get_base("sample")
     monkeypatch.setenv("CODERAG_STORE_DIR", str(tmp_path / "wrong-store"))
 
     assert native_store_dir(corpus) == Path(corpus.coderag_store)
+
+
+def test_native_store_manifest_validates_physical_metadata(registry, tmp_path):
+    corpus = registry.get_base()
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "corpus_id": corpus.corpus_id,
+                "source_revision": corpus.source_revision,
+                "embedding_model": "expected",
+                "embedding_dimension": 16,
+                "store_schema_version": 1,
+                "chunk_policy": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = tmp_path / "native-store"
+    store.mkdir()
+    (store / "meta.json").write_text(
+        json.dumps({"embed_model": "wrong", "embed_dim": 16, "schema_version": 1}),
+        encoding="utf-8",
+    )
+    configured = dataclass_replace(
+        corpus,
+        coderag_store=store,
+        store_manifest_path=manifest_path,
+    )
+
+    with pytest.raises(CodeRAGAdapterError, match="embed_model"):
+        validate_native_store(configured)
 
 
 def test_configure_native_env_aliases_uses_codalith_names(monkeypatch):
@@ -173,6 +249,27 @@ def test_source_reader_prefers_source_root_when_indexed_root_is_partial(tmp_path
     content = SourceReader(registry).read_source(corpus.corpus_id, "src/core/cache.py", 1, 2)
 
     assert "dataclass" in content
+
+
+def test_source_reader_reports_actual_range_and_rejects_out_of_bounds(registry):
+    reader = SourceReader(registry)
+    source_slice = reader.read_slice(
+        "sample-codebase",
+        "src/core/cache.py",
+        start_line=8,
+        end_line=500,
+    )
+
+    assert source_slice.start_line == 8
+    assert source_slice.end_line == 9
+    assert source_slice.line_count == 2
+    with pytest.raises(SourceReadError, match="after end of file"):
+        reader.read_slice(
+            "sample-codebase",
+            "src/core/cache.py",
+            start_line=500,
+            end_line=501,
+        )
 
 
 def test_limit_chunk_texts_splits_oversized_chunks():
@@ -271,6 +368,18 @@ def test_codalith_read_source_adds_line_numbers_and_audit(tools):
     assert audit["user_id"] == "test-user"
 
 
+def test_codalith_read_source_reports_actual_clipped_range(tools):
+    result = tools.codalith_read_source(
+        uri="codalith://sample-codebase/source/src/core/cache.py#L8-L25"
+    )
+
+    assert result["start_line"] == 8
+    assert result["end_line"] == 9
+    audit = json.loads(tools.runtime.audit.path.read_text(encoding="utf-8").splitlines()[-1])
+    assert audit["line_count"] == 2
+    assert audit["end_line"] == 9
+
+
 def test_codalith_read_source_requires_source_scope(tools):
     tools.runtime.identity = AuthContext(
         user_id="limited",
@@ -293,6 +402,55 @@ def test_codalith_context_returns_context_pack(tools):
     assert pack["source_spans"]
     assert pack["graph_edges"]
     assert any(span["path"].endswith("cache.py") for span in pack["source_spans"])
+
+
+def test_context_pack_hashes_canonical_source_not_stale_hit(tools, monkeypatch):
+    hit = RetrievalHit(
+        source="coderag",
+        corpus_id="sample-codebase",
+        uri="codalith://sample-codebase/source/src/core/cache.py#L1-L2",
+        path="src/core/cache.py",
+        start_line=1,
+        end_line=2,
+        title="stale",
+        snippet="stale index content",
+        score=10.0,
+    )
+    monkeypatch.setattr(
+        tools.runtime.adapter,
+        "search_code",
+        lambda *args, **kwargs: [hit],
+    )
+
+    pack = tools.codalith_context(query="CanonicalHashProbe", version="sample")
+
+    span = next(item for item in pack["source_spans"] if item["path"] == hit.path)
+    canonical = tools.runtime.source_reader.read_source("sample-codebase", hit.path, 1, 2)
+    assert span["source_hash"] == source_sha256(canonical)
+    assert span["index_stale"] is True
+
+
+def test_context_compiler_bounds_retrieval_query_fanout(registry, adapter, monkeypatch):
+    queries: list[str] = []
+
+    def record_search(
+        corpus_id: str,
+        query: str,
+        top_k: int = 8,
+        filters: dict[str, Any] | None = None,
+    ) -> list[RetrievalHit]:
+        del corpus_id, top_k, filters
+        queries.append(query)
+        return []
+
+    monkeypatch.setattr(adapter, "search_code", record_search)
+
+    ContextCompiler(registry, adapter).compile(
+        query="AlphaIdentifier BetaIdentifier GammaIdentifier",
+        version="sample",
+    )
+
+    assert len(queries) <= 2
 
 
 def test_graph_returns_semantic_edges(tools):
@@ -551,6 +709,10 @@ class _CountingSourceReader:
         self.read_source_calls += 1
         return self._inner.read_source(*args, **kwargs)
 
+    def read_slice(self, *args, **kwargs):
+        self.read_source_calls += 1
+        return self._inner.read_slice(*args, **kwargs)
+
 
 def test_read_source_rate_limit_precedes_file_read(tools):
     counting = _CountingSourceReader(tools.runtime.source_reader)
@@ -572,7 +734,7 @@ def test_read_source_rate_limit_precedes_file_read(tools):
 def test_read_source_fills_default_window_and_validates_ranges(tools):
     result = tools.codalith_read_source(uri="codalith://sample-codebase/source/src/core/cache.py")
     assert result["start_line"] == 1
-    assert result["end_line"] == tools.runtime.policy.default_max_lines
+    assert result["end_line"] == 9
 
     with pytest.raises(SourcePolicyError):
         tools.codalith_read_source(
