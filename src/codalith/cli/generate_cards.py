@@ -7,9 +7,9 @@ import json
 
 from codalith.cards.generator import write_cards
 from codalith.cards.verifier import KnowledgeCardVerifier
+from codalith.cli.common import add_corpus_arguments, load_seed_cards, resolve_corpus
 from codalith.coderag import CodeRAGAdapter
 from codalith.corpus.uri_resolver import URIResolver
-from jobs.common import add_corpus_arguments, load_seed_cards, resolve_corpus
 
 
 def main(argv: list[str] | None = None) -> int:

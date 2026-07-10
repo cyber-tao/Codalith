@@ -25,20 +25,21 @@ codalith-mcp = "codalith.gateway.mcp_server:main"
 codalith-mcp-http = "codalith.gateway.http_server:main"
 codalith-eval = "codalith.eval.runner:main"
 codalith-mcp-eval = "codalith.eval.mcp_runner:main"
-codalith-generate-cards = "jobs.generate_cards:main"
-codalith-verify-cards = "jobs.verify_cards:main"
-codalith-index-corpus = "jobs.index_corpus:main"
-codalith-semantic-status = "jobs.semantic_status:main"
-codalith-coderag-acceptance = "jobs.coderag_acceptance:main"
-codalith-backup-coderag-store = "jobs.backup_coderag_store:main"
+codalith-generate-cards = "codalith.cli.generate_cards:main"
+codalith-verify-cards = "codalith.cli.verify_cards:main"
+codalith-index-corpus = "codalith.cli.index_corpus:main"
+codalith-semantic-status = "codalith.cli.semantic_status:main"
+codalith-coderag-acceptance = "codalith.cli.coderag_acceptance:main"
+codalith-backup-coderag-store = "codalith.cli.backup_coderag_store:main"
+codalith-ue-eval = "codalith.cli.ue_eval:main"
 
 [tool.setuptools.packages.find]
-where = ["src", "."]
-include = ["codalith*", "jobs*"]
+where = ["src"]
+include = ["codalith*"]
 
 [tool.pytest.ini_options]
 addopts = "-q"
-pythonpath = ["src", "."]
+pythonpath = ["src"]
 testpaths = ["tests"]
 norecursedirs = ["external", ".venv", "build", "dist"]
 markers = [
@@ -49,7 +50,7 @@ markers = [
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-src = ["src", "tests", "jobs"]
+src = ["src", "tests", "scripts"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
@@ -62,5 +63,9 @@ mypy_path = "src"
 exclude = ["external/", ".venv/", "build/"]
 
 [[tool.mypy.overrides]]
-module = ["tests.*", "jobs.*"]
+module = ["tests.*"]
 disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = ["coderag", "coderag.*"]
+ignore_missing_imports = true

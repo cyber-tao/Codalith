@@ -14,7 +14,7 @@ def build_instructions(registry: CorpusRegistry) -> str:
     """Assemble the server self-description from the configured corpus registry.
 
     Nothing domain-specific is hardcoded here: corpus names, descriptions, and
-    trigger keywords all come from configs/corpus_registry.json, so a deployment
+    trigger keywords all come from the configured corpus registry, so a deployment
     that indexes a different codebase advertises that codebase instead.
     """
     corpus_labels = [

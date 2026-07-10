@@ -7,10 +7,10 @@ import json
 import os
 
 from codalith.cards.verifier import KnowledgeCardVerifier
+from codalith.cli.common import add_corpus_arguments, load_seed_cards, resolve_corpus
 from codalith.coderag import CodeRAGAdapter
 from codalith.corpus.uri_resolver import URIResolver
 from codalith.semantic.store import SemanticStore
-from jobs.common import add_corpus_arguments, load_seed_cards, resolve_corpus
 
 
 def main(argv: list[str] | None = None) -> int:

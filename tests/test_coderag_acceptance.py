@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 
-from jobs.coderag_acceptance import (
+from codalith.cli.coderag_acceptance import (
     acceptance_minimums,
     configure_coderag_runtime_env,
     minimal_coderag_dependencies,

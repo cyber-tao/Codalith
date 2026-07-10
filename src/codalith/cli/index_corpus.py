@@ -5,8 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 
+from codalith.cli.common import add_corpus_arguments, resolve_corpus
 from codalith.coderag import CodeRAGAdapter
-from jobs.common import add_corpus_arguments, resolve_corpus
 
 
 def main(argv: list[str] | None = None) -> int:

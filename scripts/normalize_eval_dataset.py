@@ -46,7 +46,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--priors",
-        default="configs/ue_source_priors.json",
+        default="configs/corpora/ue-5.7.4/source_priors.json",
     )
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args(argv)

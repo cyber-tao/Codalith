@@ -47,7 +47,6 @@ def pack_metrics(
     item: dict[str, Any],
     *,
     k: int,
-    default_version: str | None = None,
 ) -> dict[str, float | None]:
     """Compute the per-item metric set shared by both eval runners.
 
@@ -55,7 +54,7 @@ def pack_metrics(
     own resolved version is treated as expected, so wrong_version_rate only
     checks span/corpus consistency.
     """
-    expected_version = str(item.get("version") or default_version or pack.get("version", ""))
+    expected_version = str(item.get("version") or pack.get("version", ""))
     return {
         f"file_recall@{k}": file_recall_at_k(pack, expected_strings(item, "expected_files"), k=k),
         "module_accuracy": module_accuracy(pack, expected_strings(item, "expected_modules")),
@@ -78,7 +77,7 @@ def evaluate_dataset(
     dataset_path: str | Path,
     run_pack: Callable[[dict[str, Any], str | None], dict[str, Any]],
     *,
-    version: str | None = None,
+    corpus: str | None = None,
     metric_k: int = DEFAULT_METRIC_K,
     row_extras: Callable[
         [dict[str, Any], dict[str, Any], dict[str, float | None]],
@@ -95,12 +94,12 @@ def evaluate_dataset(
     rows: list[dict[str, Any]] = []
     latencies: list[float] = []
     for item in read_jsonl(dataset_path):
-        item_version = str(item["version"]) if item.get("version") else version
+        item_corpus = str(item.get("corpus") or item.get("version") or corpus or "")
         started = time.perf_counter()
-        pack = run_pack(item, item_version)
+        pack = run_pack(item, item_corpus or None)
         elapsed_ms = (time.perf_counter() - started) * 1000
         latencies.append(elapsed_ms)
-        metrics = pack_metrics(pack, item, k=metric_k, default_version=version)
+        metrics = pack_metrics(pack, item, k=metric_k)
         row: dict[str, Any] = {
             "id": item.get("id"),
             "query": item["query"],

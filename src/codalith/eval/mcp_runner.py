@@ -81,7 +81,7 @@ def run_mcp_eval(
     endpoint: str,
     dataset_path: str | Path,
     label: str,
-    version: str | None = None,
+    corpus: str | None = None,
     max_source_spans: int = 20,
     metric_k: int = DEFAULT_METRIC_K,
     timeout_seconds: float = 120.0,
@@ -95,7 +95,7 @@ def run_mcp_eval(
         endpoint,
         Path(dataset_path),
         label,
-        version,
+        corpus,
         max_source_spans,
         metric_k,
         timeout_seconds,
@@ -108,7 +108,7 @@ async def _run_mcp_eval_async(
     endpoint: str,
     dataset_path: Path,
     label: str,
-    version: str | None,
+    corpus: str | None,
     max_source_spans: int,
     metric_k: int,
     timeout_seconds: float,
@@ -129,7 +129,7 @@ async def _run_mcp_eval_async(
         ) as (read_stream, write_stream, _):
             async with ClientSession(read_stream, write_stream) as session:
                 await session.initialize()
-                status_arguments = {"corpus": version} if version else {}
+                status_arguments = {"corpus": corpus} if corpus else {}
                 retrieval_status = _structured_tool_result(
                     await session.call_tool(
                         "codalith_index_status",
@@ -137,14 +137,19 @@ async def _run_mcp_eval_async(
                     )
                 )
                 for item in read_jsonl(dataset_path):
-                    item_version = str(item["version"]) if item.get("version") else version
+                    item_corpus = str(
+                        item.get("corpus")
+                        or item.get("version")
+                        or corpus
+                        or ""
+                    )
                     arguments: dict[str, Any] = {
                         "query": str(item["query"]),
                         "mode": str(item.get("mode", "explain")),
                         "max_source_spans": max_source_spans,
                     }
-                    if item_version:
-                        arguments["corpus"] = item_version
+                    if item_corpus:
+                        arguments["corpus"] = item_corpus
                     started = time.perf_counter()
                     result = await session.call_tool("codalith_context", arguments)
                     latencies.append((time.perf_counter() - started) * 1000)
@@ -153,7 +158,6 @@ async def _run_mcp_eval_async(
                         pack,
                         item,
                         k=metric_k,
-                        default_version=version,
                     )
                     expected_files = expected_strings(item, "expected_files")
                     candidate_recall = file_recall_at_k(
@@ -254,9 +258,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dataset", default="eval/datasets/sample_eval_suite.jsonl")
     parser.add_argument("--output-dir", default="reports/mcp-eval")
     parser.add_argument("--label", default="baseline")
-    parser.add_argument(
-        "--version", default=None, help="Corpus version (defaults to the endpoint default corpus)"
-    )
+    parser.add_argument("--corpus", default=None, help="Base corpus id or version alias")
     parser.add_argument("--max-source-spans", type=int, default=20)
     parser.add_argument("--metric-k", type=int, default=DEFAULT_METRIC_K)
     parser.add_argument("--timeout-seconds", type=float, default=120.0)
@@ -276,7 +278,7 @@ def main(argv: list[str] | None = None) -> int:
         endpoint=args.endpoint,
         dataset_path=args.dataset,
         label=args.label,
-        version=args.version,
+        corpus=args.corpus,
         max_source_spans=args.max_source_spans,
         metric_k=args.metric_k,
         timeout_seconds=args.timeout_seconds,

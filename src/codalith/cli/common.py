@@ -1,4 +1,4 @@
-"""Shared CLI helpers for Codalith jobs."""
+"""Shared CLI helpers for Codalith commands."""
 
 from __future__ import annotations
 
@@ -10,16 +10,13 @@ from codalith.coderag import CodeRAGAdapter
 from codalith.corpus.registry import Corpus, CorpusRegistry
 from codalith.corpus.uri_resolver import URIResolver
 
-DEFAULT_REGISTRY_PATH = "configs/corpus_registry.json"
+DEFAULT_REGISTRY_PATH = "configs/sample/registry.json"
 
 
 def add_corpus_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--registry", default=DEFAULT_REGISTRY_PATH)
     parser.add_argument("--corpus", help="Explicit corpus id or version alias")
     parser.add_argument("--project", help="Project overlay corpus id")
-    parser.add_argument(
-        "--version", default=None, help="Corpus version (defaults to the registry default corpus)"
-    )
 
 
 def resolve_corpus(args: argparse.Namespace) -> tuple[CorpusRegistry, Corpus]:
@@ -28,7 +25,7 @@ def resolve_corpus(args: argparse.Namespace) -> tuple[CorpusRegistry, Corpus]:
         return registry, registry.get_corpus(args.corpus)
     if getattr(args, "project", None):
         return registry, registry.get_project(args.project)
-    return registry, registry.get_base(args.version)
+    return registry, registry.get_base()
 
 
 def load_seed_cards(

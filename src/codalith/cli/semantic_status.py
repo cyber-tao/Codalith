@@ -12,9 +12,9 @@ import json
 from pathlib import Path
 from typing import Any
 
+from codalith.cli.common import add_corpus_arguments, resolve_corpus
 from codalith.corpus.registry import Corpus
 from codalith.semantic.store import SemanticStore
-from jobs.common import add_corpus_arguments, resolve_corpus
 
 
 def main(argv: list[str] | None = None) -> int:

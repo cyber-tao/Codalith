@@ -44,7 +44,10 @@ def create_runtime(
 ) -> ToolRuntime:
     resolved_registry_path = registry_path
     if resolved_registry_path is None:
-        resolved_registry_path = os.getenv("CODALITH_CORPUS_REGISTRY") or "configs/corpus_registry.json"
+        resolved_registry_path = (
+            os.getenv("CODALITH_CORPUS_REGISTRY")
+            or "configs/sample/registry.json"
+        )
     resolved_source_policy_path = source_policy_path
     if resolved_source_policy_path is None:
         resolved_source_policy_path = os.getenv("CODALITH_SOURCE_POLICY") or "configs/source_policy.json"

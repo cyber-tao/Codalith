@@ -63,7 +63,7 @@ def test_ue_eval_suite_passes_real_native_mcp(
         pytest.skip(f"real UE paths are unavailable: {', '.join(missing)}")
     monkeypatch.setenv(
         "CODALITH_CORPUS_REGISTRY",
-        "configs/ue_5_7_4_registry.json",
+        "configs/corpora/ue-5.7.4/registry.json",
     )
     monkeypatch.setenv("CODALITH_USE_NATIVE_CODERAG", "1")
     monkeypatch.setenv("CODALITH_NATIVE_CODERAG_STRICT", "1")
@@ -83,7 +83,7 @@ def test_ue_eval_suite_passes_real_native_mcp(
             endpoint=f"http://{host}:{port}/mcp",
             dataset_path=eval_suite_dataset_path,
             label="ue_eval_suite",
-            version="5.7.4",
+            corpus="5.7.4",
             max_source_spans=20,
             metric_k=5,
             expected_count=EXPECTED_SUITE_SIZE,

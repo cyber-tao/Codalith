@@ -2,28 +2,28 @@
 
 [中文文档](README.zh-CN.md)
 
-Codalith is a Python MCP gateway for versioned source-code corpora. The core is domain-neutral: default code, configuration, tests, and Docker services use a small sample source corpus, and production corpora are declared through the `corpora`/`projects`/`generated` sections of `configs/corpus_registry.json`.
+Codalith is a Python MCP gateway for versioned source-code corpora. It gives AI coding tools such as Claude Code and Codex source-backed Context Packs, bounded source reads, symbol/graph lookup, examples, and corpus comparison.
 
-UE 5.7 appears only in `eval/` because the current retrieval-quality baseline uses an existing CodeRAG embedding store built from UE 5.7 source. It is not part of the default MCP service path.
+The core is domain-neutral. The default service uses the small sample corpus under `fixtures/sample_corpus`; UE 5.7.4 is an opt-in product corpus under `configs/corpora/ue-5.7.4/` with an explicit native CodeRAG store and acceptance suite.
 
-## Features
+## Architecture
 
-- MCP stdio and Streamable HTTP gateways for AI coding tools.
-- Versioned corpus registry with configurable source, indexed, CodeRAG, card, source-prior, and seed-card paths.
-- Unified source URI resolution for `codalith://<corpus_id>/...` resources.
-- Source-root-first `SourceReader` with indexed-root fallback for evidence reads.
-- Source-read policy, scopes, rate limits, and audit log support.
-- Optional semantic graph store and knowledge-card verification.
-- CodeRAG acceptance jobs and eval reports for default sample and explicit UE eval runs.
+- Official Python MCP SDK v1 for stdio and Streamable HTTP.
+- Validated `source` / `project` / `generated` corpus registry and revision provenance.
+- Native CodeRAG backend with strict manifest validation plus a bounded deterministic local fallback.
+- Canonical source slices, policy, per-identity rate limiting, and audit records.
+- Filesystem-backed Knowledge Cards with evidence and semantic verification states.
+- Optional versioned SQLite/PostgreSQL semantic graph store.
+- Shared in-process and MCP eval metrics/gates.
 
 ## Requirements
 
-- Python 3.11 or newer.
-- [uv](https://docs.astral.sh/uv/) for local Python workflows.
-- Docker Compose for containerized validation.
-- Git submodules for the pinned CodeRAG checkout when running native CodeRAG acceptance.
+- Python 3.11+
+- [uv](https://docs.astral.sh/uv/)
+- Docker Compose for container workflows
+- `external/CodeRAG` submodule only for native retrieval/acceptance
 
-## Quick Start
+## Quick start
 
 ```bash
 cp .env.example .env
@@ -32,115 +32,102 @@ uv run pytest
 uv run codalith-mcp
 ```
 
-Run the HTTP MCP server locally:
+HTTP:
 
 ```bash
 uv run codalith-mcp-http --host 127.0.0.1 --port 8765 --endpoint /mcp
 ```
 
-HTTP endpoint:
+Endpoint: `http://127.0.0.1:8765/mcp`
 
-```text
-http://127.0.0.1:8765/mcp
+Client installation helpers:
+
+```bash
+sh scripts/install-mcp-client.sh
+# or
+powershell -File scripts/install-mcp-client.ps1
 ```
 
 ## Configuration
 
-Default local development uses `fixtures/sample_corpus`:
+Default sample assets:
 
-- `configs/corpus_registry.json`
+- `configs/sample/registry.json`
+- `configs/sample/source_priors.json`
+- `configs/sample/seed_cards.json`
 - `configs/source_policy.json`
-- `configs/source_priors.json`
-- `configs/seed_cards.json`
 
-Host-specific values live in `.env`; do not edit `docker-compose.yml` per machine.
+UE product assets:
 
-Common variables:
+- `configs/corpora/ue-5.7.4/registry.json`
+- `configs/corpora/ue-5.7.4/source_priors.json`
+- `configs/corpora/ue-5.7.4/seed_cards.json`
+- `configs/corpora/ue-5.7.4/store_manifest.json`
+- `eval/datasets/ue_eval_suite.jsonl`
 
-| Variable | Purpose |
-| --- | --- |
-| `CODALITH_SAMPLE_SOURCE_ROOT` | Source root for the default sample corpus. |
-| `CODALITH_SAMPLE_INDEXED_ROOT` | Indexed root used for search/index operations. |
-| `CODALITH_SAMPLE_CODERAG_STORE_DIR` | CodeRAG store path for the sample corpus. |
-| `CODALITH_SAMPLE_CARD_ROOT` | Rendered knowledge-card root for the sample corpus. |
-| `CODALITH_SAMPLE_SOURCE_PRIORS` | Optional source-prior config for deterministic source entry points. |
-| `CODALITH_SAMPLE_SEED_CARDS` | Optional seed-card config. |
-| `CODALITH_SCOPES` | Explicit scope override; empty grants base scopes plus registry access scopes. |
-| `CODALITH_CODERAG_PROVIDER` | Default CodeRAG provider for local commands. |
+Copy `.env.example` for neutral development. Append values from `.env.ue.example` only when using the UE corpus, and replace its relative host paths/credentials locally. Never commit `.env`, stores, reports, or source mounts.
 
-## Docker Workflows
-
-Run default checks:
-
-```bash
-docker compose run --rm test
-```
-
-Run the HTTP MCP service (sample corpus by default):
-
-```bash
-docker compose up -d mcp-http
-```
-
-Run the optional full UE 5.7.4 corpus MCP (uses `configs/ue_5_7_4_registry.json` and the local embedding store):
-
-```bash
-docker compose --profile ue up -d mcp-http-ue
-```
-
-Run default sample corpus acceptance:
-
-```bash
-docker compose --profile acceptance run --rm corpus-acceptance
-```
-
-Run native CodeRAG acceptance against the sample dataset:
-
-```bash
-docker compose --profile coderag run --rm coderag-acceptance
-```
-
-Optional OpenAI-backed CodeRAG acceptance (same profile):
-
-```bash
-docker compose --profile coderag run --rm coderag-openai-acceptance
-```
-
-Run the explicit UE Eval Suite profile (acceptance only; reuses the product UE registry):
-
-```bash
-docker compose --profile eval-ue run --rm ue-eval
-```
-
-The UE corpus lives under `configs/ue_5_7_4_registry.json`, `configs/ue_source_priors.json`, and `configs/ue_seed_cards.json`. The Eval Suite dataset stays at `eval/datasets/ue_eval_suite.jsonl`.
+Product corpora must provide a non-empty `source_revision`. Native stores with a configured manifest are rejected when model, dimension, schema, corpus, or revision metadata does not match.
 
 ## CLI
 
 | Command | Purpose |
 | --- | --- |
-| `codalith-mcp` | stdio MCP server. |
-| `codalith-mcp-http` | Streamable HTTP MCP server. |
-| `codalith-index-corpus --corpus <id>` | Index any configured corpus. |
-| `codalith-semantic-status --corpus <id>` | Record corpus metadata and report semantic store status; the core ships no domain extractors. |
-| `codalith-generate-cards --corpus <id>` | Generate and verify configured seed cards. |
-| `codalith-verify-cards --corpus <id>` | Verify configured seed cards. |
-| `codalith-coderag-acceptance` | Native CodeRAG acceptance against a configured corpus. |
-| `codalith-backup-coderag-store` | Backup a CodeRAG store directory. |
-| `codalith-eval --dataset <path>` | Run in-process eval (optional `--semantic-db`). |
-| `codalith-mcp-eval --endpoint <url> --dataset <path>` | Run eval through an MCP HTTP endpoint. |
+| `codalith-mcp` | MCP stdio server |
+| `codalith-mcp-http` | MCP Streamable HTTP server |
+| `codalith-index-corpus --corpus <id>` | Index or smoke-check a corpus |
+| `codalith-semantic-status --corpus <id>` | Record/report semantic store state |
+| `codalith-generate-cards --corpus <id>` | Generate evidence-verified cards |
+| `codalith-verify-cards --corpus <id>` | Verify configured cards |
+| `codalith-coderag-acceptance --corpus <id>` | Native CodeRAG acceptance |
+| `codalith-backup-coderag-store` | Backup a CodeRAG store |
+| `codalith-eval --corpus <id>` | In-process eval |
+| `codalith-mcp-eval --corpus <id>` | Eval through MCP HTTP |
+| `codalith-ue-eval` | Cross-platform real UE MCP acceptance |
+
+## Docker
+
+```bash
+docker compose run --rm test
+docker compose up -d mcp-http
+docker compose --profile acceptance run --rm corpus-acceptance
+docker compose --profile coderag run --rm coderag-acceptance
+```
+
+After configuring UE host paths and the query embedding provider in `.env`:
+
+```bash
+docker compose --profile ue up -d mcp-http-ue
+docker compose --profile eval-ue run --rm ue-eval
+```
+
+Both UE services run native retrieval in strict mode and mount the selected store directory read-only.
+
+## Eval
+
+Default pytest validates the 80-row UE dataset contract but does not fake UE retrieval. Real acceptance is explicit:
+
+```bash
+uv run codalith-ue-eval \
+  --source-root /path/to/UnrealEngine_5.7 \
+  --indexed-root /path/to/UnrealEngine_5.7 \
+  --store-dir .local/coderag-openai-store/ue-5.7.4-openai-qwen3-embedding-8b-3072c-3584b-full
+```
+
+The gate requires 80 rows, all applicable retrieval/module/symbol metrics, zero citation/version errors, native backend, zero fallback, and a validated store manifest. Dataset expectations are normalized with:
+
+```bash
+uv run python scripts/normalize_eval_dataset.py --check
+```
 
 ## Validation
 
 ```bash
 uv run pytest
-uv run ruff check src tests jobs
+uv run ruff check src tests scripts/normalize_eval_dataset.py
 uv run mypy src
 docker compose config --quiet
 docker compose --env-file .env.example config --quiet
 ```
 
-UE Eval Suite, when the UE source/checkpoint store is available:
-
-```bash
-uv run python -m codalith.eval.runner --registry configs/ue_5_7_4_registry.json --dataset eval/datasets/ue_eval_suite.jsonl --output-dir reports/eval/ue_eval_suite --version 5.7.4 --max-source-spans 20
-```
+Semantic stores are schema-versioned. This development build deliberately rejects unversioned legacy stores; recreate them instead of attempting an implicit migration.

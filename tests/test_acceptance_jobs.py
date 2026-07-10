@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 
-from jobs.index_corpus import main as index_corpus_main
-from jobs.semantic_status import main as semantic_status_main
+from codalith.cli.index_corpus import main as index_corpus_main
+from codalith.cli.semantic_status import main as semantic_status_main
 
 
 def test_semantic_status_writes_empty_summary(registry_path, tmp_path):

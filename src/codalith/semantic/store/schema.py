@@ -1,4 +1,4 @@
-"""Schema DDL loading and lightweight migrations for the semantic store."""
+"""Versioned schema initialization for the semantic store."""
 
 from __future__ import annotations
 

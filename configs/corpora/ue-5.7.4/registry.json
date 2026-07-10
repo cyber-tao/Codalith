@@ -18,9 +18,9 @@
       "coderag_store": "${CODALITH_UE_CODERAG_STORE_DIR:-/var/lib/codalith/coderag/ue-5.7.4}",
       "semantic_schema": "${CODALITH_UE_SEMANTIC_SCHEMA:-ue_5_7_4}",
       "card_root": "${CODALITH_UE_CARD_ROOT:-data/cards/ue-5.7.4}",
-      "source_priors_path": "${CODALITH_UE_SOURCE_PRIORS:-configs/ue_source_priors.json}",
-      "seed_cards_path": "${CODALITH_UE_SEED_CARDS:-configs/ue_seed_cards.json}",
-      "store_manifest_path": "${CODALITH_UE_STORE_MANIFEST:-configs/ue_5_7_4_store_manifest.json}",
+      "source_priors_path": "${CODALITH_UE_SOURCE_PRIORS:-configs/corpora/ue-5.7.4/source_priors.json}",
+      "seed_cards_path": "${CODALITH_UE_SEED_CARDS:-configs/corpora/ue-5.7.4/seed_cards.json}",
+      "store_manifest_path": "${CODALITH_UE_STORE_MANIFEST:-configs/corpora/ue-5.7.4/store_manifest.json}",
       "default": true,
       "access_scopes": ["source:read"],
       "scope_prefixes": {

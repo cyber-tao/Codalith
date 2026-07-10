@@ -14,12 +14,12 @@ from typing import Any
 
 from codalith.cards.generator import write_cards
 from codalith.cards.verifier import KnowledgeCardVerifier
+from codalith.cli.common import load_seed_cards
 from codalith.coderag import CodeRAGAdapter
 from codalith.compiler.context_compiler import ContextCompiler
 from codalith.corpus.registry import Corpus, CorpusRegistry
 from codalith.corpus.uri_resolver import URIResolver
 from codalith.eval.runner import EvalRunner, write_reports
-from jobs.common import load_seed_cards
 
 DEFAULT_CODERAG_EMBEDDING_BATCH_SIZE = "32"
 DEFAULT_CODERAG_EMBEDDING_MODEL = "Qwen3-Embedding-8B"
@@ -29,10 +29,10 @@ DEFAULT_PYPI_INDEX = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/"
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--registry", default="configs/corpus_registry.json")
+    parser.add_argument("--registry", default="configs/sample/registry.json")
     parser.add_argument("--dataset", default="eval/datasets/sample_eval_suite.jsonl")
     parser.add_argument(
-        "--version", default=None, help="Corpus version (defaults to the registry default corpus)"
+        "--corpus", default=None, help="Base corpus id or version alias"
     )
     parser.add_argument("--output-dir", default="reports/coderag")
     parser.add_argument("--provider", default=os.getenv("CODALITH_CODERAG_PROVIDER", "fake"))
@@ -50,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
     ensure_coderag_installed(args.provider)
     configure_openai_batch_limit(args.provider)
     registry = CorpusRegistry.from_file(args.registry)
-    corpus = registry.get_base(args.version)
+    corpus = registry.get_base(args.corpus)
     prepare_indexed_root(corpus)
     resolver = URIResolver(registry)
     card_adapter = CodeRAGAdapter(registry)
@@ -76,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
     status = adapter.status(corpus.corpus_id)
 
     compiler = ContextCompiler(registry, adapter)
-    report = EvalRunner(compiler).run(args.dataset, version=args.version)
+    report = EvalRunner(compiler).run(args.dataset, corpus=args.corpus)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     write_reports(report, output_dir)
@@ -201,7 +201,7 @@ def minimal_coderag_dependencies(provider: str) -> list[str]:
 def configure_openai_batch_limit(provider: str) -> None:
     if provider.lower() != "openai":
         return
-    import coderag.embeddings.openai_provider as openai_provider  # type: ignore[import-untyped]
+    import coderag.embeddings.openai_provider as openai_provider
 
     openai_provider._BATCH = int(os.getenv("CODERAG_OPENAI_BATCH", "10"))
 

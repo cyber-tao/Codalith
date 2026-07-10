@@ -65,10 +65,12 @@ def test_load_config_rejects_missing_file(tmp_path):
 
 
 def test_bundled_configs_are_valid_json():
-    assert load_config("configs/corpus_registry.json")["corpora"]
+    assert load_config("configs/sample/registry.json")["corpora"]
     assert load_config("configs/source_policy.json")["limits"]
-    assert load_config("configs/source_priors.json")["priors"]
-    ue_registry = CorpusRegistry.from_file("configs/ue_5_7_4_registry.json")
+    assert load_config("configs/sample/source_priors.json")["priors"]
+    ue_registry = CorpusRegistry.from_file(
+        "configs/corpora/ue-5.7.4/registry.json"
+    )
     manifest = load_store_manifest(ue_registry.get_base())
     assert manifest is not None
     assert manifest.embedding_dimension == 4096

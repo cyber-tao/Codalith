@@ -8,13 +8,13 @@ import os
 import threading
 from pathlib import Path
 
-from codalith.eval.mcp_runner import run_mcp_eval, write_reports
-from codalith.gateway.http_server import StreamableHTTPConfig, create_http_server
-from codalith.gateway.tools import CodalithTools, create_runtime
-from jobs.coderag_acceptance import (
+from codalith.cli.coderag_acceptance import (
     configure_coderag_runtime_env,
     ensure_coderag_installed,
 )
+from codalith.eval.mcp_runner import run_mcp_eval, write_reports
+from codalith.gateway.http_server import StreamableHTTPConfig, create_http_server
+from codalith.gateway.tools import CodalithTools, create_runtime
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -35,7 +35,7 @@ def main(argv: list[str] | None = None) -> int:
         "--registry",
         default=os.getenv(
             "CODALITH_UE_CORPUS_REGISTRY",
-            "configs/ue_5_7_4_registry.json",
+            "configs/corpora/ue-5.7.4/registry.json",
         ),
     )
     parser.add_argument(
@@ -46,7 +46,7 @@ def main(argv: list[str] | None = None) -> int:
         "--output-dir",
         default="reports/mcp-eval/ue_eval_suite",
     )
-    parser.add_argument("--version", default="5.7.4")
+    parser.add_argument("--corpus", default="5.7.4")
     parser.add_argument("--expected-count", type=int, default=80)
     parser.add_argument("--max-source-spans", type=int, default=20)
     parser.add_argument("--metric-k", type=int, default=5)
@@ -83,7 +83,7 @@ def main(argv: list[str] | None = None) -> int:
             endpoint=f"http://{host}:{port}/mcp",
             dataset_path=args.dataset,
             label="ue_eval_suite",
-            version=args.version,
+            corpus=args.corpus,
             max_source_spans=args.max_source_spans,
             metric_k=args.metric_k,
             expected_count=args.expected_count,

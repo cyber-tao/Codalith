@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+!.env.ue.example
 .cursor/
 .codex/
 .vscode/mcp.json

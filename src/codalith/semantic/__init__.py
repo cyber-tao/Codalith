@@ -1,1 +1,1 @@
-"""Semantic graph and extractor-profile support."""
+"""Domain-neutral semantic graph types and stores."""

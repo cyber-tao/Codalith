@@ -69,14 +69,14 @@ class EvalRunner:
         self,
         dataset_path: str | Path,
         *,
-        version: str | None = None,
+        corpus: str | None = None,
         max_source_spans: int = 8,
         metric_k: int = DEFAULT_METRIC_K,
     ) -> EvalReport:
-        def run_pack(item: dict[str, Any], item_version: str | None) -> dict[str, Any]:
+        def run_pack(item: dict[str, Any], item_corpus: str | None) -> dict[str, Any]:
             return self.compiler.compile(
                 query=str(item["query"]),
-                corpus=item_version,
+                corpus=item_corpus,
                 mode=str(item.get("mode", "explain")),
                 max_source_spans=max_source_spans,
             ).as_dict()
@@ -104,7 +104,7 @@ class EvalRunner:
         rows, latencies = evaluate_dataset(
             dataset_path,
             run_pack,
-            version=version,
+            corpus=corpus,
             metric_k=metric_k,
             row_extras=row_extras,
         )
@@ -149,12 +149,10 @@ def write_reports(report: EvalReport, output_dir: str | Path) -> tuple[Path, Pat
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--registry", default="configs/corpus_registry.json")
+    parser.add_argument("--registry", default="configs/sample/registry.json")
     parser.add_argument("--dataset", default="eval/datasets/sample_eval_suite.jsonl")
     parser.add_argument("--output-dir", default="reports/eval")
-    parser.add_argument(
-        "--version", default=None, help="Corpus version (defaults to the registry default corpus)"
-    )
+    parser.add_argument("--corpus", default=None, help="Base corpus id or version alias")
     parser.add_argument(
         "--max-source-spans",
         type=int,
@@ -180,7 +178,7 @@ def main(argv: list[str] | None = None) -> int:
         compiler = ContextCompiler(registry, adapter, semantic_store=semantic_store)
         report = EvalRunner(compiler).run(
             args.dataset,
-            version=args.version,
+            corpus=args.corpus,
             max_source_spans=args.max_source_spans,
             metric_k=args.metric_k,
         )
