@@ -69,11 +69,19 @@ class SemanticQueries(ConnectionBase):
         limit: int = 20,
     ) -> list[dict[str, Any]]:
         normalized = name.split("::")[-1]
+        escaped = (
+            normalized.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        )
         sql = """
             SELECT * FROM codalith_symbols
-            WHERE corpus_id = ? AND (name = ? OR qualified_name = ? OR qualified_name LIKE ?)
+            WHERE corpus_id = ?
+              AND (
+                LOWER(name) = LOWER(?)
+                OR LOWER(qualified_name) = LOWER(?)
+                OR LOWER(qualified_name) LIKE LOWER(?) ESCAPE '\\'
+              )
             """
-        params: list[Any] = [corpus_id, normalized, name, f"%::{normalized}"]
+        params: list[Any] = [corpus_id, normalized, name, f"%::{escaped}"]
         if kind and kind != "any":
             sql += " AND kind = ?"
             params.append(kind)
@@ -159,7 +167,7 @@ class SemanticQueries(ConnectionBase):
 
 def _row(row: Any) -> dict[str, Any]:
     data = dict(row)
-    for key in ("metadata",):
+    for key in ("metadata", "evidence_uris"):
         if key in data and isinstance(data[key], str):
             data[key] = json.loads(data[key])
     return data

@@ -24,7 +24,7 @@ class GraphEdge:
     from_node: str
     edge_type: str
     to_node: str
-    evidence_uri: str | None = None
+    evidence_uris: tuple[str, ...] = ()
     extractor: str = "manual"
     confidence: float = 1.0
     metadata: dict[str, object] = field(default_factory=dict)
@@ -34,7 +34,7 @@ class GraphEdge:
             "from": self.from_node,
             "edge_type": self.edge_type,
             "to": self.to_node,
-            "evidence_uri": self.evidence_uri,
+            "evidence_uris": list(self.evidence_uris),
             "extractor": self.extractor,
             "confidence": self.confidence,
             "metadata": self.metadata,
@@ -82,6 +82,13 @@ def query_graph(
             limit=bounded_nodes * 4,
         ):
             key = (edge.from_node, edge.edge_type, edge.to_node)
+            missing_nodes = {
+                endpoint
+                for endpoint in (edge.from_node, edge.to_node)
+                if endpoint not in nodes
+            }
+            if len(nodes) + len(missing_nodes) > bounded_nodes:
+                continue
             edges[key] = edge
             _add_node(nodes, edge.from_node)
             _add_node(nodes, edge.to_node)
@@ -110,12 +117,12 @@ def aggregate_graph_neighborhood(
 ) -> GraphQueryResult:
     """Merge neighborhoods for multiple seed nodes across corpora.
 
-    Edges are deduplicated by ``(from, edge_type, to)``. When
+    Edges are deduplicated by ``(corpus_id, from, edge_type, to)``. When
     ``include_corpus_id`` is true, each edge dict gains a ``corpus_id`` field
-    (last corpus wins on collision).
+    so overlay provenance remains explicit.
     """
     nodes: dict[str, GraphNodeDict] = {}
-    edges: dict[tuple[object, object, object], dict[str, object]] = {}
+    edges: dict[tuple[object, object, object, object], dict[str, object]] = {}
     seeds = [node for node in seed_nodes if node]
     for corpus_id in corpus_ids:
         for node in seeds:
@@ -127,21 +134,41 @@ def aggregate_graph_neighborhood(
                 depth=depth,
                 max_nodes=max_nodes,
             )
-            for result_node in result["nodes"]:
-                nodes[str(result_node["id"])] = result_node
+            result_nodes = {
+                str(result_node["id"]): result_node for result_node in result["nodes"]
+            }
             for edge in result["edges"]:
-                key = (edge.get("from"), edge.get("edge_type"), edge.get("to"))
+                from_node = str(edge.get("from", ""))
+                to_node = str(edge.get("to", ""))
+                missing_nodes = {
+                    endpoint
+                    for endpoint in (from_node, to_node)
+                    if endpoint and endpoint not in nodes
+                }
+                if (
+                    not from_node
+                    or not to_node
+                    or len(nodes) + len(missing_nodes) > max_nodes
+                ):
+                    continue
+                if max_edges is not None and len(edges) >= max_edges:
+                    return {
+                        "nodes": list(nodes.values()),
+                        "edges": list(edges.values()),
+                    }
+                for endpoint in (from_node, to_node):
+                    node_payload = result_nodes.get(endpoint)
+                    if node_payload is not None:
+                        nodes[endpoint] = node_payload
+                    else:
+                        _add_node(nodes, endpoint)
+                key = (corpus_id, from_node, edge.get("edge_type"), to_node)
                 payload = dict(edge)
                 if include_corpus_id:
                     payload["corpus_id"] = corpus_id
                 edges[key] = payload
-                if max_edges is not None and len(edges) >= max_edges:
-                    return {
-                        "nodes": list(nodes.values())[:max_nodes],
-                        "edges": list(edges.values()),
-                    }
     return {
-        "nodes": list(nodes.values())[:max_nodes],
+        "nodes": list(nodes.values()),
         "edges": list(edges.values()),
     }
 
@@ -166,11 +193,17 @@ def edge_from_row(row: Mapping[str, object]) -> GraphEdge:
     if not isinstance(metadata, dict):
         metadata = {}
     confidence = row.get("confidence")
+    evidence = row.get("evidence_uris")
+    evidence_uris = (
+        tuple(str(item) for item in evidence)
+        if isinstance(evidence, list | tuple)
+        else ()
+    )
     return GraphEdge(
         from_node=str(row["from_node"]),
         edge_type=str(row["edge_type"]),
         to_node=str(row["to_node"]),
-        evidence_uri=str(row["evidence_uri"]) if row.get("evidence_uri") is not None else None,
+        evidence_uris=evidence_uris,
         extractor=str(row["extractor"]),
         confidence=float(confidence) if isinstance(confidence, int | float | str) else 1.0,
         metadata=metadata,

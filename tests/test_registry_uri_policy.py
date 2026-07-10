@@ -137,6 +137,19 @@ def test_source_read_rate_limiter_rejects_non_positive_line_counts():
         limiter.record_read(line_count=-5)
 
 
+def test_source_read_rate_limiter_isolates_identity_budgets():
+    limiter = SourceReadRateLimiter(
+        SourcePolicy(max_source_reads_per_10min=1),
+        time_func=lambda: 100.0,
+    )
+
+    limiter.record_read(line_count=1, key="user-a")
+    limiter.record_read(line_count=1, key="user-b")
+
+    with pytest.raises(SourcePolicyError):
+        limiter.record_read(line_count=1, key="user-a")
+
+
 def test_source_read_rate_limiter_expires_old_events():
     now = 100.0
     policy = SourcePolicy(max_source_reads_per_10min=1)

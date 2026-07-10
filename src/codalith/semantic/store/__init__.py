@@ -11,7 +11,7 @@ from codalith.semantic.store.writers import SemanticWriters
 class SemanticStore(SemanticWriters):
     """Facade combining connection handling, writers, and queries."""
 
-    def __init__(self, path: str | Path | None = ":memory:") -> None:
+    def __init__(self, path: str | Path | None = None) -> None:
         super().__init__(path)
         self.initialize()
 

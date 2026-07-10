@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from typing import Any
 
 from codalith.corpus.registry import Corpus
@@ -44,9 +45,12 @@ class SemanticWriters(SemanticQueries):
                 """
         else:
             sql = """
-                INSERT OR REPLACE INTO codalith_module_deps
+                INSERT INTO codalith_module_deps
                   (corpus_id, from_module, to_module, dep_kind, evidence_uri, metadata)
                 VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT (corpus_id, from_module, to_module, dep_kind)
+                DO UPDATE SET evidence_uri = excluded.evidence_uri,
+                              metadata = excluded.metadata
                 """
         self._execute(
             sql,
@@ -91,10 +95,19 @@ class SemanticWriters(SemanticQueries):
                 """
         else:
             sql = """
-                INSERT OR REPLACE INTO codalith_corpora
+                INSERT INTO codalith_corpora
                   (corpus_id, kind, version, source_revision, source_root,
                    indexed_root, semantic_schema, metadata)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (corpus_id)
+                DO UPDATE SET kind = excluded.kind,
+                              version = excluded.version,
+                              source_revision = excluded.source_revision,
+                              source_root = excluded.source_root,
+                              indexed_root = excluded.indexed_root,
+                              semantic_schema = excluded.semantic_schema,
+                              metadata = excluded.metadata,
+                              updated_at = CURRENT_TIMESTAMP
                 """
         self._execute(
             sql,
@@ -138,9 +151,16 @@ class SemanticWriters(SemanticQueries):
                 """
         else:
             sql = """
-                INSERT OR REPLACE INTO codalith_source_files
+                INSERT INTO codalith_source_files
                   (corpus_id, path, language, module_name, source_hash, line_count, metadata)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (corpus_id, path)
+                DO UPDATE SET language = excluded.language,
+                              module_name = excluded.module_name,
+                              source_hash = excluded.source_hash,
+                              line_count = excluded.line_count,
+                              metadata = excluded.metadata,
+                              updated_at = CURRENT_TIMESTAMP
                 """
         self._execute(
             sql,
@@ -185,9 +205,13 @@ class SemanticWriters(SemanticQueries):
                 """
         else:
             sql = """
-                INSERT OR REPLACE INTO codalith_modules
+                INSERT INTO codalith_modules
                   (corpus_id, module_name, module_type, source_uri, metadata)
                 VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (corpus_id, module_name)
+                DO UPDATE SET module_type = excluded.module_type,
+                              source_uri = excluded.source_uri,
+                              metadata = excluded.metadata
                 """
         self._execute(
             sql,
@@ -211,7 +235,13 @@ class SemanticWriters(SemanticQueries):
         commit: bool = True,
     ) -> None:
         guard_end = guard.end_line or guard.line
-        guard_id = _edge_id(corpus_id, f"source:{path}:{guard.line}", guard.macro, guard.expression, evidence_uri)
+        guard_id = _stable_id(
+            corpus_id,
+            f"source:{path}:{guard.line}",
+            guard.macro,
+            guard.expression,
+            evidence_uri,
+        )
         if self.dialect == "postgresql":
             sql = """
                 INSERT INTO codalith_compile_guards
@@ -229,10 +259,18 @@ class SemanticWriters(SemanticQueries):
                 """
         else:
             sql = """
-                INSERT OR REPLACE INTO codalith_compile_guards
+                INSERT INTO codalith_compile_guards
                   (corpus_id, guard_id, path, macro, expression, start_line,
                    end_line, evidence_uri, metadata)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (guard_id)
+                DO UPDATE SET path = excluded.path,
+                              macro = excluded.macro,
+                              expression = excluded.expression,
+                              start_line = excluded.start_line,
+                              end_line = excluded.end_line,
+                              evidence_uri = excluded.evidence_uri,
+                              metadata = excluded.metadata
                 """
         self._execute(
             sql,
@@ -294,10 +332,21 @@ class SemanticWriters(SemanticQueries):
                 """
         else:
             sql = """
-                INSERT OR REPLACE INTO codalith_symbols
+                INSERT INTO codalith_symbols
                   (corpus_id, symbol_id, name, qualified_name, kind, module_name,
                    declaration_uri, definition_uri, signature, build_guard, metadata, confidence)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (symbol_id)
+                DO UPDATE SET name = excluded.name,
+                              qualified_name = excluded.qualified_name,
+                              kind = excluded.kind,
+                              module_name = excluded.module_name,
+                              declaration_uri = excluded.declaration_uri,
+                              definition_uri = excluded.definition_uri,
+                              signature = excluded.signature,
+                              build_guard = excluded.build_guard,
+                              metadata = excluded.metadata,
+                              confidence = excluded.confidence
                 """
         self._execute(
             sql,
@@ -354,28 +403,60 @@ class SemanticWriters(SemanticQueries):
         metadata: dict[str, Any] | None = None,
         commit: bool = True,
     ) -> None:
-        edge_id = _edge_id(corpus_id, from_node, edge_type, to_node, evidence_uri)
+        edge_id = _edge_id(corpus_id, from_node, edge_type, to_node)
+        existing = self._execute(
+            "SELECT evidence_uris, extractor, confidence, metadata "
+            "FROM codalith_graph_edges WHERE edge_id = ?",
+            (edge_id,),
+        ).fetchone()
+        evidence_uris = set(_json_list(existing["evidence_uris"]) if existing else [])
+        if evidence_uri:
+            evidence_uris.add(evidence_uri)
+        merged_metadata = _merge_dict(
+            _json_mapping(existing["metadata"]) if existing else None,
+            metadata or {},
+        )
+        raw_extractors = merged_metadata.get("extractors")
+        extractors = (
+            {str(item) for item in raw_extractors if isinstance(item, str)}
+            if isinstance(raw_extractors, list)
+            else set()
+        )
+        if existing and existing["extractor"]:
+            extractors.add(str(existing["extractor"]))
+        extractors.add(extractor)
+        merged_metadata["extractors"] = sorted(extractors)
+        existing_confidence = float(existing["confidence"]) if existing else 0.0
+        merged_confidence = max(existing_confidence, confidence)
         if self.dialect == "postgresql":
             sql = """
                 INSERT INTO codalith_graph_edges
-                  (corpus_id, edge_id, from_node, to_node, edge_type, evidence_uri,
+                  (corpus_id, edge_id, from_node, to_node, edge_type, evidence_uris,
                    extractor, confidence, metadata)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (edge_id)
                 DO UPDATE SET from_node = EXCLUDED.from_node,
                               to_node = EXCLUDED.to_node,
                               edge_type = EXCLUDED.edge_type,
-                              evidence_uri = EXCLUDED.evidence_uri,
+                              evidence_uris = EXCLUDED.evidence_uris,
                               extractor = EXCLUDED.extractor,
                               confidence = EXCLUDED.confidence,
                               metadata = EXCLUDED.metadata
                 """
         else:
             sql = """
-                INSERT OR REPLACE INTO codalith_graph_edges
-                  (corpus_id, edge_id, from_node, to_node, edge_type, evidence_uri,
+                INSERT INTO codalith_graph_edges
+                  (corpus_id, edge_id, from_node, to_node, edge_type, evidence_uris,
                    extractor, confidence, metadata)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (edge_id)
+                DO UPDATE SET from_node = excluded.from_node,
+                              to_node = excluded.to_node,
+                              edge_type = excluded.edge_type,
+                              evidence_uris = excluded.evidence_uris,
+                              extractor = excluded.extractor,
+                              confidence = excluded.confidence,
+                              metadata = excluded.metadata
                 """
         self._execute(
             sql,
@@ -385,10 +466,10 @@ class SemanticWriters(SemanticQueries):
                 from_node,
                 to_node,
                 edge_type,
-                evidence_uri,
+                self._json(sorted(evidence_uris)),
                 extractor,
-                confidence,
-                self._json(metadata or {}),
+                merged_confidence,
+                self._json(merged_metadata),
             ),
         )
         if commit:
@@ -406,7 +487,22 @@ def _edge_id(
     from_node: str,
     edge_type: str,
     to_node: str,
-    evidence_uri: str | None,
 ) -> str:
-    raw = "\x1f".join([corpus_id, from_node, edge_type, to_node, evidence_uri or ""])
+    return _stable_id(corpus_id, from_node, edge_type, to_node)
+
+
+def _stable_id(*parts: str) -> str:
+    raw = "\x1f".join(parts)
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+
+def _json_list(value: object) -> list[str]:
+    parsed = json.loads(value) if isinstance(value, str) else value
+    if not isinstance(parsed, list):
+        return []
+    return [str(item) for item in parsed]
+
+
+def _json_mapping(value: object) -> dict[str, Any]:
+    parsed = json.loads(value) if isinstance(value, str) else value
+    return dict(parsed) if isinstance(parsed, dict) else {}

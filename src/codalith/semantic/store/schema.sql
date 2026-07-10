@@ -1,3 +1,8 @@
+CREATE TABLE IF NOT EXISTS codalith_schema_meta (
+  singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+  schema_version INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS codalith_corpora (
   corpus_id TEXT PRIMARY KEY,
   kind TEXT NOT NULL,
@@ -74,7 +79,7 @@ CREATE TABLE IF NOT EXISTS codalith_graph_edges (
   from_node TEXT NOT NULL,
   to_node TEXT NOT NULL,
   edge_type TEXT NOT NULL,
-  evidence_uri TEXT,
+  evidence_uris TEXT DEFAULT '[]',
   extractor TEXT NOT NULL,
   confidence REAL DEFAULT 1.0,
   metadata TEXT DEFAULT '{}'

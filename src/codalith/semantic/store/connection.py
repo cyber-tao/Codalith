@@ -5,18 +5,50 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
+import uuid
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
 
 class ConnectionBase:
-    """Owns the DB connection and dialect-aware statement execution."""
+    """Owns thread-local DB connections and dialect-aware statement execution."""
 
-    def __init__(self, path: str | Path | None = ":memory:") -> None:
-        configured = str(path or os.getenv("CODALITH_SEMANTIC_DSN") or ":memory:")
+    def __init__(self, path: str | Path | None = None) -> None:
+        configured = str(
+            path
+            or os.getenv("CODALITH_SEMANTIC_DSN")
+            or os.getenv("CODALITH_SEMANTIC_DB")
+            or ":memory:"
+        )
         self.dialect = "postgresql" if _is_postgres_dsn(configured) else "sqlite"
-        self.connection: Any
+        self.configured_target = configured
+        self._sqlite_uri = False
+        if configured == ":memory:":
+            self.configured_target = (
+                f"file:codalith-{uuid.uuid4().hex}?mode=memory&cache=shared"
+            )
+            self._sqlite_uri = True
+        self._local = threading.local()
+        self._connections: list[Any] = []
+        self._connections_lock = threading.RLock()
+        self._closed = False
+        _ = self.connection
+
+    @property
+    def connection(self) -> Any:
+        if self._closed:
+            raise RuntimeError("Semantic store is closed")
+        connection = getattr(self._local, "connection", None)
+        if connection is None:
+            connection = self._open_connection()
+            self._local.connection = connection
+            with self._connections_lock:
+                self._connections.append(connection)
+        return connection
+
+    def _open_connection(self) -> Any:
         if self.dialect == "postgresql":
             try:
                 import psycopg
@@ -25,12 +57,19 @@ class ConnectionBase:
                 raise RuntimeError(
                     "PostgreSQL semantic store requires the psycopg package"
                 ) from exc
-            self.connection = psycopg.connect(configured, row_factory=dict_row)
-        else:
-            if configured != ":memory:":
-                Path(configured).parent.mkdir(parents=True, exist_ok=True)
-            self.connection = sqlite3.connect(configured, check_same_thread=False)
-            self.connection.row_factory = sqlite3.Row
+            return psycopg.connect(self.configured_target, row_factory=dict_row)
+        if not self._sqlite_uri:
+            Path(self.configured_target).parent.mkdir(parents=True, exist_ok=True)
+        connection = sqlite3.connect(
+            self.configured_target,
+            check_same_thread=False,
+            uri=self._sqlite_uri,
+        )
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA busy_timeout = 5000")
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("PRAGMA journal_mode = WAL")
+        return connection
 
     def _execute(
         self,
@@ -61,7 +100,12 @@ class ConnectionBase:
         self.connection.commit()
 
     def close(self) -> None:
-        self.connection.close()
+        with self._connections_lock:
+            connections = list(self._connections)
+            self._connections.clear()
+            self._closed = True
+        for connection in connections:
+            connection.close()
 
 
 def _is_postgres_dsn(value: str) -> bool:

@@ -53,10 +53,8 @@ def create_runtime(
     policy = SourcePolicy.from_file(resolved_source_policy_path)
     source_reader = SourceReader(registry)
     adapter = CodeRAGAdapter(registry)
-    semantic_target = os.getenv("CODALITH_SEMANTIC_DSN") or os.getenv("CODALITH_SEMANTIC_DB") or str(
-        Path("data") / "semantic" / "codalith.sqlite"
-    )
-    semantic_store = SemanticStore(semantic_target)
+    semantic_target = os.getenv("CODALITH_SEMANTIC_DSN") or os.getenv("CODALITH_SEMANTIC_DB")
+    semantic_store = SemanticStore(semantic_target) if semantic_target else None
     compiler = ContextCompiler(
         registry,
         adapter,
@@ -134,6 +132,7 @@ class CodalithTools:
             resolved = self._bounded_read_range(resolved)
             self.require_corpus_access(resolved.corpus_id)
             self.runtime.policy.check(resolved, self.scopes())
+            auth = self._auth()
             assert resolved.start_line is not None
             assert resolved.end_line is not None
             requested_line_count = resolved.line_count or 0
@@ -143,6 +142,7 @@ class CodalithTools:
                     path=resolved.relative_path,
                     start_line=resolved.start_line,
                     end_line=resolved.end_line,
+                    key=f"{auth.user_id}\x1f{auth.session_id}",
                 )
             source_slice = self.runtime.source_reader.read_slice(
                 resolved.corpus_id,
@@ -153,7 +153,6 @@ class CodalithTools:
             line_count = source_slice.line_count
             content = source_slice.content
             source_hash = source_sha256(content)
-            auth = self._auth()
             if with_line_numbers:
                 content = "\n".join(
                     f"{source_slice.start_line + index}|{line}"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fnmatch
+import threading
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -90,7 +91,11 @@ class SourceReadRateLimiter:
         self.policy = policy
         self.window_seconds = window_seconds
         self.time_func = time_func
-        self._events: list[tuple[float, int, str | None, int | None, int | None]] = []
+        self._events: dict[
+            str,
+            list[tuple[float, int, str | None, int | None, int | None]],
+        ] = {}
+        self._lock = threading.RLock()
 
     def record_read(
         self,
@@ -99,18 +104,38 @@ class SourceReadRateLimiter:
         path: str | None = None,
         start_line: int | None = None,
         end_line: int | None = None,
+        key: str = "default",
+    ) -> None:
+        with self._lock:
+            self._record_read_locked(
+                key=key,
+                line_count=line_count,
+                path=path,
+                start_line=start_line,
+                end_line=end_line,
+            )
+
+    def _record_read_locked(
+        self,
+        *,
+        key: str,
+        line_count: int,
+        path: str | None,
+        start_line: int | None,
+        end_line: int | None,
     ) -> None:
         if line_count < 1:
             raise SourcePolicyError(f"Source reads must cover at least one line: {line_count}")
         now = float(self.time_func())
         cutoff = now - self.window_seconds
-        self._events = [
+        events = [
             (timestamp, lines, event_path, event_start, event_end)
-            for timestamp, lines, event_path, event_start, event_end in self._events
+            for timestamp, lines, event_path, event_start, event_end in self._events.get(key, [])
             if timestamp >= cutoff
         ]
-        read_count = len(self._events)
-        total_lines = sum(lines for _, lines, _, _, _ in self._events)
+        self._events[key] = events
+        read_count = len(events)
+        total_lines = sum(lines for _, lines, _, _, _ in events)
         if read_count + 1 > self.policy.max_source_reads_per_10min:
             raise SourcePolicyError(
                 f"Source read rate limit exceeded: {read_count + 1} > "
@@ -122,14 +147,14 @@ class SourceReadRateLimiter:
                 f"{self.policy.max_total_lines_per_10min} per 10 minutes"
             )
         if path is not None:
-            paths = {event_path for _, _, event_path, _, _ in self._events if event_path}
+            paths = {event_path for _, _, event_path, _, _ in events if event_path}
             if path not in paths and len(paths) + 1 > self.policy.max_distinct_paths_per_10min:
                 raise SourcePolicyError(
                     "Potential bulk export detected: distinct source path budget exceeded"
                 )
             same_path_reads = [
                 (event_start, event_end)
-                for _, _, event_path, event_start, event_end in self._events
+                for _, _, event_path, event_start, event_end in events
                 if event_path == path
             ]
             touches_existing = any(
@@ -149,7 +174,7 @@ class SourceReadRateLimiter:
                 raise SourcePolicyError(
                     "Potential bulk export detected: repeated adjacent reads for one source path"
                 )
-        self._events.append((now, line_count, path, start_line, end_line))
+        events.append((now, line_count, path, start_line, end_line))
 
 
 def _match(pattern: str, path: str) -> bool:

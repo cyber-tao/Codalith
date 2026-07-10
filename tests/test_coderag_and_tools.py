@@ -241,6 +241,25 @@ def test_runtime_loads_registry_from_environment(monkeypatch, tmp_path):
             runtime.semantic_store.close()
 
 
+def test_runtime_leaves_semantic_store_disabled_without_configuration(
+    monkeypatch,
+    registry_path,
+    policy_path,
+    tmp_path,
+):
+    monkeypatch.delenv("CODALITH_SEMANTIC_DSN", raising=False)
+    monkeypatch.delenv("CODALITH_SEMANTIC_DB", raising=False)
+
+    runtime = create_runtime(
+        registry_path=str(registry_path),
+        source_policy_path=str(policy_path),
+        audit_log=str(tmp_path / "audit.jsonl"),
+    )
+
+    assert runtime.semantic_store is None
+    assert runtime.compiler.semantic_store is None
+
+
 def test_source_reader_prefers_source_root_when_indexed_root_is_partial(tmp_path, registry):
     corpus = registry.get_base()
     indexed = tmp_path / "indexed"
