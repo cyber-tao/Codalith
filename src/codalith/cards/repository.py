@@ -52,8 +52,8 @@ class FileCardRepository:
                         f"card corpus_id {card.corpus_id!r} does not match {corpus.corpus_id!r}"
                     )
                 documents.append(CardDocument(card=card, path=path, markdown=markdown))
-            except (OSError, ValueError):
-                _LOG.warning("Skipping invalid Knowledge Card %s", path, exc_info=True)
+            except (OSError, ValueError) as exc:
+                _LOG.warning("Skipping invalid Knowledge Card %s: %s", path, exc)
         return documents
 
     def get_document(
