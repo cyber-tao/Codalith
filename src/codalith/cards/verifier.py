@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from codalith.cards.hashing import source_sha256
-from codalith.cards.schema import KnowledgeCard
+from codalith.cards.schema import CardVerificationStatus, KnowledgeCard
 from codalith.coderag import CodeRAGAdapter
 from codalith.corpus.uri_resolver import URIResolver
 from codalith.semantic.store import SemanticStore
@@ -15,9 +15,22 @@ from codalith.semantic.store import SemanticStore
 class VerificationResult:
     ok: bool
     errors: list[str] = field(default_factory=list)
+    semantic_checked: bool = False
 
     def as_dict(self) -> dict[str, object]:
-        return {"ok": self.ok, "errors": self.errors}
+        return {
+            "ok": self.ok,
+            "errors": self.errors,
+            "semantic_checked": self.semantic_checked,
+        }
+
+    def verified_card(self, card: KnowledgeCard) -> KnowledgeCard:
+        if not self.ok:
+            raise ValueError("Cannot mark a card verified after failed verification")
+        status: CardVerificationStatus = (
+            "semantic_verified" if self.semantic_checked else "evidence_verified"
+        )
+        return card.with_verification(status)
 
 
 class KnowledgeCardVerifier:
@@ -77,7 +90,11 @@ class KnowledgeCardVerifier:
                 )
         if self.semantic_store is not None and not card.related_nodes:
             errors.append("Card must declare related semantic nodes when semantic verification is enabled")
-        return VerificationResult(ok=not errors, errors=errors)
+        return VerificationResult(
+            ok=not errors,
+            errors=errors,
+            semantic_checked=self.semantic_store is not None and evidence_semantically_scanned,
+        )
 
     def _verify_related_node(
         self,
@@ -101,3 +118,5 @@ class KnowledgeCardVerifier:
                 errors.append(f"Related module does not exist in semantic DB: {module}")
         elif node.startswith("symbol:") and not store.symbol_exists(corpus_id, node):
             errors.append(f"Related semantic node does not exist in semantic DB: {node}")
+        elif not node.startswith(("module:", "symbol:")):
+            errors.append(f"Unsupported related semantic node: {node}")

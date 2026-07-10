@@ -27,9 +27,14 @@ def main(argv: list[str] | None = None) -> int:
     results = []
     for card in cards:
         result = verifier.verify(card)
-        if result.ok and semantic_store is not None:
-            semantic_store.upsert_knowledge_card(card.verified())
-        results.append({"card_id": card.card_id, **result.as_dict()})
+        status = result.verified_card(card).verification_status if result.ok else "unverified"
+        results.append(
+            {
+                "card_id": card.card_id,
+                "verification_status": status,
+                **result.as_dict(),
+            }
+        )
     if semantic_store is not None:
         semantic_store.close()
     print(json.dumps({"results": results}, indent=2))

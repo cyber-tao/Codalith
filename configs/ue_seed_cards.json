@@ -40,35 +40,35 @@
       "card_type": "mechanism",
       "title": "UObject GC",
       "path": "Engine/Source/Runtime/CoreUObject/Public/UObject/Object.h",
-      "related_node": "mechanism:UObject GC"
+      "related_node": "module:CoreUObject"
     },
     {
       "card_id": "mechanism-uht-reflection",
       "card_type": "mechanism",
       "title": "UHT Reflection",
       "path": "Engine/Source/Runtime/CoreUObject/Public/UObject/ObjectMacros.h",
-      "related_node": "mechanism:UHT Reflection"
+      "related_node": "module:CoreUObject"
     },
     {
       "card_id": "mechanism-uproperty-replication",
       "card_type": "mechanism",
       "title": "UPROPERTY Replication",
       "path": "Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h",
-      "related_node": "mechanism:UPROPERTY Replication"
+      "related_node": "module:Engine"
     },
     {
       "card_id": "mechanism-actor-replication",
       "card_type": "mechanism",
       "title": "Actor Replication",
       "path": "Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h",
-      "related_node": "mechanism:Actor Replication"
+      "related_node": "symbol:AActor"
     },
     {
       "card_id": "mechanism-rpc-dispatch",
       "card_type": "mechanism",
       "title": "RPC Dispatch",
       "path": "Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h",
-      "related_node": "mechanism:RPC Dispatch"
+      "related_node": "symbol:AActor"
     },
     {
       "card_id": "symbol-uobject",
@@ -138,7 +138,7 @@
       "card_type": "recipe",
       "title": "Safe Source Read",
       "path": "Engine/Source/Runtime/Core/Public/CoreMinimal.h",
-      "related_node": "mechanism:Safe Source Read"
+      "related_node": "module:Core"
     }
   ]
 }

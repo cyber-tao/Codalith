@@ -28,15 +28,13 @@ def main(argv: list[str] | None = None) -> int:
     for card in cards:
         result = verifier.verify(card)
         if result.ok:
-            verified.append(card.verified())
+            verified.append(result.verified_card(card))
         else:
             failures[card.card_id] = result.errors
     if failures:
         print(json.dumps({"error": "card verification failed", "failures": failures}, indent=2))
         return 1
     written = write_cards(verified, corpus.card_root)
-    if corpus.indexed_root != corpus.card_root:
-        written.extend(write_cards(verified, corpus.indexed_root))
     print(json.dumps({"count": len(written), "paths": [str(path) for path in written]}, indent=2))
     return 0
 

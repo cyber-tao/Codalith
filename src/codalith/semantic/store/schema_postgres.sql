@@ -68,19 +68,6 @@ CREATE TABLE IF NOT EXISTS codalith_compile_guards (
   metadata JSONB DEFAULT '{}'::jsonb
 );
 
-CREATE TABLE IF NOT EXISTS codalith_knowledge_cards (
-  corpus_id TEXT NOT NULL,
-  card_id TEXT NOT NULL,
-  card_type TEXT NOT NULL,
-  title TEXT NOT NULL,
-  version TEXT,
-  verification_status TEXT NOT NULL,
-  related_nodes JSONB DEFAULT '[]'::jsonb,
-  source_hashes JSONB DEFAULT '{}'::jsonb,
-  metadata JSONB DEFAULT '{}'::jsonb,
-  PRIMARY KEY(corpus_id, card_id)
-);
-
 CREATE TABLE IF NOT EXISTS codalith_graph_edges (
   corpus_id TEXT NOT NULL,
   edge_id TEXT PRIMARY KEY,

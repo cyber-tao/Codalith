@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-from codalith.cards.schema import KnowledgeCard
 from codalith.corpus.registry import Corpus
 from codalith.semantic.store.queries import SemanticQueries
 from codalith.semantic.types import CompileGuard, ModuleDependency, SourceSymbol
@@ -341,45 +340,6 @@ class SemanticWriters(SemanticQueries):
             )
         if commit:
             self.connection.commit()
-
-    def upsert_knowledge_card(self, card: KnowledgeCard) -> None:
-        if self.dialect == "postgresql":
-            sql = """
-                INSERT INTO codalith_knowledge_cards
-                  (corpus_id, card_id, card_type, title, version,
-                   verification_status, related_nodes, source_hashes, metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (corpus_id, card_id)
-                DO UPDATE SET card_type = EXCLUDED.card_type,
-                              title = EXCLUDED.title,
-                              version = EXCLUDED.version,
-                              verification_status = EXCLUDED.verification_status,
-                              related_nodes = EXCLUDED.related_nodes,
-                              source_hashes = EXCLUDED.source_hashes,
-                              metadata = EXCLUDED.metadata
-                """
-        else:
-            sql = """
-                INSERT OR REPLACE INTO codalith_knowledge_cards
-                  (corpus_id, card_id, card_type, title, version,
-                   verification_status, related_nodes, source_hashes, metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """
-        self._execute(
-            sql,
-            (
-                card.corpus_id,
-                card.card_id,
-                card.card_type,
-                card.title,
-                card.version,
-                card.verification_status,
-                self._json(card.related_nodes),
-                self._json(card.source_hashes),
-                self._json({"generated_by": card.generated_by}),
-            ),
-            commit=True,
-        )
 
     def upsert_graph_edge(
         self,

@@ -54,10 +54,16 @@ def main(argv: list[str] | None = None) -> int:
     prepare_indexed_root(corpus)
     resolver = URIResolver(registry)
     card_adapter = CodeRAGAdapter(registry)
-    cards = [card.verified() for card in load_seed_cards(corpus, resolver, card_adapter)]
-    write_cards(cards, corpus.card_root)
-    if corpus.indexed_root.exists() or corpus.indexed_root == corpus.source_root:
-        write_cards(cards, corpus.indexed_root)
+    seed_cards = load_seed_cards(corpus, resolver, card_adapter)
+    verifier = KnowledgeCardVerifier(resolver, card_adapter)
+    verified_cards = []
+    card_results = []
+    for card in seed_cards:
+        result = verifier.verify(card)
+        card_results.append(result.as_dict() | {"card_id": card.card_id})
+        if result.ok:
+            verified_cards.append(result.verified_card(card))
+    write_cards(verified_cards, corpus.card_root)
 
     os.environ["CODALITH_USE_NATIVE_CODERAG"] = "1"
     os.environ["CODALITH_NATIVE_CODERAG_STRICT"] = "1"
@@ -68,9 +74,6 @@ def main(argv: list[str] | None = None) -> int:
     index_stats = adapter.reindex(corpus.corpus_id, path=args.index_path, full=args.full)
     index_seconds = time.perf_counter() - started
     status = adapter.status(corpus.corpus_id)
-
-    verifier = KnowledgeCardVerifier(resolver, adapter)
-    card_results = [verifier.verify(card).as_dict() | {"card_id": card.card_id} for card in cards]
 
     compiler = ContextCompiler(registry, adapter)
     report = EvalRunner(compiler).run(args.dataset, version=args.version)

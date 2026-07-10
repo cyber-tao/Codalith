@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
-from codalith.cards import CARDS_DIR
+from codalith.cards.repository import FileCardRepository
 from codalith.corpus.registry import CorpusRegistry
 from codalith.corpus.uris import card_uri, corpus_uri
 from codalith.errors import URIResolutionError
@@ -148,25 +148,18 @@ def _cards_collection_resource(
 ) -> dict[str, Any]:
     if "cards:read" not in tools.scopes():
         raise AuthError("Missing required scope: cards:read")
-    cards_root = corpus.card_root / CARDS_DIR
     cards: list[dict[str, str]] = []
-    if cards_root.is_dir():
-        for path in sorted(cards_root.glob("*/*.md")):
-            card_type = path.parent.name.lower()
-            card_id = path.stem
-            if not (
-                _SAFE_SEGMENT_RE.fullmatch(card_type) and _SAFE_SEGMENT_RE.fullmatch(card_id)
-            ):
-                continue
-            cards.append(
-                {
-                    "uri": card_uri(corpus.corpus_id, card_type, card_id),
-                    "card_type": card_type,
-                    "card_id": card_id,
-                    "title": path.stem.replace("-", " "),
-                    "path": str(path.relative_to(corpus.card_root)).replace("\\", "/"),
-                }
-            )
+    for document in FileCardRepository(tools.runtime.registry).list_documents(corpus.corpus_id):
+        card = document.card
+        cards.append(
+            {
+                "uri": document.uri,
+                "card_type": card.card_type,
+                "card_id": card.card_id,
+                "title": card.title,
+                "path": str(document.path.relative_to(corpus.card_root)).replace("\\", "/"),
+            }
+        )
     return {
         "uri": uri,
         "corpus_id": corpus.corpus_id,
@@ -235,8 +228,12 @@ def _card_resource(
     if len(parts) != 2 or not all(_SAFE_SEGMENT_RE.fullmatch(part) for part in parts):
         raise URIResolutionError(f"Invalid card resource URI: {uri}")
     card_type, card_id = parts
-    card_file = corpus.card_root / CARDS_DIR / card_type.title() / f"{card_id}.md"
-    if not card_file.is_file():
+    document = FileCardRepository(tools.runtime.registry).get_document(
+        corpus.corpus_id,
+        card_type,
+        card_id,
+    )
+    if document is None:
         raise URIResolutionError(f"Unknown card resource: {uri}")
     return {
         "uri": card_uri(corpus.corpus_id, card_type, card_id),
@@ -244,5 +241,5 @@ def _card_resource(
         "kind": "card",
         "card_type": card_type,
         "card_id": card_id,
-        "markdown": card_file.read_text(encoding="utf-8"),
+        "markdown": document.markdown,
     }

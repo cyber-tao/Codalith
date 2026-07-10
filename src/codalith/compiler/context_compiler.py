@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import logging
-import re
 
-from codalith.cards import is_card_path
 from codalith.cards.hashing import source_sha256
+from codalith.cards.repository import CardMatch, FileCardRepository
 from codalith.coderag import CodeRAGAdapter, RetrievalHit, language_for_path
 from codalith.compiler.context_pack import (
     CardEntry,
@@ -23,12 +22,12 @@ from codalith.compiler.reranker import rerank
 from codalith.compiler.source_locator import load_source_domain_config, locate_source_priors
 from codalith.corpus.registry import CorpusRegistry
 from codalith.corpus.source_reader import SourceReader
-from codalith.corpus.uris import SCHEME, module_uri, parse_source_uri, source_uri, symbol_uri
-from codalith.errors import CorpusNotFoundError, SourceReadError
+from codalith.corpus.uri_resolver import URIResolver
+from codalith.corpus.uris import module_uri, source_uri, symbol_uri
+from codalith.errors import SourceReadError, URIResolutionError
 from codalith.semantic.graph import aggregate_graph_neighborhood
 from codalith.semantic.store import SemanticStore
 
-_FRONT_MATTER_STATUS_RE = re.compile(r"^verification_status:\s*(?P<status>\S+)\s*$", re.MULTILINE)
 _LOG = logging.getLogger(__name__)
 
 
@@ -40,11 +39,14 @@ class ContextCompiler:
         *,
         semantic_store: SemanticStore | None = None,
         source_reader: SourceReader | None = None,
+        card_repository: FileCardRepository | None = None,
     ) -> None:
         self.registry = registry
         self.adapter = adapter
         self.semantic_store = semantic_store
         self.source_reader = source_reader or SourceReader(registry)
+        self.card_repository = card_repository or FileCardRepository(registry)
+        self.uri_resolver = URIResolver(registry)
 
     def compile(
         self,
@@ -100,34 +102,45 @@ class ContextCompiler:
                         top_k=search_top_k,
                     )
                 )
-        # Rerank a wider window than the span budget so card hits do not evict
-        # source hits: cards land in the cards section, not in source_spans.
         ranked = rerank(
             _unique_hits(raw_hits),
             identifiers=identifiers,
-            max_hits=max_source_spans * 2,
+            max_hits=max_source_spans,
             mode=intent,
         )
-        card_hits = [hit for hit in ranked if is_card_path(hit.path)]
-        hits = [hit for hit in ranked if not is_card_path(hit.path)][:max_source_spans]
+        hits = ranked[:max_source_spans]
         base_corpus_id = resolution.base.corpus_id
         corpus_kinds = {corpus.corpus_id: corpus.kind for corpus in resolution.ordered}
         inferred_modules = _module_entries(base_corpus_id, modules, hits)
-        source_spans = self._enriched_source_spans(hits, corpus_kinds)
-        source_spans.extend(self._card_evidence_spans(card_hits))
-        # Card evidence must not let the pack exceed the caller's span budget.
-        source_spans = source_spans[:max_source_spans]
+        card_matches = self.card_repository.search(
+            [corpus.corpus_id for corpus in resolution.ordered],
+            query,
+            identifiers=identifiers,
+            limit=min(8, max_source_spans),
+        )
+        retrieval_spans = self._enriched_source_spans(hits, corpus_kinds)
+        card_evidence = self._card_evidence_spans(card_matches)
+        evidence_budget = (
+            min(len(card_evidence), max(1, max_source_spans // 4)) if card_evidence else 0
+        )
+        retrieval_budget = max_source_spans - evidence_budget
+        source_spans = _merge_source_spans(
+            [
+                *retrieval_spans[:retrieval_budget],
+                *card_evidence[:evidence_budget],
+            ]
+        )[:max_source_spans]
         graph_edges = self._graph_edges(
             [corpus.corpus_id for corpus in resolution.ordered],
             [*identifiers, *(module["name"] for module in inferred_modules)],
         )
         cards: list[CardEntry] = [
             {
-                "uri": hit.uri,
-                "title": hit.title,
-                "verification_status": self._card_verification_status(hit),
+                "uri": match.document.uri,
+                "title": match.document.card.title,
+                "verification_status": match.document.card.verification_status,
             }
-            for hit in card_hits
+            for match in card_matches
         ]
         return ContextPack(
             query=query,
@@ -241,84 +254,56 @@ class ContextCompiler:
             spans.append(span)
         return spans
 
-    def _card_verification_status(self, hit: RetrievalHit) -> str:
-        """Read the actual verification status from the card's front matter.
-
-        The retrieval snippet may start mid-file, so the card file head is read
-        through the corpus source reader instead of trusting the hit snippet.
-        """
-        try:
-            head = self.source_reader.read_source(hit.corpus_id, hit.path, 1, 10)
-        except (CorpusNotFoundError, SourceReadError):
-            return "unknown"
-        except Exception:
-            _LOG.warning(
-                "Unexpected failure reading card head for %s:%s",
-                hit.corpus_id,
-                hit.path,
-                exc_info=True,
-            )
-            return "unknown"
-        match = _FRONT_MATTER_STATUS_RE.search(head)
-        return match.group("status") if match else "unknown"
-
-    def _card_evidence_spans(self, hits: list[RetrievalHit]) -> list[SourceSpanEntry]:
+    def _card_evidence_spans(self, matches: list[CardMatch]) -> list[SourceSpanEntry]:
         spans: list[SourceSpanEntry] = []
-        for hit in hits:
-            if not is_card_path(hit.path):
+        for match in matches:
+            card = match.document.card
+            if not card.has_verified_evidence:
                 continue
-            for uri in _extract_evidence_uris(hit.snippet):
-                parsed = parse_source_uri(uri)
-                if parsed is None:
-                    continue
-                corpus_id, path, start, end = parsed
-                span: SourceSpanEntry = {
-                    "uri": uri,
-                    "path": path,
-                    "start_line": start,
-                    "end_line": end,
-                    "reason": f"Evidence linked from verified card {hit.title}.",
-                    "source": "card-evidence",
-                    "language": language_for_path(path),
-                    "guard": None,
-                }
-                span.update(self._card_evidence_provenance(corpus_id, path, start, end))
-                spans.append(span)
-        return spans
-
-    def _card_evidence_provenance(
-        self,
-        corpus_id: str,
-        path: str,
-        start: int,
-        end: int,
-    ) -> SourceSpanEntry:
-        try:
-            corpus = self.registry.get_corpus(corpus_id)
-            source_slice = self.source_reader.read_slice(
-                corpus.corpus_id,
-                path,
-                start_line=start,
-                end_line=end,
-            )
-        except (CorpusNotFoundError, SourceReadError):
-            # Evidence pointing at an unavailable corpus stays cited but unhashed.
-            return {"corpus_id": None, "corpus_kind": None, "source_hash": None}
-        except Exception:
-            _LOG.warning(
-                "Unexpected failure reading card evidence %s:%s#%s-%s",
-                corpus_id,
-                path,
-                start,
-                end,
-                exc_info=True,
-            )
-            return {"corpus_id": None, "corpus_kind": None, "source_hash": None}
-        return {
-            "corpus_id": corpus.corpus_id,
-            "corpus_kind": corpus.kind,
-            "source_hash": source_sha256(source_slice.content),
-        }
+            for claim in card.claims:
+                for evidence in claim.evidence:
+                    try:
+                        resolved = self.uri_resolver.resolve_source(evidence.uri)
+                        if resolved.start_line is None or resolved.end_line is None:
+                            continue
+                        corpus = self.registry.get_corpus(resolved.corpus_id)
+                        source_slice = self.source_reader.read_slice(
+                            corpus.corpus_id,
+                            resolved.relative_path,
+                            start_line=resolved.start_line,
+                            end_line=resolved.end_line,
+                        )
+                    except (SourceReadError, URIResolutionError):
+                        _LOG.warning(
+                            "Skipping unavailable evidence from card %s: %s",
+                            card.card_id,
+                            evidence.uri,
+                        )
+                        continue
+                    spans.append(
+                        {
+                            "uri": source_uri(
+                                corpus.corpus_id,
+                                resolved.relative_path,
+                                source_slice.start_line,
+                                source_slice.end_line,
+                            ),
+                            "corpus_id": corpus.corpus_id,
+                            "corpus_kind": corpus.kind,
+                            "path": resolved.relative_path,
+                            "start_line": source_slice.start_line,
+                            "end_line": source_slice.end_line,
+                            "reason": (
+                                f"{evidence.reason}; linked from "
+                                f"{card.verification_status} card {card.title}."
+                            ),
+                            "source": "card-evidence",
+                            "language": language_for_path(resolved.relative_path),
+                            "guard": None,
+                            "source_hash": source_sha256(source_slice.content),
+                        }
+                    )
+        return _merge_source_spans(spans)
 
     def _symbol_entries(
         self,
@@ -403,8 +388,20 @@ def _confidence(hits: list[RetrievalHit]) -> str:
     return "medium"
 
 
-def _extract_evidence_uris(text: str) -> list[str]:
-    return re.findall(rf"{SCHEME}://[^\s)]+", text)
+def _merge_source_spans(spans: list[SourceSpanEntry]) -> list[SourceSpanEntry]:
+    seen: set[tuple[object, object, object, object]] = set()
+    merged: list[SourceSpanEntry] = []
+    for span in spans:
+        key = (
+            span.get("corpus_id"),
+            span.get("path"),
+            span.get("start_line"),
+            span.get("end_line"),
+        )
+        if key not in seen:
+            seen.add(key)
+            merged.append(span)
+    return merged
 
 
 def _graph_caveat(graph_edges: list[dict[str, object]], has_store: bool) -> str:

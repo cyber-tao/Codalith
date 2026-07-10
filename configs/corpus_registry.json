@@ -27,7 +27,7 @@
         "docs": ["docs/"]
       },
       "module_roots": ["src"],
-      "index_ignore_dirs": [".venv", "node_modules", "dist", "build", "__pycache__"],
+      "index_ignore_dirs": [".venv", "node_modules", "dist", "build", "__pycache__", "cards"],
       "index_suffixes": [".py", ".md", ".json", ".toml", ".yaml", ".yml"]
     }
   },

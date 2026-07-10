@@ -79,7 +79,6 @@ def test_semantic_status_reports_generic_counts():
         "module_dependencies",
         "symbols",
         "compile_guards",
-        "cards",
         "graph_edges",
         "graph_nodes",
     }

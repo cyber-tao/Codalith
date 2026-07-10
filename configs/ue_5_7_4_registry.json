@@ -28,7 +28,7 @@
         "plugins": ["Engine/Plugins/"]
       },
       "module_roots": ["Runtime", "Developer", "Editor"],
-      "index_ignore_dirs": ["Binaries", "Intermediate", "Saved", "DerivedDataCache", "ThirdParty"],
+      "index_ignore_dirs": ["Binaries", "Intermediate", "Saved", "DerivedDataCache", "ThirdParty", "cards"],
       "index_suffixes": [".uplugin", ".uproject", ".Build.cs", ".Target.cs"]
     }
   },

@@ -139,7 +139,6 @@ class SemanticQueries(ConnectionBase):
                 ("module_dependencies", "codalith_module_deps"),
                 ("symbols", "codalith_symbols"),
                 ("compile_guards", "codalith_compile_guards"),
-                ("cards", "codalith_knowledge_cards"),
             )
         }
         return {
@@ -160,7 +159,7 @@ class SemanticQueries(ConnectionBase):
 
 def _row(row: Any) -> dict[str, Any]:
     data = dict(row)
-    for key in ("metadata", "related_nodes", "source_hashes"):
+    for key in ("metadata",):
         if key in data and isinstance(data[key], str):
             data[key] = json.loads(data[key])
     return data

@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 
 from codalith.cards.generator import attach_source_hashes, built_in_cards, write_cards
+from codalith.cards.parser import parse_card_markdown
+from codalith.cards.repository import FileCardRepository
 from codalith.cards.schema import CardClaim, KnowledgeCard
 from codalith.cards.verifier import KnowledgeCardVerifier
 from codalith.compiler.context_compiler import ContextCompiler
@@ -30,47 +32,84 @@ def test_built_in_cards_verify_against_sample_fixture(registry, adapter, tmp_pat
     assert all(card.source_hashes for card in cards)
     results = [verifier.verify(card) for card in cards]
     assert all(result.ok for result in results), [result.errors for result in results if not result.ok]
-    written = write_cards([card.verified() for card in cards], tmp_path)
+    written = write_cards(
+        [
+            result.verified_card(card)
+            for card, result in zip(cards, results, strict=True)
+        ],
+        tmp_path,
+    )
     assert len(written) == 2
     assert all(path.exists() for path in written)
+    assert parse_card_markdown(written[0].read_text(encoding="utf-8")) == results[
+        0
+    ].verified_card(cards[0])
 
 
-def test_written_cards_are_searchable_from_indexed_root(registry, adapter, sample_corpus_root):
+def test_written_cards_are_searchable_from_card_repository(registry):
     corpus = registry.get_base()
     cards = [
-        card.verified()
+        card.with_verification("evidence_verified")
         for card in built_in_cards(
             corpus_id=corpus.corpus_id,
             version=corpus.version_label,
             seed_cards_path=corpus.seed_cards_path,
         )
     ]
-    write_cards(cards, sample_corpus_root)
-    adapter.reindex(corpus.corpus_id)
-    hits = adapter.search_code(corpus.corpus_id, "Core Cache API seed knowledge card", top_k=5)
-    assert any("cards" in hit.path for hit in hits)
+    write_cards(cards, corpus.card_root)
+
+    matches = FileCardRepository(registry).search(
+        [corpus.corpus_id],
+        "Core Cache API seed knowledge card",
+    )
+
+    assert matches
+    assert matches[0].document.card.card_id == "module-core-cache"
 
 
-def test_context_pack_reads_card_verification_status_from_front_matter(
-    registry, adapter, sample_corpus_root
-):
+def test_context_pack_only_uses_evidence_verified_cards(registry, adapter):
     corpus = registry.get_base()
     cards = built_in_cards(
         corpus_id=corpus.corpus_id,
         version=corpus.version_label,
         seed_cards_path=corpus.seed_cards_path,
     )
-    write_cards([cards[0].verified(), cards[1]], sample_corpus_root)
-    adapter.reindex(corpus.corpus_id)
+    write_cards(
+        [cards[0].with_verification("evidence_verified"), cards[1]],
+        corpus.card_root,
+    )
     compiler = ContextCompiler(registry, adapter)
 
     pack = compiler.compile(query="Core Cache API seed knowledge card", version="sample")
 
     statuses = {card["uri"]: card["verification_status"] for card in pack.cards}
     assert statuses, "expected at least one card hit"
-    for uri, status in statuses.items():
-        expected = "verified" if "module-core-cache" in uri else "unverified"
-        assert status == expected, (uri, status)
+    assert set(statuses.values()) == {"evidence_verified"}
+    assert all("module-core-cache" in uri for uri in statuses)
+
+
+def test_card_evidence_keeps_reserved_context_budget(registry, adapter):
+    corpus = registry.get_base()
+    resolver = URIResolver(registry)
+    card = attach_source_hashes(
+        built_in_cards(
+            corpus_id=corpus.corpus_id,
+            version=corpus.version_label,
+            seed_cards_path=corpus.seed_cards_path,
+        )[:1],
+        resolver,
+        adapter,
+    )[0].with_verification("evidence_verified")
+    write_cards([card], corpus.card_root)
+
+    pack = ContextCompiler(registry, adapter).compile(
+        query="Core Cache API",
+        version="sample",
+        max_source_spans=2,
+    )
+
+    assert len(pack.source_spans) == 2
+    assert any(span["source"] == "card-evidence" for span in pack.source_spans)
 
 
 def test_card_without_evidence_fails(registry, adapter):

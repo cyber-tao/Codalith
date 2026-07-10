@@ -90,7 +90,7 @@ def write_cards(cards: list[KnowledgeCard], root: str | Path) -> list[Path]:
     root_path = Path(root)
     written: list[Path] = []
     for card in cards:
-        target = root_path / CARDS_DIR / card.card_type.title() / f"{card.card_id}.md"
+        target = root_path / CARDS_DIR / card.card_type / f"{card.card_id}.md"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(render_markdown(card), encoding="utf-8")
         written.append(target)
