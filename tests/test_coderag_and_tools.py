@@ -415,7 +415,7 @@ def test_codalith_read_source_requires_source_scope(tools):
 
 
 def test_codalith_context_returns_context_pack(tools):
-    pack = tools.codalith_context(query="CachedValue ttl expiration", version="sample")
+    pack = tools.codalith_context(query="CachedValue ttl expiration", corpus="sample")
     assert pack["schema_version"] == "0.2"
     assert pack["version"] == "sample"
     assert pack["corpus_id"] == "sample-codebase"
@@ -442,7 +442,7 @@ def test_context_pack_hashes_canonical_source_not_stale_hit(tools, monkeypatch):
         lambda *args, **kwargs: [hit],
     )
 
-    pack = tools.codalith_context(query="CanonicalHashProbe", version="sample")
+    pack = tools.codalith_context(query="CanonicalHashProbe", corpus="sample")
 
     span = next(item for item in pack["source_spans"] if item["path"] == hit.path)
     canonical = tools.runtime.source_reader.read_source("sample-codebase", hit.path, 1, 2)
@@ -467,20 +467,20 @@ def test_context_compiler_bounds_retrieval_query_fanout(registry, adapter, monke
 
     ContextCompiler(registry, adapter).compile(
         query="AlphaIdentifier BetaIdentifier GammaIdentifier",
-        version="sample",
+        corpus="sample",
     )
 
     assert len(queries) <= 2
 
 
 def test_graph_returns_semantic_edges(tools):
-    graph = tools.codalith_graph(node="EventBus", version="sample", depth=2)
+    graph = tools.codalith_graph(node="EventBus", corpus="sample", depth=2)
 
     assert any(edge["edge_type"] == "declares_symbol" for edge in graph["edges"])
 
 
 def test_lookup_symbol_includes_graph_and_examples(tools):
-    result = tools.codalith_lookup_symbol(symbol="EventBus", version="sample")
+    result = tools.codalith_lookup_symbol(symbol="EventBus", corpus="sample")
 
     assert result["context"]["source_spans"]
     assert result["graph"]["edges"]
@@ -490,7 +490,7 @@ def test_lookup_symbol_includes_graph_and_examples(tools):
 def test_project_overlay_context_and_source_read(tools):
     pack = tools.codalith_context(
         query="ProjectFeature EventBus",
-        version="sample",
+        corpus="sample",
         project="SampleProject",
     )
 
@@ -508,8 +508,8 @@ def test_project_overlay_context_and_source_read(tools):
 def test_compare_versions_compiles_both_context_packs(tools):
     result = tools.codalith_compare_versions(
         target="CachedValue",
-        from_version="sample",
-        to_version="sample-next",
+        from_corpus="sample",
+        to_corpus="sample-next",
     )
 
     assert result["from"]["version"] == "sample"
@@ -519,7 +519,7 @@ def test_compare_versions_compiles_both_context_packs(tools):
 
 
 def test_index_status_reports_semantic_store(tools):
-    status = tools.codalith_index_status(version="sample")
+    status = tools.codalith_index_status(corpus="sample")
 
     assert status["semantic"]["base"]["graph_edges"] > 0
     assert status["semantic"]["base"]["symbols"] > 0
@@ -545,7 +545,7 @@ def test_mcp_tools_list_and_call(tools):
             "method": "tools/call",
             "params": {
                 "name": "codalith_context",
-                "arguments": {"query": "CachedValue ttl", "version": "sample"},
+                "arguments": {"query": "CachedValue ttl", "corpus": "sample"},
             },
         },
         tools,
@@ -576,15 +576,18 @@ def test_mcp_initialize_instructions_come_from_registry(tools):
     assert "Unreal" not in instructions and "UE" not in instructions
 
 
-def test_mcp_tool_schema_version_default_follows_registry_default(tools):
+def test_mcp_tool_schema_corpus_default_and_outputs_follow_registry(tools):
     listed = handle_request({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, tools)
     assert listed is not None
     schemas = {item["name"]: item for item in listed["result"]["tools"]}
     for name in ("codalith_context", "codalith_lookup_symbol", "codalith_graph", "codalith_examples"):
-        version_property = schemas[name]["inputSchema"]["properties"]["version"]
-        assert version_property["default"] == "sample"
+        corpus_property = schemas[name]["inputSchema"]["properties"]["corpus"]
+        assert corpus_property["default"] == "sample-codebase"
     descriptions = " ".join(str(schema["description"]) for schema in schemas.values())
     assert "Unreal" not in descriptions and "UE" not in descriptions
+    assert "references" not in schemas["codalith_lookup_symbol"]["description"]
+    assert " or file " not in schemas["codalith_compare_versions"]["description"]
+    assert all("outputSchema" in schema for schema in schemas.values())
     examples_scopes = schemas["codalith_examples"]["inputSchema"]["properties"]["scope"]["enum"]
     assert "source" in examples_scopes
     assert "docs" in examples_scopes
@@ -597,16 +600,37 @@ def test_codalith_examples_rejects_unknown_scope(tools):
         tools.codalith_examples(symbol_or_api="CachedValue", scope="engine")
 
 
+def test_codalith_examples_returns_references_without_source_text(tools):
+    result = tools.codalith_examples(
+        symbol_or_api="CachedValue",
+        corpus="sample",
+        scope="source",
+    )
+
+    assert result["examples"]
+    assert all("snippet" not in example for example in result["examples"])
+    assert all(example["uri"] for example in result["examples"])
+
+
 def test_codalith_context_defaults_to_registry_default_corpus(tools):
     pack = tools.codalith_context(query="EventBus dispatch")
     assert pack["version"] == "sample"
     assert pack["source_spans"]
 
 
+def test_codalith_context_defaults_to_auto_intent(tools):
+    pack = tools.codalith_context(query="Debug the EventBus error")
+
+    assert pack["intent"] == "debug"
+
+
 def test_mcp_resources_list_templates_and_read(tools):
     listed = handle_request({"jsonrpc": "2.0", "id": 1, "method": "resources/list"}, tools)
     assert listed is not None
-    assert any(item["uri"] == "codalith://sample-codebase/modules" for item in listed["result"]["resources"])
+    resource_uris = {item["uri"] for item in listed["result"]["resources"]}
+    assert "codalith://sample-codebase/modules" in resource_uris
+    assert "codalith://SampleProject/modules" in resource_uris
+    assert "codalith://generated-sample/modules" in resource_uris
 
     templates = handle_request(
         {"jsonrpc": "2.0", "id": 2, "method": "resources/templates/list"},
@@ -630,6 +654,23 @@ def test_mcp_resources_list_templates_and_read(tools):
     assert read is not None
     content = json.loads(read["result"]["contents"][0]["text"])
     assert content["semantic"]["graph_edges"] > 0
+    modules = _read_resource_via_rpc(tools, "codalith://sample-codebase/modules")
+    assert modules["count"] >= 1
+    assert any(module["module_name"] == "core" for module in modules["modules"])
+
+
+def test_project_and_generated_resource_templates_resolve(tools):
+    project_source = _read_resource_via_rpc(
+        tools,
+        "codalith://SampleProject/source/src/project/feature.py#L1-L3",
+    )
+    generated_source = _read_resource_via_rpc(
+        tools,
+        "codalith://generated-sample/source/generated/build.log#L1",
+    )
+
+    assert project_source["corpus_id"] == "SampleProject"
+    assert generated_source["corpus_id"] == "generated-sample"
 
 
 def _read_resource_via_rpc(tools, uri: str) -> dict[str, Any]:
@@ -713,8 +754,8 @@ def test_call_tool_rejects_unknown_tools_and_invalid_arguments(tools):
             "codalith_compare_versions",
             {
                 "target": "CachedValue",
-                "from_version": "sample",
-                "to_version": "sample-next",
+                "from_corpus": "sample",
+                "to_corpus": "sample-next",
                 "diff_type": "summary",
             },
         )
@@ -781,7 +822,7 @@ def test_lookup_symbol_omits_graph_without_scope(tools):
         scopes=frozenset({"source:read", "index:status", "cards:read"}),
     )
 
-    result = tools.codalith_lookup_symbol(symbol="EventBus", version="sample")
+    result = tools.codalith_lookup_symbol(symbol="EventBus", corpus="sample")
 
     assert "graph" not in result
     assert any("Graph neighborhood omitted" in warning for warning in result["warnings"])

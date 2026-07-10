@@ -79,7 +79,7 @@ def test_streamable_http_post_get_session_and_origin(tools):
                 "method": "tools/call",
                 "params": {
                     "name": "codalith_index_status",
-                    "arguments": {"version": "sample"},
+                    "arguments": {"corpus": "sample"},
                 },
             },
             session_id=session_id,
@@ -97,7 +97,7 @@ def test_streamable_http_post_get_session_and_origin(tools):
                 "method": "tools/call",
                 "params": {
                     "name": "codalith_graph",
-                    "arguments": {"node": "EventBus", "version": "sample"},
+                    "arguments": {"node": "EventBus", "corpus": "sample"},
                 },
             },
             session_id=session_id,

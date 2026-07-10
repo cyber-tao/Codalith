@@ -25,7 +25,7 @@ from codalith.corpus.source_reader import SourceReader
 from codalith.corpus.uri_resolver import URIResolver
 from codalith.corpus.uris import module_uri, source_uri, symbol_uri
 from codalith.errors import SourceReadError, URIResolutionError
-from codalith.semantic.graph import aggregate_graph_neighborhood
+from codalith.semantic.graph import GraphEdgeDict, aggregate_graph_neighborhood
 from codalith.semantic.store import SemanticStore
 
 _LOG = logging.getLogger(__name__)
@@ -52,7 +52,7 @@ class ContextCompiler:
         self,
         *,
         query: str,
-        version: str | None = None,
+        corpus: str | None = None,
         project: str | None = None,
         mode: str | None = None,
         max_source_spans: int = 8,
@@ -60,7 +60,7 @@ class ContextCompiler:
         include_generated_overlay: bool = False,
     ) -> ContextPack:
         resolution = self.registry.resolve(
-            version,
+            corpus,
             project,
             include_project_overlay,
             include_generated_overlay=include_generated_overlay,
@@ -83,21 +83,21 @@ class ContextCompiler:
         modules = detect_modules(query, module_hints=module_hint_values)
         search_top_k = max_source_spans
         raw_hits: list[RetrievalHit] = []
-        for corpus in resolution.ordered:
+        for resolved_corpus in resolution.ordered:
             raw_hits.extend(
                 locate_source_priors(
-                    corpus,
+                    resolved_corpus,
                     query=query,
                     identifiers=identifiers,
                     max_hits=search_top_k,
-                    priors=domain_configs[corpus.corpus_id].priors,
+                    priors=domain_configs[resolved_corpus.corpus_id].priors,
                     source_reader=self.source_reader,
                 )
             )
             for planned_query in _build_queries(query, identifiers):
                 raw_hits.extend(
                     self.adapter.search_code(
-                        corpus.corpus_id,
+                        resolved_corpus.corpus_id,
                         planned_query,
                         top_k=search_top_k,
                     )
@@ -172,7 +172,7 @@ class ContextCompiler:
 
     def _graph_edges(
         self, corpus_ids: list[str], nodes: list[str], max_edges: int = 24
-    ) -> list[dict[str, object]]:
+    ) -> list[GraphEdgeDict]:
         if self.semantic_store is None:
             return []
         result = aggregate_graph_neighborhood(
@@ -404,7 +404,7 @@ def _merge_source_spans(spans: list[SourceSpanEntry]) -> list[SourceSpanEntry]:
     return merged
 
 
-def _graph_caveat(graph_edges: list[dict[str, object]], has_store: bool) -> str:
+def _graph_caveat(graph_edges: list[GraphEdgeDict], has_store: bool) -> str:
     if graph_edges:
         return "Semantic graph edges are included from extractor output where available."
     if has_store:

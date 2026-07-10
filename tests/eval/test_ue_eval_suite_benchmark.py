@@ -20,7 +20,7 @@ def test_ue_eval_suite_passes_mcp_context_recall(
     for row in eval_suite_rows:
         pack = ue_eval_tools.codalith_context(
             query=str(row["query"]),
-            version=str(row.get("version", "5.7.4")),
+            corpus=str(row.get("version", "5.7.4")),
             mode=str(row.get("mode", "explain")),
             max_source_spans=5,
             include_project_overlay=False,

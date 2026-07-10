@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any, NotRequired, TypedDict
 
+from codalith.semantic.graph import GraphEdgeDict
+
 
 @dataclass(frozen=True, slots=True)
 class AnswerPolicy:
@@ -25,7 +27,7 @@ class ModuleEntry(TypedDict):
     reason: str
 
 
-class SymbolEntry(TypedDict, total=False):
+class SymbolEntry(TypedDict):
     name: str
     uri: str
     kind: str
@@ -40,7 +42,7 @@ class CardEntry(TypedDict):
     verification_status: str
 
 
-class SourceSpanEntry(TypedDict, total=False):
+class SourceSpanEntry(TypedDict):
     uri: str
     path: str
     start_line: int
@@ -78,7 +80,7 @@ class ContextPack:
     symbols: list[SymbolEntry]
     cards: list[CardEntry]
     source_spans: list[SourceSpanEntry]
-    graph_edges: list[dict[str, Any]]
+    graph_edges: list[GraphEdgeDict]
     caveats: list[str]
     recommended_next_calls: list[RecommendedCall]
     schema_version: str = "0.2"

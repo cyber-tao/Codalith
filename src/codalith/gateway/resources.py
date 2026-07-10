@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import re
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 from codalith.cards.repository import FileCardRepository
 from codalith.corpus.registry import CorpusRegistry
-from codalith.corpus.uris import card_uri, corpus_uri
-from codalith.errors import URIResolutionError
+from codalith.corpus.uris import SCHEME, card_uri, corpus_uri
+from codalith.errors import CorpusNotFoundError, URIResolutionError
 from codalith.gateway.auth import AuthError
 
 if TYPE_CHECKING:
@@ -22,40 +23,33 @@ _SAFE_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$")
 
 def resources(registry: CorpusRegistry) -> list[dict[str, str]]:
     items: list[dict[str, str]] = []
-    for corpus in registry.corpora.values():
-        base = corpus_uri(corpus.corpus_id)
-        label = corpus.label
-        items.extend(
-            [
-                {
-                    "uri": base,
-                    "name": label,
-                    "description": corpus.description or "Version-pinned corpus summary.",
-                    "mimeType": "application/json",
-                },
-                {
-                    "uri": f"{base}/modules",
-                    "name": f"{label} modules",
-                    "description": "Module names and dependency graph summary.",
-                    "mimeType": "application/json",
-                },
-                {
-                    "uri": f"{base}/cards",
-                    "name": f"{label} knowledge cards",
-                    "description": "Verified knowledge card collection summary.",
-                    "mimeType": "application/json",
-                },
-            ]
-        )
-    for project_id in registry.projects:
-        items.append(
-            {
-                "uri": corpus_uri(project_id),
-                "name": f"Project overlay {project_id}",
-                "description": "Project overlay corpus summary.",
-                "mimeType": "application/json",
-            }
-        )
+    for collection in (registry.corpora, registry.projects, registry.generated):
+        for corpus in collection.values():
+            base = corpus_uri(corpus.corpus_id)
+            label = corpus.label
+            items.extend(
+                [
+                    {
+                        "uri": base,
+                        "name": label,
+                        "description": corpus.description
+                        or f"{corpus.kind.title()} corpus summary.",
+                        "mimeType": "application/json",
+                    },
+                    {
+                        "uri": f"{base}/modules",
+                        "name": f"{label} modules",
+                        "description": "Semantic modules and dependency summary.",
+                        "mimeType": "application/json",
+                    },
+                    {
+                        "uri": f"{base}/cards",
+                        "name": f"{label} knowledge cards",
+                        "description": "Verified knowledge card collection.",
+                        "mimeType": "application/json",
+                    },
+                ]
+            )
     return items
 
 
@@ -86,59 +80,64 @@ def resource_templates() -> list[dict[str, str]]:
 
 def read_resource(uri: str, tools: CodalithTools) -> dict[str, Any]:
     registry = tools.runtime.registry
-    for corpus in registry.corpora.values():
-        base = corpus_uri(corpus.corpus_id)
-        if uri != base and not uri.startswith(f"{base}/"):
-            continue
-        tools.require_corpus_access(corpus.corpus_id)
-        if uri == base:
-            return {
-                "uri": uri,
-                "corpus_id": corpus.corpus_id,
-                "kind": "corpus",
-                "version": corpus.version_label,
-                "source_revision": corpus.source_revision,
-                "semantic": _semantic_status(tools, corpus.corpus_id),
-            }
-        if uri == f"{base}/modules":
-            return {
-                "uri": uri,
-                "corpus_id": corpus.corpus_id,
-                "kind": "modules",
-                "semantic": _semantic_status(tools, corpus.corpus_id),
-                "caveat": (
-                    "Use codalith_context, codalith_graph, codalith_examples, "
-                    "or codalith_read_source for bounded evidence retrieval."
-                ),
-            }
-        if uri == f"{base}/cards":
-            return _cards_collection_resource(tools, corpus, uri)
-        if uri.startswith(f"{base}/module/"):
-            return _module_resource(tools, corpus, uri, uri.removeprefix(f"{base}/module/"))
-        if uri.startswith(f"{base}/symbol/"):
-            return _symbol_resource(tools, corpus, uri, uri.removeprefix(f"{base}/symbol/"))
-        if uri.startswith(f"{base}/source/"):
-            # Route through the tool so policy, rate limiting, and audit apply.
-            return tools.codalith_read_source(uri=uri)
-        if uri.startswith(f"{base}/card/"):
-            return _card_resource(tools, corpus, uri, uri.removeprefix(f"{base}/card/"))
+    parsed = urlparse(uri)
+    if parsed.scheme != SCHEME or not parsed.netloc:
         raise URIResolutionError(f"Unknown resource URI: {uri}")
-    for project_id, corpus in registry.projects.items():
-        if uri == corpus_uri(project_id):
-            tools.require_corpus_access(corpus.corpus_id)
-            return {
-                "uri": uri,
-                "corpus_id": corpus.corpus_id,
-                "kind": "project",
-                "base_corpus": corpus.base_corpus,
-                "semantic": _semantic_status(tools, corpus.corpus_id),
-            }
+    try:
+        corpus = registry.get_corpus(parsed.netloc)
+    except CorpusNotFoundError as exc:
+        raise URIResolutionError(str(exc)) from exc
+    tools.require_corpus_access(corpus.corpus_id)
+    path = parsed.path.rstrip("/")
+    if not path:
+        return {
+            "uri": uri,
+            "corpus_id": corpus.corpus_id,
+            "kind": corpus.kind,
+            "version": corpus.version_label,
+            "source_revision": corpus.source_revision,
+            "base_corpus": corpus.base_corpus,
+            "semantic": _semantic_status(tools, corpus.corpus_id),
+        }
+    if path == "/modules":
+        return _modules_collection_resource(tools, corpus, uri)
+    if path == "/cards":
+        return _cards_collection_resource(tools, corpus, uri)
+    if path.startswith("/module/"):
+        return _module_resource(tools, corpus, uri, path.removeprefix("/module/"))
+    if path.startswith("/symbol/"):
+        return _symbol_resource(tools, corpus, uri, path.removeprefix("/symbol/"))
+    if path.startswith("/source/"):
+        # Route through the tool so policy, rate limiting, and audit apply.
+        return tools.codalith_read_source(uri=uri)
+    if path.startswith("/card/"):
+        return _card_resource(tools, corpus, uri, path.removeprefix("/card/"))
     raise URIResolutionError(f"Unknown resource URI: {uri}")
 
 
 def _semantic_status(tools: CodalithTools, corpus_id: str) -> dict[str, Any] | None:
     store = tools.runtime.semantic_store
     return store.semantic_status(corpus_id) if store is not None else None
+
+
+def _modules_collection_resource(
+    tools: CodalithTools,
+    corpus: Corpus,
+    uri: str,
+) -> dict[str, Any]:
+    store = tools.runtime.semantic_store
+    modules = store.list_modules(corpus.corpus_id) if store is not None else []
+    return {
+        "uri": uri,
+        "corpus_id": corpus.corpus_id,
+        "kind": "modules",
+        "count": len(modules),
+        "modules": modules,
+        "semantic": _semantic_status(tools, corpus.corpus_id),
+        "caveat": None
+        if store is not None
+        else "Semantic store is not configured; no module inventory is available.",
+    }
 
 
 def _cards_collection_resource(

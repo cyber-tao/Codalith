@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Protocol, TypedDict
+from typing import NotRequired, Protocol, TypedDict
 
 
 class GraphNodeDict(TypedDict):
@@ -14,9 +14,20 @@ class GraphNodeDict(TypedDict):
     label: str
 
 
+class GraphEdgeDict(TypedDict):
+    from_node: str
+    edge_type: str
+    to_node: str
+    evidence_uris: list[str]
+    extractor: str
+    confidence: float
+    metadata: dict[str, object]
+    corpus_id: NotRequired[str]
+
+
 class GraphQueryResult(TypedDict):
     nodes: list[GraphNodeDict]
-    edges: list[dict[str, object]]
+    edges: list[GraphEdgeDict]
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,11 +40,11 @@ class GraphEdge:
     confidence: float = 1.0
     metadata: dict[str, object] = field(default_factory=dict)
 
-    def as_dict(self) -> dict[str, object]:
+    def as_dict(self) -> GraphEdgeDict:
         return {
-            "from": self.from_node,
+            "from_node": self.from_node,
             "edge_type": self.edge_type,
-            "to": self.to_node,
+            "to_node": self.to_node,
             "evidence_uris": list(self.evidence_uris),
             "extractor": self.extractor,
             "confidence": self.confidence,
@@ -122,7 +133,7 @@ def aggregate_graph_neighborhood(
     so overlay provenance remains explicit.
     """
     nodes: dict[str, GraphNodeDict] = {}
-    edges: dict[tuple[object, object, object, object], dict[str, object]] = {}
+    edges: dict[tuple[object, object, object, object], GraphEdgeDict] = {}
     seeds = [node for node in seed_nodes if node]
     for corpus_id in corpus_ids:
         for node in seeds:
@@ -138,8 +149,8 @@ def aggregate_graph_neighborhood(
                 str(result_node["id"]): result_node for result_node in result["nodes"]
             }
             for edge in result["edges"]:
-                from_node = str(edge.get("from", ""))
-                to_node = str(edge.get("to", ""))
+                from_node = str(edge.get("from_node", ""))
+                to_node = str(edge.get("to_node", ""))
                 missing_nodes = {
                     endpoint
                     for endpoint in (from_node, to_node)
@@ -163,7 +174,7 @@ def aggregate_graph_neighborhood(
                     else:
                         _add_node(nodes, endpoint)
                 key = (corpus_id, from_node, edge.get("edge_type"), to_node)
-                payload = dict(edge)
+                payload = edge.copy()
                 if include_corpus_id:
                     payload["corpus_id"] = corpus_id
                 edges[key] = payload

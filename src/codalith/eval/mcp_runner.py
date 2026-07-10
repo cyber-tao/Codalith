@@ -164,7 +164,7 @@ def run_mcp_eval(
             "max_source_spans": max_source_spans,
         }
         if item_version:
-            arguments["version"] = item_version
+            arguments["corpus"] = item_version
         return client.call_tool("codalith_context", arguments)
 
     def row_extras(

@@ -61,7 +61,7 @@ class EvalRunner:
         def run_pack(item: dict[str, Any], item_version: str | None) -> dict[str, Any]:
             return self.compiler.compile(
                 query=str(item["query"]),
-                version=item_version,
+                corpus=item_version,
                 mode=str(item.get("mode", "explain")),
                 max_source_spans=max_source_spans,
             ).as_dict()

@@ -11,6 +11,18 @@ from codalith.semantic.store.connection import ConnectionBase
 
 
 class SemanticQueries(ConnectionBase):
+    def list_modules(self, corpus_id: str, *, limit: int = 500) -> list[dict[str, Any]]:
+        rows = self._execute(
+            """
+            SELECT * FROM codalith_modules
+            WHERE corpus_id = ?
+            ORDER BY module_name
+            LIMIT ?
+            """,
+            (corpus_id, limit),
+        ).fetchall()
+        return [_row(row) for row in rows]
+
     def list_module_deps(self, corpus_id: str, module: str | None = None) -> list[dict[str, Any]]:
         sql = "SELECT * FROM codalith_module_deps WHERE corpus_id = ?"
         params: list[Any] = [corpus_id]

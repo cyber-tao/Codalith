@@ -88,15 +88,15 @@ class CodalithTools:
         self,
         *,
         query: str,
-        version: str | None = None,
+        corpus: str | None = None,
         project: str | None = None,
-        mode: str = "explain",
+        mode: str = "auto",
         max_source_spans: int = 8,
         include_project_overlay: bool = True,
         include_generated_overlay: bool = False,
     ) -> dict[str, Any]:
         resolution = self.runtime.registry.resolve(
-            version,
+            corpus,
             project,
             include_project_overlay,
             include_generated_overlay=include_generated_overlay,
@@ -104,9 +104,9 @@ class CodalithTools:
         self._require_resolution_access(resolution)
         pack = self.runtime.compiler.compile(
             query=query,
-            version=version,
+            corpus=corpus,
             project=project,
-            mode=mode,
+            mode=None if mode == "auto" else mode,
             max_source_spans=max_source_spans,
             include_project_overlay=include_project_overlay,
             include_generated_overlay=include_generated_overlay,
@@ -208,11 +208,11 @@ class CodalithTools:
     def codalith_index_status(
         self,
         *,
-        version: str | None = None,
+        corpus: str | None = None,
         project: str | None = None,
     ) -> dict[str, Any]:
         self._require_scope("index:status")
-        resolution = self.runtime.registry.resolve(version, project, include_project_overlay=bool(project))
+        resolution = self.runtime.registry.resolve(corpus, project, include_project_overlay=bool(project))
         self._require_resolution_access(resolution)
         semantic = {
             "base": self.runtime.semantic_store.semantic_status(resolution.base.corpus_id)
@@ -234,23 +234,23 @@ class CodalithTools:
         self,
         *,
         symbol: str,
-        version: str | None = None,
+        corpus: str | None = None,
         project: str | None = None,
         kind: str = "any",
         include_examples: bool = True,
     ) -> dict[str, Any]:
-        resolution = self.runtime.registry.resolve(version, project, include_project_overlay=bool(project))
+        resolution = self.runtime.registry.resolve(corpus, project, include_project_overlay=bool(project))
         self._require_resolution_access(resolution)
         semantic_matches: list[dict[str, Any]] = []
         if self.runtime.semantic_store is not None:
-            for corpus in resolution.ordered:
+            for resolved_corpus in resolution.ordered:
                 semantic_matches.extend(
                     {
                         **row,
-                        "corpus_id": corpus.corpus_id,
+                        "corpus_id": resolved_corpus.corpus_id,
                     }
                     for row in self.runtime.semantic_store.find_symbols(
-                        corpus.corpus_id,
+                        resolved_corpus.corpus_id,
                         symbol,
                         kind=kind,
                         limit=20,
@@ -258,7 +258,7 @@ class CodalithTools:
                 )
         pack = self.codalith_context(
             query=symbol,
-            version=version,
+            corpus=corpus,
             project=project,
             mode="api_usage" if include_examples else "explain",
             max_source_spans=8,
@@ -271,7 +271,10 @@ class CodalithTools:
             "definitions": [
                 match
                 for match in semantic_matches
-                if match.get("definition_uri") or match.get("declaration_uri")
+                if match.get("definition_uri")
+            ],
+            "declarations": [
+                match for match in semantic_matches if match.get("declaration_uri")
             ],
             "modules": sorted(
                 {str(match["module_name"]) for match in semantic_matches if match.get("module_name")}
@@ -279,13 +282,18 @@ class CodalithTools:
             "context": pack,
         }
         if "graph:read" in self.scopes():
-            result["graph"] = self.codalith_graph(node=symbol, version=version, project=project, max_nodes=24)
+            result["graph"] = self.codalith_graph(
+                node=symbol,
+                corpus=corpus,
+                project=project,
+                max_nodes=24,
+            )
         else:
             warnings.append("Graph neighborhood omitted: missing scope graph:read.")
         result["examples"] = (
             self.codalith_examples(
                 symbol_or_api=symbol,
-                version=version,
+                corpus=corpus,
                 project=project,
                 max_examples=5,
             )["examples"]
@@ -300,14 +308,14 @@ class CodalithTools:
         self,
         *,
         node: str,
-        version: str | None = None,
+        corpus: str | None = None,
         project: str | None = None,
         edge_types: list[str] | None = None,
         depth: int = 1,
         max_nodes: int = 80,
     ) -> dict[str, Any]:
         self._require_scope("graph:read")
-        resolution = self.runtime.registry.resolve(version, project, include_project_overlay=bool(project))
+        resolution = self.runtime.registry.resolve(corpus, project, include_project_overlay=bool(project))
         self._require_resolution_access(resolution)
         resolved_version = resolution.base.version_label
         if self.runtime.semantic_store is None:
@@ -349,7 +357,7 @@ class CodalithTools:
         self,
         *,
         symbol_or_api: str,
-        version: str | None = None,
+        corpus: str | None = None,
         project: str | None = None,
         scope: str = "all",
         max_examples: int = 8,
@@ -360,7 +368,7 @@ class CodalithTools:
                 f"Unknown examples scope: {scope!r}; expected one of {sorted(allowed_scopes)}"
             )
         resolution = self.runtime.registry.resolve(
-            version,
+            corpus,
             project,
             include_project_overlay=scope in {"project", "all"},
             include_generated_overlay=scope == "generated"
@@ -368,23 +376,30 @@ class CodalithTools:
         )
         self._require_resolution_access(resolution)
         hits: list[RetrievalHit] = []
-        for corpus in resolution.ordered:
-            prefixes = _search_path_prefixes(scope, corpus)
+        for resolved_corpus in resolution.ordered:
+            prefixes = _search_path_prefixes(scope, resolved_corpus)
             if prefixes is None:
                 continue
             if not prefixes:
                 corpus_hits = self.runtime.adapter.search_code(
-                    corpus.corpus_id, symbol_or_api, top_k=max_examples * 2
+                    resolved_corpus.corpus_id,
+                    symbol_or_api,
+                    top_k=max_examples * 2,
                 )
                 hits.extend(
                     hit
                     for hit in corpus_hits
-                    if _scope_matches(scope, hit.path, corpus, allowed_scopes=allowed_scopes)
+                    if _scope_matches(
+                        scope,
+                        hit.path,
+                        resolved_corpus,
+                        allowed_scopes=allowed_scopes,
+                    )
                 )
                 continue
             for prefix in prefixes:
                 corpus_hits = self.runtime.adapter.search_code(
-                    corpus.corpus_id,
+                    resolved_corpus.corpus_id,
                     symbol_or_api,
                     top_k=max_examples * 2,
                     filters={"path_prefix": prefix},
@@ -392,33 +407,41 @@ class CodalithTools:
                 hits.extend(
                     hit
                     for hit in corpus_hits
-                    if _scope_matches(scope, hit.path, corpus, allowed_scopes=allowed_scopes)
+                    if _scope_matches(
+                        scope,
+                        hit.path,
+                        resolved_corpus,
+                        allowed_scopes=allowed_scopes,
+                    )
                 )
-        return {"symbol_or_api": symbol_or_api, "examples": [hit.as_dict() for hit in hits[:max_examples]]}
+        return {
+            "symbol_or_api": symbol_or_api,
+            "examples": [_example_entry(hit) for hit in hits[:max_examples]],
+        }
 
     def codalith_compare_versions(
         self,
         *,
         target: str,
-        from_version: str,
-        to_version: str,
+        from_corpus: str,
+        to_corpus: str,
         diff_type: str = "symbols",
     ) -> dict[str, Any]:
         if diff_type not in ("module_deps", "symbols"):
             raise ValueError(f"Unsupported diff_type: {diff_type}")
-        from_resolution = self.runtime.registry.resolve(from_version)
-        to_resolution = self.runtime.registry.resolve(to_version)
+        from_resolution = self.runtime.registry.resolve(from_corpus)
+        to_resolution = self.runtime.registry.resolve(to_corpus)
         self._require_resolution_access(from_resolution)
         self._require_resolution_access(to_resolution)
         from_pack = self.codalith_context(
             query=target,
-            version=from_version,
+            corpus=from_corpus,
             mode="compare",
             max_source_spans=5,
         )
         to_pack = self.codalith_context(
             query=target,
-            version=to_version,
+            corpus=to_corpus,
             mode="compare",
             max_source_spans=5,
         )
@@ -430,8 +453,8 @@ class CodalithTools:
         )
         return {
             "target": target,
-            "from_version": from_version,
-            "to_version": to_version,
+            "from_corpus": from_corpus,
+            "to_corpus": to_corpus,
             "diff_type": diff_type,
             "diff": diff,
             "from": from_pack,
@@ -586,15 +609,43 @@ def _symbol_key(row: dict[str, Any]) -> tuple[object, ...]:
     return (row["name"], row["kind"], row.get("qualified_name"), row.get("signature"))
 
 
-def _version_property(default_version: str | None) -> dict[str, Any]:
+def _example_entry(hit: RetrievalHit) -> dict[str, Any]:
+    return {
+        "source": hit.source,
+        "corpus_id": hit.corpus_id,
+        "uri": hit.uri,
+        "path": hit.path,
+        "start_line": hit.start_line,
+        "end_line": hit.end_line,
+        "title": hit.title,
+        "score": hit.score,
+        "kind": hit.kind,
+        "language": hit.language,
+        "symbol": hit.symbol,
+        "module": hit.module,
+        "reason": hit.reason,
+        "metadata": hit.metadata,
+    }
+
+
+def _corpus_property(default_corpus: str | None) -> dict[str, Any]:
     prop: dict[str, Any] = {"type": "string"}
-    if default_version:
-        prop["default"] = default_version
+    if default_corpus:
+        prop["default"] = default_corpus
     return prop
 
 
+def _object_output_schema(*required: str) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {key: {} for key in required},
+        "required": list(required),
+        "additionalProperties": True,
+    }
+
+
 def _tool_schema_data(
-    default_version: str | None,
+    default_corpus: str | None,
     scopes: tuple[str, ...],
 ) -> list[dict[str, Any]]:
     scope_enum = list(scopes) if scopes else list(_FIXED_EXAMPLE_SCOPES)
@@ -610,12 +661,20 @@ def _tool_schema_data(
                 "type": "object",
                 "properties": {
                     "query": {"type": "string"},
-                    "version": _version_property(default_version),
+                    "corpus": _corpus_property(default_corpus),
                     "project": {"type": "string"},
                     "mode": {
                         "type": "string",
-                        "enum": ["explain", "trace", "implement", "debug", "api_usage", "compare"],
-                        "default": "explain",
+                        "enum": [
+                            "auto",
+                            "explain",
+                            "trace",
+                            "implement",
+                            "debug",
+                            "api_usage",
+                            "compare",
+                        ],
+                        "default": "auto",
                     },
                     "max_source_spans": {"type": "integer", "default": 8, "minimum": 1, "maximum": 20},
                     "include_project_overlay": {"type": "boolean", "default": True},
@@ -623,6 +682,14 @@ def _tool_schema_data(
                 },
                 "required": ["query"],
             },
+            "outputSchema": _object_output_schema(
+                "schema_version",
+                "query",
+                "version",
+                "corpus_id",
+                "source_revision",
+                "source_spans",
+            ),
         },
         {
             "name": "codalith_read_source",
@@ -637,6 +704,15 @@ def _tool_schema_data(
                 },
                 "required": ["uri"],
             },
+            "outputSchema": _object_output_schema(
+                "uri",
+                "corpus_id",
+                "path",
+                "start_line",
+                "end_line",
+                "source_hash",
+                "content",
+            ),
         },
         {
             "name": "codalith_index_status",
@@ -644,19 +720,23 @@ def _tool_schema_data(
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "version": _version_property(default_version),
+                    "corpus": _corpus_property(default_corpus),
                     "project": {"type": "string"},
                 },
             },
+            "outputSchema": _object_output_schema("base", "project", "semantic"),
         },
         {
             "name": "codalith_lookup_symbol",
-            "description": "Resolve a source symbol to definitions, declarations, modules, references, examples, and source URIs.",
+            "description": (
+                "Resolve a source symbol to definitions, declarations, modules, "
+                "examples, graph context, and source URIs."
+            ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "symbol": {"type": "string"},
-                    "version": _version_property(default_version),
+                    "corpus": _corpus_property(default_corpus),
                     "project": {"type": "string"},
                     "kind": {
                         "type": "string",
@@ -670,6 +750,16 @@ def _tool_schema_data(
                 },
                 "required": ["symbol"],
             },
+            "outputSchema": _object_output_schema(
+                "symbol",
+                "kind",
+                "semantic_matches",
+                "definitions",
+                "declarations",
+                "modules",
+                "context",
+                "examples",
+            ),
         },
         {
             "name": "codalith_graph",
@@ -678,7 +768,7 @@ def _tool_schema_data(
                 "type": "object",
                 "properties": {
                     "node": {"type": "string"},
-                    "version": _version_property(default_version),
+                    "corpus": _corpus_property(default_corpus),
                     "project": {"type": "string"},
                     "edge_types": {"type": "array", "items": {"type": "string"}},
                     "depth": {"type": "integer", "default": 1, "minimum": 1, "maximum": 4},
@@ -686,6 +776,13 @@ def _tool_schema_data(
                 },
                 "required": ["node"],
             },
+            "outputSchema": _object_output_schema(
+                "node",
+                "version",
+                "nodes",
+                "edges",
+                "caveat",
+            ),
         },
         {
             "name": "codalith_examples",
@@ -697,7 +794,7 @@ def _tool_schema_data(
                 "type": "object",
                 "properties": {
                     "symbol_or_api": {"type": "string"},
-                    "version": _version_property(default_version),
+                    "corpus": _corpus_property(default_corpus),
                     "project": {"type": "string"},
                     "scope": {
                         "type": "string",
@@ -708,58 +805,68 @@ def _tool_schema_data(
                 },
                 "required": ["symbol_or_api"],
             },
+            "outputSchema": _object_output_schema("symbol_or_api", "examples"),
         },
         {
             "name": "codalith_compare_versions",
-            "description": "Compare a symbol, module, or file across corpus versions.",
+            "description": "Compare a symbol or module across two base corpora.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "target": {"type": "string"},
-                    "from_version": {"type": "string"},
-                    "to_version": {"type": "string"},
+                    "from_corpus": {"type": "string"},
+                    "to_corpus": {"type": "string"},
                     "diff_type": {
                         "type": "string",
                         "enum": ["module_deps", "symbols"],
                         "default": "symbols",
                     },
                 },
-                "required": ["target", "from_version", "to_version"],
+                "required": ["target", "from_corpus", "to_corpus"],
             },
+            "outputSchema": _object_output_schema(
+                "target",
+                "from_corpus",
+                "to_corpus",
+                "diff_type",
+                "diff",
+                "from",
+                "to",
+            ),
         },
     ]
 
 
 # Single source of truth: tools/list schemas and call_tool dispatch both derive
 # from this registry, so a tool cannot be listed without being callable. The
-# default version and example scopes are injected from the corpus registry.
+# default corpus and example scopes are injected from the corpus registry.
 @lru_cache(maxsize=8)
 def _tool_registry(
-    default_version: str | None,
+    default_corpus: str | None,
     scopes: tuple[str, ...],
 ) -> dict[str, dict[str, Any]]:
-    return {schema["name"]: schema for schema in _tool_schema_data(default_version, scopes)}
+    return {schema["name"]: schema for schema in _tool_schema_data(default_corpus, scopes)}
 
 
-def _default_version(registry: CorpusRegistry) -> str | None:
+def _default_corpus(registry: CorpusRegistry) -> str | None:
     try:
-        return registry.get_base(None).version_label
+        return registry.get_base(None).corpus_id
     except CorpusNotFoundError:
         return None
 
 
 def _registry_cache_key(registry: CorpusRegistry) -> tuple[str | None, tuple[str, ...]]:
-    return _default_version(registry), tuple(example_scopes(registry))
+    return _default_corpus(registry), tuple(example_scopes(registry))
 
 
 def tool_schemas(registry: CorpusRegistry) -> list[dict[str, Any]]:
-    default_version, scopes = _registry_cache_key(registry)
-    return list(_tool_registry(default_version, scopes).values())
+    default_corpus, scopes = _registry_cache_key(registry)
+    return list(_tool_registry(default_corpus, scopes).values())
 
 
 def call_tool(tools: CodalithTools, name: str, arguments: dict[str, Any]) -> Any:
-    default_version, scopes = _registry_cache_key(tools.runtime.registry)
-    schema = _tool_registry(default_version, scopes).get(name)
+    default_corpus, scopes = _registry_cache_key(tools.runtime.registry)
+    schema = _tool_registry(default_corpus, scopes).get(name)
     if schema is None:
         raise ValueError(f"Unknown tool: {name}")
     _validate_arguments(name, schema["inputSchema"], arguments)

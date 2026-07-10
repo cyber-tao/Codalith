@@ -33,8 +33,8 @@ def test_semantic_store_records_generic_modules_symbols_and_edges():
     rows = store.list_module_deps("sample-codebase", "core")
     assert len(rows) == 1
     graph = query_graph(store, corpus_id="sample-codebase", node="core")
-    assert any(edge["to"] == "module:shared" for edge in graph["edges"])
-    assert any(edge["to"] == "symbol:CachedValue" for edge in graph["edges"])
+    assert any(edge["to_node"] == "module:shared" for edge in graph["edges"])
+    assert any(edge["to_node"] == "symbol:CachedValue" for edge in graph["edges"])
 
 
 def test_upsert_compile_guard_supports_deferred_commit(tmp_path):
@@ -144,7 +144,7 @@ def test_graph_limits_never_return_orphan_edges():
 
     assert len(node_ids) <= 3
     assert all(
-        edge["from"] in node_ids and edge["to"] in node_ids
+        edge["from_node"] in node_ids and edge["to_node"] in node_ids
         for edge in graph["edges"]
     )
 

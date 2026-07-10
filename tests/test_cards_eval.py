@@ -80,7 +80,7 @@ def test_context_pack_only_uses_evidence_verified_cards(registry, adapter):
     )
     compiler = ContextCompiler(registry, adapter)
 
-    pack = compiler.compile(query="Core Cache API seed knowledge card", version="sample")
+    pack = compiler.compile(query="Core Cache API seed knowledge card", corpus="sample")
 
     statuses = {card["uri"]: card["verification_status"] for card in pack.cards}
     assert statuses, "expected at least one card hit"
@@ -104,7 +104,7 @@ def test_card_evidence_keeps_reserved_context_budget(registry, adapter):
 
     pack = ContextCompiler(registry, adapter).compile(
         query="Core Cache API",
-        version="sample",
+        corpus="sample",
         max_source_spans=2,
     )
 
