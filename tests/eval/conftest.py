@@ -104,6 +104,7 @@ def ue_eval_registry_path(
             "ue-5.7.4": {
                 "kind": "source",
                 "version": "5.7.4",
+                "source_revision": "5.7.4-test",
                 "source_root": str(seeded_eval_sources),
                 "indexed_root": str(seeded_eval_sources),
                 "coderag_store": str(tmp_path / "ue-store"),

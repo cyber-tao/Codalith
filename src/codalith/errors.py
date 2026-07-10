@@ -13,6 +13,10 @@ class CorpusNotFoundError(CodalithError):
     """Raised when a requested base, project, or generated corpus is unknown."""
 
 
+class CorpusResolutionError(CodalithError):
+    """Raised when corpus and overlay selectors describe incompatible targets."""
+
+
 class URIResolutionError(CodalithError):
     """Raised when an external corpus URI is invalid or unsupported."""
 

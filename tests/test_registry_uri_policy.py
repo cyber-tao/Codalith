@@ -5,7 +5,7 @@ import pytest
 from codalith.corpus.source_policy import SourcePolicy, SourceReadRateLimiter
 from codalith.corpus.uri_resolver import URIResolver
 from codalith.corpus.uris import parse_source_uri
-from codalith.errors import SourcePolicyError, URIResolutionError
+from codalith.errors import CorpusResolutionError, SourcePolicyError, URIResolutionError
 
 
 def test_registry_resolves_base_and_project(registry):
@@ -25,6 +25,11 @@ def test_registry_resolve_uses_project_base_even_without_overlay(registry):
     )
     assert resolution.base.corpus_id == "sample-codebase"
     assert resolution.project is None
+
+
+def test_registry_rejects_project_and_base_conflict(registry):
+    with pytest.raises(CorpusResolutionError, match="SampleProject"):
+        registry.resolve("sample-next", "SampleProject")
 
 
 def test_uri_resolver_and_parse_source_uri_accept_single_line_fragment(registry):

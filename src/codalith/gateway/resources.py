@@ -97,7 +97,7 @@ def read_resource(uri: str, tools: CodalithTools) -> dict[str, Any]:
                 "corpus_id": corpus.corpus_id,
                 "kind": "corpus",
                 "version": corpus.version_label,
-                "source_commit": corpus.source_commit,
+                "source_revision": corpus.source_revision,
                 "semantic": _semantic_status(tools, corpus.corpus_id),
             }
         if uri == f"{base}/modules":

@@ -69,7 +69,7 @@ class ContextPack:
     query: str
     version: str
     corpus_id: str
-    source_commit: str
+    source_revision: str
     project: str | None
     intent: str
     confidence: str

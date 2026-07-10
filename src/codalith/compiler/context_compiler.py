@@ -133,7 +133,7 @@ class ContextCompiler:
             query=query,
             version=resolved_version,
             corpus_id=base_corpus_id,
-            source_commit=resolution.base.source_commit,
+            source_revision=resolution.base.source_revision or resolution.base.version_label,
             project=project,
             intent=intent,
             confidence=_confidence(hits),

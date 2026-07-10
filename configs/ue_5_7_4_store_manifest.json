@@ -1,0 +1,11 @@
+{
+  "corpus_id": "ue-${CODALITH_UE_VERSION:-5.7.4}",
+  "source_revision": "${CODALITH_UE_SOURCE_REVISION:-5.7.4}",
+  "embedding_model": "${CODALITH_CODERAG_EMBEDDING_MODEL:-Qwen3-Embedding-8B}",
+  "embedding_dimension": 4096,
+  "store_schema_version": 1,
+  "chunk_policy": {
+    "max_chars": 2048,
+    "max_bytes": null
+  }
+}

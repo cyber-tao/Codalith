@@ -12,7 +12,7 @@
         "cache",
         "events"
       ],
-      "source_commit": "${CODALITH_SAMPLE_SOURCE_COMMIT:-UNKNOWN}",
+      "source_revision": "${CODALITH_SAMPLE_SOURCE_REVISION:-sample-v1}",
       "source_root": "${CODALITH_SAMPLE_SOURCE_ROOT:-fixtures/sample_corpus}",
       "indexed_root": "${CODALITH_SAMPLE_INDEXED_ROOT:-fixtures/sample_corpus}",
       "coderag_store": "${CODALITH_SAMPLE_CODERAG_STORE_DIR:-data/coderag/sample-codebase}",

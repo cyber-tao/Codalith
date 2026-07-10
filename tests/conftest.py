@@ -133,7 +133,7 @@ def registry_path(
                 "display_name": "Sample Codebase",
                 "description": "Neutral source corpus",
                 "keywords": ["cache", "events"],
-                "source_commit": "TEST",
+                "source_revision": "TEST",
                 "source_root": str(sample_corpus_root),
                 "indexed_root": str(sample_corpus_root),
                 "coderag_store": str(tmp_path / "store"),
@@ -151,7 +151,7 @@ def registry_path(
             "sample-next": {
                 "kind": "source",
                 "version": "sample-next",
-                "source_commit": "TEST-NEXT",
+                "source_revision": "TEST-NEXT",
                 "source_root": str(sample_corpus_root),
                 "indexed_root": str(sample_corpus_root),
                 "coderag_store": str(tmp_path / "store-next"),

@@ -137,6 +137,7 @@ def test_runtime_loads_registry_from_environment(monkeypatch, tmp_path):
                     "env-corpus": {
                         "kind": "source",
                         "version": "env",
+                        "source_revision": "env-test",
                         "source_root": str(source_root),
                         "indexed_root": str(source_root),
                         "coderag_store": str(tmp_path / "coderag"),
