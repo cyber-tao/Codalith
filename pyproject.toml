@@ -4,13 +4,20 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codalith"
-version = "0.1.0"
-description = "Corpus-aware source context MCP gateway powered by a CodeRAG adapter."
+version = "0.2.0"
+description = "Local-first, versioned source intelligence for AI coding agents."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "anyio>=4.5,<5",
+    "coderag[openai]==1.0.0",
     "mcp<2",
-    "psycopg[binary]>=3.2,<4",
+    "pydantic>=2.11,<3",
+    "starlette>=0.37,<2",
+    "tree-sitter>=0.25.2,<0.26",
+    "tree-sitter-c-sharp>=0.23.5,<0.24",
+    "tree-sitter-cpp>=0.23.4,<0.24",
+    "uvicorn>=0.30,<1",
 ]
 
 [project.optional-dependencies]
@@ -21,17 +28,15 @@ dev = [
 ]
 
 [project.scripts]
-codalith-mcp = "codalith.gateway.mcp_server:main"
-codalith-mcp-http = "codalith.gateway.http_server:main"
-codalith-eval = "codalith.eval.runner:main"
-codalith-mcp-eval = "codalith.eval.mcp_runner:main"
-codalith-generate-cards = "codalith.cli.generate_cards:main"
-codalith-verify-cards = "codalith.cli.verify_cards:main"
-codalith-index-corpus = "codalith.cli.index_corpus:main"
-codalith-semantic-status = "codalith.cli.semantic_status:main"
-codalith-coderag-acceptance = "codalith.cli.coderag_acceptance:main"
-codalith-backup-coderag-store = "codalith.cli.backup_coderag_store:main"
-codalith-ue-eval = "codalith.cli.ue_eval:main"
+codalith = "codalith.cli.main:main"
+
+[tool.uv.sources]
+coderag = { path = "external/CodeRAG", editable = false }
+
+[[tool.uv.index]]
+name = "tsinghua"
+url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/"
+default = true
 
 [tool.setuptools.packages.find]
 where = ["src"]

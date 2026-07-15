@@ -10,11 +10,7 @@ class ConfigurationError(CodalithError):
 
 
 class CorpusNotFoundError(CodalithError):
-    """Raised when a requested base, project, or generated corpus is unknown."""
-
-
-class CorpusResolutionError(CodalithError):
-    """Raised when corpus and overlay selectors describe incompatible targets."""
+    """Raised when a requested corpus or workspace is unknown."""
 
 
 class URIResolutionError(CodalithError):
@@ -29,5 +25,13 @@ class SourceReadError(CodalithError):
     """Raised when a corpus source file cannot be read (missing or invalid path)."""
 
 
-class CodeRAGAdapterError(CodalithError):
-    """Raised when a CodeRAG operation cannot be completed."""
+class IndexUnavailableError(CodalithError):
+    """Raised when an index generation is missing, stale, or invalid."""
+
+
+class IndexBuildError(CodalithError):
+    """Raised when an index generation cannot be built or published."""
+
+
+class RetrievalError(CodalithError):
+    """Raised when a requested retrieval strategy cannot be completed."""

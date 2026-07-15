@@ -5,7 +5,9 @@
 .vscode/mcp.json
 .serena
 .local
-external
+external/*
+!external/CodeRAG
+!external/CodeRAG/**
 .venv
 venv
 __pycache__

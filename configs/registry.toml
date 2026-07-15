@@ -1,0 +1,69 @@
+schema_version = 2
+default_target = "${CODALITH_DEFAULT_TARGET:-sample}"
+
+[[corpora]]
+id = "sample"
+display_name = "Codalith sample corpus"
+description = "Small Python corpus used for deterministic local validation."
+revision = "sample-v1"
+source_root = "../fixtures/sample_corpus"
+index_root = "${CODALITH_SAMPLE_INDEX_ROOT:-../data/indexes/sample}"
+adapter = "python"
+embedding_provider = "fake"
+include_extensions = [".py"]
+exclude_globs = [
+  ".git/**",
+  ".venv/**",
+  "**/__pycache__/**",
+  "build/**",
+  "dist/**",
+]
+
+[[corpora]]
+id = "ue-5.7.4"
+display_name = "Unreal Engine 5.7.4"
+description = "Version-pinned Unreal Engine C++ source corpus."
+revision = "${CODALITH_UE_SOURCE_REVISION:-5.7.4}"
+source_root = "${CODALITH_UE_SOURCE_ROOT:-/srv/ue/5.7.4}"
+index_root = "${CODALITH_UE_INDEX_ROOT:-../data/indexes/ue-5.7.4}"
+coderag_store = "${CODALITH_UE_CODERAG_STORE_DIR:-../data/coderag/ue-5.7.4}"
+adapter = "cpp-ue"
+embedding_provider = "${CODALITH_UE_EMBEDDING_PROVIDER:-openai}"
+embedding_model = "${CODALITH_UE_EMBEDDING_MODEL:-text-embedding-3-small}"
+include_extensions = [
+  ".h",
+  ".hpp",
+  ".inl",
+  ".c",
+  ".cc",
+  ".cpp",
+  ".m",
+  ".mm",
+  ".cs",
+  ".ispc",
+  ".usf",
+  ".ush",
+]
+exclude_globs = [
+  ".git/**",
+  "**/.git/**",
+  ".vs/**",
+  "**/.vs/**",
+  "**/Binaries/**",
+  "**/DerivedDataCache/**",
+  "**/Intermediate/**",
+  "**/Saved/**",
+  "**/ThirdParty/**",
+  "Engine/Build/**",
+  "Engine/Config/**",
+  "Engine/Content/**",
+  "Engine/Documentation/**",
+  "Engine/Extras/**",
+  "FeaturePacks/**",
+  "Samples/**",
+  "Templates/**",
+]
+
+[[workspaces]]
+id = "ue"
+corpora = ["ue-5.7.4"]

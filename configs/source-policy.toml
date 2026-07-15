@@ -1,0 +1,17 @@
+default_max_lines = 200
+hard_max_lines = 2000
+max_file_bytes = 8388608
+deny_globs = [
+  ".env",
+  ".env.*",
+  "**/.env",
+  "**/.env.*",
+  ".git/**",
+  "**/.git/**",
+  "*.pem",
+  "*.key",
+  "**/*.pem",
+  "**/*.key",
+  "**/secrets/**",
+  "**/credentials/**",
+]
