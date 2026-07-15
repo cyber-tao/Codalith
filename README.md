@@ -1,133 +1,109 @@
 # Codalith
 
-[中文文档](README.zh-CN.md)
+[中文说明](README.zh-CN.md)
 
-Codalith is a Python MCP gateway for versioned source-code corpora. It gives AI coding tools such as Claude Code and Codex source-backed Context Packs, bounded source reads, symbol/graph lookup, examples, and corpus comparison.
+Codalith is a local-first MCP source-intelligence service for AI coding agents. It combines an immutable SQLite structural index with CodeRAG retrieval, then returns bounded, hash-verified source evidence through the official MCP protocol.
 
-The core is domain-neutral. The default service uses the small sample corpus under `fixtures/sample_corpus`; UE 5.7.4 is an opt-in product corpus under `configs/corpora/ue-5.7.4/` with an explicit native CodeRAG store and acceptance suite.
+The core is language-neutral. Python, C#, and C++/Unreal Engine have structural adapters today; other text corpora can use the generic adapter without pretending to provide symbols.
 
-## Architecture
+## What it guarantees
 
-- Official Python MCP SDK v1 for stdio and Streamable HTTP.
-- Validated `source` / `project` / `generated` corpus registry and revision provenance.
-- Native CodeRAG backend with strict manifest validation plus a bounded deterministic local fallback.
-- Canonical source slices, policy, per-identity rate limiting, and audit records.
-- Filesystem-backed Knowledge Cards with evidence and semantic verification states.
-- Optional versioned SQLite/PostgreSQL semantic graph store.
-- Shared in-process and MCP eval metrics/gates.
+- Every source result identifies a corpus revision and immutable index generation.
+- `codalith://` citations can only read files present in that generation.
+- Source reads are bounded by a shared deny policy and report post-index changes.
+- A generation is published with one atomic pointer update only after its artifacts validate.
+- stdio and Streamable HTTP expose the same seven strict, read-only MCP tools.
+- The HTTP service is loopback-first, checks Host and Origin, and bounds streamed bodies.
+
+Codalith is not a hosted multi-tenant gateway. Authentication, RBAC, audit databases, rate-limit shells, Knowledge Cards, source priors, and the old PostgreSQL semantic store are intentionally absent.
 
 ## Requirements
 
 - Python 3.11+
 - [uv](https://docs.astral.sh/uv/)
-- Docker Compose for container workflows
-- `external/CodeRAG` submodule only for native retrieval/acceptance
+- Git submodules
+- Docker Compose (optional)
 
 ## Quick start
 
 ```bash
-cp .env.example .env
-uv sync --extra dev
-uv run pytest
-uv run codalith-mcp
+git submodule update --init --recursive
+uv sync --frozen --extra dev
+uv run codalith index build --corpus sample --semantic build
+uv run codalith doctor --target sample --deep
+uv run codalith serve --transport http
 ```
 
-HTTP:
+The MCP endpoint is `http://127.0.0.1:8765/mcp`. Print a client configuration without modifying user files:
 
 ```bash
-uv run codalith-mcp-http --host 127.0.0.1 --port 8765 --endpoint /mcp
+uv run codalith client-config --client codex --transport http
+uv run codalith client-config --client claude --transport stdio
 ```
 
-Endpoint: `http://127.0.0.1:8765/mcp`
-
-Client installation helpers:
+Docker performs the sample index step before starting the server:
 
 ```bash
-sh scripts/install-mcp-client.sh
-# or
-powershell -File scripts/install-mcp-client.ps1
+docker compose up --build mcp-http
 ```
 
-## Configuration
+## MCP tools
 
-Default sample assets:
-
-- `configs/sample/registry.json`
-- `configs/sample/source_priors.json`
-- `configs/sample/seed_cards.json`
-- `configs/source_policy.json`
-
-UE product assets:
-
-- `configs/corpora/ue-5.7.4/registry.json`
-- `configs/corpora/ue-5.7.4/source_priors.json`
-- `configs/corpora/ue-5.7.4/seed_cards.json`
-- `configs/corpora/ue-5.7.4/store_manifest.json`
-- `eval/datasets/ue_eval_suite.jsonl`
-
-Copy `.env.example` for neutral development. Append values from `.env.ue.example` only when using the UE corpus, and replace its relative host paths/credentials locally. Never commit `.env`, stores, reports, or source mounts.
-
-Product corpora must provide a non-empty `source_revision`. Native stores with a configured manifest are rejected when model, dimension, schema, corpus, or revision metadata does not match.
-
-## CLI
-
-| Command | Purpose |
+| Tool | Purpose |
 | --- | --- |
-| `codalith-mcp` | MCP stdio server |
-| `codalith-mcp-http` | MCP Streamable HTTP server |
-| `codalith-index-corpus --corpus <id>` | Index or smoke-check a corpus |
-| `codalith-semantic-status --corpus <id>` | Record/report semantic store state |
-| `codalith-generate-cards --corpus <id>` | Generate evidence-verified cards |
-| `codalith-verify-cards --corpus <id>` | Verify configured cards |
-| `codalith-coderag-acceptance --corpus <id>` | Native CodeRAG acceptance |
-| `codalith-backup-coderag-store` | Backup a CodeRAG store |
-| `codalith-eval --corpus <id>` | In-process eval |
-| `codalith-mcp-eval --corpus <id>` | Eval through MCP HTTP |
-| `codalith-ue-eval` | Cross-platform real UE MCP acceptance |
+| `codalith_search` | Structural, semantic, or exact-text discovery |
+| `codalith_context` | Bounded context pack with verified source text |
+| `codalith_read` | Exact read of a canonical source URI |
+| `codalith_symbol` | Exact or fuzzy symbol resolution |
+| `codalith_graph` | Bounded incoming/outgoing reference traversal |
+| `codalith_compare` | Structural comparison of two corpora |
+| `codalith_status` | Side-effect-free readiness and provenance |
 
-## Docker
+See [MCP API](docs/mcp-api.md) for schemas and error behavior.
 
-```bash
-docker compose run --rm test
-docker compose up -d mcp-http
-docker compose --profile acceptance run --rm corpus-acceptance
-docker compose --profile coderag run --rm coderag-acceptance
+## Repository layout
+
+```text
+configs/                 TOML corpus registry and source policy
+benchmarks/datasets/     independent sample, UE regression, and holdout sets
+external/CodeRAG/        pinned retrieval-engine submodule
+fixtures/sample_corpus/  deterministic local smoke corpus
+src/codalith/corpus/     registry, policy, URIs, generations, source reads
+src/codalith/languages/  structural adapter contracts and implementations
+src/codalith/indexing/   SQLite builder and CodeRAG integration
+src/codalith/query/      transport-independent query service
+src/codalith/mcp/        official SDK bindings and transports
+src/codalith/benchmarks/ real MCP benchmark runner
+src/codalith/cli/        single `codalith` command tree
+tests/                   unit, integration, security, and protocol tests
 ```
 
-After configuring UE host paths and the query embedding provider in `.env`:
+## Development validation
 
 ```bash
-docker compose --profile ue up -d mcp-http-ue
-docker compose --profile eval-ue run --rm ue-eval
-```
-
-Both UE services run native retrieval in strict mode and mount the selected store directory read-only.
-
-## Eval
-
-Default pytest validates the 80-row UE dataset contract but does not fake UE retrieval. Real acceptance is explicit:
-
-```bash
-uv run codalith-ue-eval \
-  --source-root /path/to/UnrealEngine_5.7 \
-  --indexed-root /path/to/UnrealEngine_5.7 \
-  --store-dir .local/coderag-openai-store/ue-5.7.4-openai-qwen3-embedding-8b-3072c-3584b-full
-```
-
-The gate requires 80 rows, all applicable retrieval/module/symbol metrics, zero citation/version errors, native backend, zero fallback, and a validated store manifest. Dataset expectations are normalized with:
-
-```bash
-uv run python scripts/normalize_eval_dataset.py --check
-```
-
-## Validation
-
-```bash
-uv run pytest
-uv run ruff check src tests scripts/normalize_eval_dataset.py
-uv run mypy src
+uv run --frozen ruff check src tests
+uv run --frozen mypy src
+uv run --frozen pytest -q
 docker compose config --quiet
-docker compose --env-file .env.example config --quiet
+docker compose --profile ue config --quiet
+docker compose --profile test config --quiet
 ```
 
-Semantic stores are schema-versioned. This development build deliberately rejects unversioned legacy stores; recreate them instead of attempting an implicit migration.
+Run an independent dataset against a live endpoint:
+
+```bash
+uv run codalith benchmark \
+  --dataset benchmarks/datasets/sample-smoke.jsonl \
+  --endpoint-url http://127.0.0.1:8765/mcp \
+  --label local-sample
+```
+
+## Documentation
+
+- [Architecture and invariants](docs/architecture.md)
+- [Configuration](docs/configuration.md)
+- [MCP API](docs/mcp-api.md)
+- [Operations and UE setup](docs/operations.md)
+- [Evaluation](docs/evaluation.md)
+
+This repository is in development. Index and configuration schemas may change without compatibility shims; rebuild generations after such changes.
