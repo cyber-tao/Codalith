@@ -211,7 +211,7 @@ class TelemetryStore:
         current_summary = _summary(current_events, resources)
         previous_summary = _summary(previous_events, resources)
         recent_queries = sorted(current_events, key=lambda item: item.timestamp, reverse=True)[:25]
-        recent_logs = sorted(
+        matching_logs = sorted(
             (
                 item
                 for item in logs
@@ -219,7 +219,19 @@ class TelemetryStore:
             ),
             key=lambda item: item.timestamp,
             reverse=True,
-        )[:100]
+        )
+        recent_logs = matching_logs[:100]
+        recent_ids = {item.event_id for item in recent_logs}
+        diagnostic_logs = [
+            item
+            for item in matching_logs
+            if item.level != "INFO" and item.event_id not in recent_ids
+        ][:20]
+        recent_logs = sorted(
+            (*recent_logs, *diagnostic_logs),
+            key=lambda item: item.timestamp,
+            reverse=True,
+        )
         uptime_seconds = max(0, int((now - self.started_at).total_seconds()))
 
         return {

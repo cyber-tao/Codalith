@@ -83,3 +83,41 @@ def test_dashboard_snapshot_rejects_unknown_range() -> None:
             status=_status(),
             targets=[],
         )
+
+
+def test_dashboard_snapshot_keeps_diagnostic_logs_visible_after_busy_period() -> None:
+    store = TelemetryStore()
+    store.record_call(
+        tool="codalith_compare",
+        arguments={"query": "Invalid comparison", "target": "sample"},
+        target="sample",
+        started_at=datetime.now(UTC),
+        duration_ms=1.0,
+        result=None,
+        error=ValueError("from_corpus and to_corpus must differ"),
+    )
+    for index in range(105):
+        store.record_call(
+            tool="codalith_read",
+            arguments={"uri": f"codalith://sample/source/file-{index}.py"},
+            target="sample",
+            started_at=datetime.now(UTC),
+            duration_ms=1.0,
+            result={"content": "sample"},
+            error=None,
+        )
+
+    payload = store.snapshot(
+        window_key="1h",
+        target="sample",
+        status=_status(),
+        targets=[{"id": "sample", "label": "Sample", "kind": "corpus"}],
+    )
+
+    logs = payload["logs"]
+    assert isinstance(logs, list)
+    assert len(logs) == 101
+    assert any(
+        item["level"] == "ERROR" and "must differ" in item["message"]
+        for item in logs
+    )

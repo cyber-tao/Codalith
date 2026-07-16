@@ -54,6 +54,20 @@ Deep doctor hashes local artifacts and every CodeRAG store byte, so it can be sl
 
 Old generation directories are retained for diagnosis and rollback-by-pointer repair. Codalith intentionally has no automatic retention job during development; remove old generations only while the service is stopped and after preserving the active generation.
 
+## Operations dashboard
+
+Build the dashboard before starting the HTTP transport:
+
+```bash
+bun install --cwd dashboard --frozen-lockfile
+bun run --cwd dashboard build
+uv run codalith serve --transport http
+```
+
+Open `http://127.0.0.1:8765/dashboard/`. The dashboard visualizes MCP query volume and latency, tool usage, process CPU and peak memory, corpus generation size and readiness, recent queries, structured logs, and active incidents. Its corpus, time-range, chart, log-level, tool, search, pause, refresh, and export controls are all local to the browser.
+
+The backing endpoint is `GET /api/dashboard/snapshot`. Telemetry is bounded and process-local: it is intended for live operations diagnosis, does not record secrets, and resets when the MCP HTTP process restarts. If the frontend has not been built, `/dashboard/` returns a build instruction instead of an empty page.
+
 ## HTTP exposure
 
 Published Compose ports default to `127.0.0.1`. Add exact Host/Origin values only when a trusted local proxy requires them. Codalith has no network authentication layer; do not expose it directly to an untrusted network.
