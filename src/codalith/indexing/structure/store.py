@@ -46,30 +46,50 @@ class StructureIndex:
         if not normalized:
             return []
         suffix = f"%/{_escape_like(normalized)}"
-        stem_suffix = (
-            f"%/{_escape_like(normalized)}.%" if "." not in normalized else suffix
-        )
+        stem_suffix = f"%/{_escape_like(normalized)}.%" if "." not in normalized else suffix
         rows = self._all(
             "SELECT path, language, sha256, size_bytes, line_count, module "
             "FROM files WHERE path = ? COLLATE NOCASE "
             "OR path LIKE ? ESCAPE '\\' COLLATE NOCASE "
             "OR path LIKE ? ESCAPE '\\' COLLATE NOCASE "
             "ORDER BY CASE WHEN path = ? COLLATE NOCASE THEN 0 ELSE 1 END, "
-            "length(path), path LIMIT ?",
+            f"{_declaration_path_order()}, length(path), path LIMIT ?",
             (normalized, suffix, stem_suffix, normalized, limit),
         )
         return [FileRecord(**dict(row)) for row in rows]
 
     def list_files(self, *, limit: int | None = None) -> list[FileRecord]:
         sql = (
-            "SELECT path, language, sha256, size_bytes, line_count, module "
-            "FROM files ORDER BY path"
+            "SELECT path, language, sha256, size_bytes, line_count, module FROM files ORDER BY path"
         )
         parameters: tuple[object, ...] = ()
         if limit is not None:
             sql += " LIMIT ?"
             parameters = (limit,)
         return [FileRecord(**dict(row)) for row in self._all(sql, parameters)]
+
+    def lookup_files_by_terms(
+        self,
+        terms: list[str],
+        *,
+        limit: int = 20,
+    ) -> list[FileRecord]:
+        normalized = [term.casefold().strip() for term in terms if term.strip()]
+        if not normalized:
+            return []
+        patterns = [f"%{_escape_like(term)}%" for term in normalized]
+        score = " + ".join(
+            "CASE WHEN lower(path) LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END" for _ in patterns
+        )
+        where = " OR ".join("lower(path) LIKE ? ESCAPE '\\'" for _ in patterns)
+        rows = self._all(
+            "SELECT path, language, sha256, size_bytes, line_count, module, "
+            f"({score}) AS term_hits FROM files WHERE {where} "
+            "ORDER BY term_hits DESC, "
+            f"{_declaration_path_order()}, length(path), path LIMIT ?",
+            (*patterns, *patterns, limit),
+        )
+        return [FileRecord(**{key: row[key] for key in FileRecord.__annotations__}) for row in rows]
 
     def get_symbol(self, symbol_id: str) -> SymbolRecord | None:
         row = self._one("SELECT * FROM symbols WHERE symbol_id = ?", (symbol_id,))
@@ -86,10 +106,12 @@ class StructureIndex:
             rows = self._all(
                 "SELECT * FROM symbols "
                 "WHERE name = ? COLLATE NOCASE OR qualified_name = ? COLLATE NOCASE "
-                "ORDER BY CASE WHEN qualified_name = ? COLLATE NOCASE THEN 0 ELSE 1 END, "
+                "ORDER BY CASE WHEN qualified_name = ? THEN 0 WHEN name = ? THEN 1 "
+                "WHEN qualified_name = ? COLLATE NOCASE THEN 2 ELSE 3 END, "
                 f"{_definition_kind_order()}, "
+                f"{_declaration_path_order()}, "
                 "length(qualified_name), path, start_line LIMIT ?",
-                (query, query, query, limit),
+                (query, query, query, query, query, limit),
             )
         else:
             pattern = f"%{_escape_like(query)}%"
@@ -100,6 +122,7 @@ class StructureIndex:
                 "ORDER BY CASE WHEN name = ? COLLATE NOCASE THEN 0 "
                 "WHEN name LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 1 ELSE 2 END, "
                 f"{_definition_kind_order()}, "
+                f"{_declaration_path_order()}, "
                 "length(qualified_name), path, start_line LIMIT ?",
                 (pattern, pattern, query, f"{_escape_like(query)}%", limit),
             )
@@ -232,4 +255,15 @@ def _definition_kind_order() -> str:
         "WHEN 'method' THEN 2 "
         "WHEN 'macro' THEN 2 "
         "ELSE 3 END"
+    )
+
+
+def _declaration_path_order() -> str:
+    return (
+        "CASE WHEN lower(path) LIKE '%.h' OR lower(path) LIKE '%.hh' "
+        "OR lower(path) LIKE '%.hpp' OR lower(path) LIKE '%.hxx' "
+        "OR lower(path) LIKE '%.inl' THEN 0 ELSE 1 END, "
+        "CASE WHEN path LIKE 'Public/%' OR path LIKE 'Classes/%' "
+        "OR path LIKE '%/Public/%' OR path LIKE '%/Classes/%' THEN 0 "
+        "WHEN path LIKE 'Private/%' OR path LIKE '%/Private/%' THEN 2 ELSE 1 END"
     )

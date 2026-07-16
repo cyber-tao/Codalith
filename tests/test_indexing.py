@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -10,11 +11,12 @@ from codalith.errors import IndexBuildError, IndexUnavailableError
 from codalith.indexing.coderag.backend import (
     CodeRAGBackend,
     _materialize_source_view,
+    _ripgrep_text_search,
     store_fingerprint,
 )
 from codalith.indexing.structure.builder import StructureBuilder
 from codalith.indexing.structure.store import StructureIndex
-from conftest import EnvironmentFactory, TestEnvironment
+from conftest import EnvironmentFactory, TestEnvironment, build_environment
 
 
 def test_generation_contains_only_policy_selected_files(
@@ -59,6 +61,26 @@ def test_semantic_index_cannot_leak_files_outside_the_generation(
         "src/core/cache.py",
         "src/core/events.py",
     }
+
+
+def test_ripgrep_text_search_treats_natural_language_as_literal(
+    tmp_path: Path,
+) -> None:
+    if shutil.which("rg") is None:
+        pytest.skip("ripgrep is not installed")
+    environment = build_environment(
+        tmp_path,
+        files={"source.py": "Where is the literal?\n"},
+        semantic=False,
+    )
+    hits = _ripgrep_text_search(
+        environment.corpus,
+        "Where is the literal?",
+        limit=10,
+        max_file_bytes=environment.policy.max_file_bytes,
+        deny_globs=environment.policy.deny_globs,
+    )
+    assert [(hit.path, hit.line) for hit in hits] == [("source.py", 1)]
 
 
 def test_resolved_reference_edges_are_stored(

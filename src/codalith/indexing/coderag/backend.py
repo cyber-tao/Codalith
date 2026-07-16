@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 import threading
 from dataclasses import dataclass
@@ -135,7 +136,15 @@ class CodeRAGBackend:
             text = row.get("line")
             if isinstance(path, str) and isinstance(line, int) and isinstance(text, str):
                 hits.append(TextHit(path.replace("\\", "/"), line, text))
-        return hits
+        if hits or shutil.which("rg") is None:
+            return hits
+        return _ripgrep_text_search(
+            corpus,
+            query,
+            limit=limit,
+            max_file_bytes=self.policy.max_file_bytes,
+            deny_globs=self.policy.deny_globs,
+        )
 
     def close(self) -> None:
         with self._lock:
@@ -157,11 +166,96 @@ class CodeRAGBackend:
                 obsolete = [item for item in self._engines if item[0] == corpus.corpus_id]
                 for old_key in obsolete:
                     self._engines.pop(old_key).close()
-                engine = CodeRAG(
-                    coderag_config(corpus, generation.coderag_path, self.policy)
-                )
+                engine = CodeRAG(coderag_config(corpus, generation.coderag_path, self.policy))
                 self._engines[key] = engine
             return engine
+
+
+def _ripgrep_text_search(
+    corpus: Corpus,
+    query: str,
+    *,
+    limit: int,
+    max_file_bytes: int,
+    deny_globs: tuple[str, ...],
+) -> list[TextHit]:
+    command = [
+        "rg",
+        "--json",
+        "--line-number",
+        "--no-config",
+        "--no-ignore",
+        "--hidden",
+        "--ignore-case",
+        "--fixed-strings",
+        "--max-filesize",
+        str(max_file_bytes),
+        "--regexp",
+        query,
+    ]
+    for extension in corpus.include_extensions:
+        command.extend(("--glob", f"*{extension}"))
+    for pattern in dict.fromkeys([*corpus.exclude_globs, *deny_globs]):
+        command.extend(("--glob", f"!{pattern}"))
+    command.extend(("--", str(corpus.source_root)))
+
+    try:
+        process = subprocess.Popen(  # noqa: S603 - fixed executable and argv-only input
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except OSError as exc:
+        raise RetrievalError(f"Cannot start ripgrep text search: {exc}") from exc
+
+    hits: list[TextHit] = []
+    stderr = ""
+    try:
+        if process.stdout is None:
+            raise RetrievalError("ripgrep text search has no stdout stream")
+        for raw in process.stdout:
+            try:
+                event = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if event.get("type") != "match":
+                continue
+            data = event.get("data")
+            if not isinstance(data, dict):
+                continue
+            path_payload = data.get("path")
+            lines_payload = data.get("lines")
+            line_number = data.get("line_number")
+            if not isinstance(path_payload, dict) or not isinstance(lines_payload, dict):
+                continue
+            raw_path = path_payload.get("text")
+            raw_text = lines_payload.get("text")
+            if not isinstance(raw_path, str) or not isinstance(raw_text, str):
+                continue
+            if not isinstance(line_number, int):
+                continue
+            try:
+                relative = Path(raw_path).resolve().relative_to(corpus.source_root.resolve())
+            except (OSError, ValueError):
+                continue
+            hits.append(TextHit(relative.as_posix(), line_number, raw_text.rstrip("\r\n")))
+            if len(hits) >= limit:
+                process.terminate()
+                break
+        _, stderr = process.communicate(timeout=5)
+    except subprocess.TimeoutExpired as exc:
+        process.kill()
+        process.communicate()
+        raise RetrievalError("ripgrep text search did not terminate") from exc
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+
+    if process.returncode not in {0, 1, -15}:
+        raise RetrievalError(stderr.strip() or "ripgrep text search failed")
+    return hits
 
 
 def prepare_semantic_index(
@@ -194,17 +288,14 @@ def prepare_semantic_index(
         except Exception:
             source_view.cleanup()
             raise
-    engine = CodeRAG(
-        coderag_config(corpus, store_dir, policy, watched_root=watched_root)
-    )
+    engine = CodeRAG(coderag_config(corpus, store_dir, policy, watched_root=watched_root))
     try:
         if mode == "build":
             engine.index(full=True)
         status = engine.status()
     except Exception as exc:
         raise IndexBuildError(
-            f"Cannot {mode} CodeRAG store for {corpus.corpus_id}: "
-            f"{type(exc).__name__}: {exc}"
+            f"Cannot {mode} CodeRAG store for {corpus.corpus_id}: {type(exc).__name__}: {exc}"
         ) from exc
     finally:
         engine.close()
@@ -250,8 +341,7 @@ def preflight_semantic_index(
         status = engine.status()
     except Exception as exc:
         raise IndexBuildError(
-            f"Cannot preflight CodeRAG store for {corpus.corpus_id}: "
-            f"{type(exc).__name__}: {exc}"
+            f"Cannot preflight CodeRAG store for {corpus.corpus_id}: {type(exc).__name__}: {exc}"
         ) from exc
     finally:
         engine.close()
@@ -311,9 +401,7 @@ def coderag_config(
         watched_dir=watched_root or corpus.source_root,
         store_dir=store_dir,
         languages=_coderag_languages(corpus, defaults.languages),
-        ignore_globs=tuple(
-            dict.fromkeys([*defaults.ignore_globs, *corpus.exclude_globs])
-        ),
+        ignore_globs=tuple(dict.fromkeys([*defaults.ignore_globs, *corpus.exclude_globs])),
         use_gitignore=True,
         index_all_text=False,
         max_file_bytes=policy.max_file_bytes,
@@ -397,6 +485,5 @@ def _materialize_source_view(
                     shutil.copy2(source, destination)
                 except OSError as exc:
                     raise IndexBuildError(
-                        "Cannot materialize source for semantic indexing: "
-                        f"{relative}"
+                        f"Cannot materialize source for semantic indexing: {relative}"
                     ) from exc

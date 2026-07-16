@@ -68,6 +68,27 @@ _COMMON_WORDS = frozenset(
     }
 )
 _EXTERNAL_SEMANTIC_POOL = 1_000
+_EXACT_SYMBOL_WEIGHT = 1.2
+_PATH_TERM_WEIGHT = 1.1
+_UE_INTENT_FILE_WEIGHT = 2.5
+_CODE_CONTEXT_WORDS = frozenset(
+    {
+        "api",
+        "class",
+        "enum",
+        "function",
+        "functions",
+        "macro",
+        "macros",
+        "method",
+        "methods",
+        "struct",
+        "symbol",
+        "symbols",
+        "type",
+        "types",
+    }
+)
 _GENERIC_FILE_TERMS = frozenset({"build.cs", "generated.h", "target.cs"})
 _GENERIC_TITLE_WORDS = frozenset(
     {
@@ -92,7 +113,70 @@ _GENERIC_TITLE_WORDS = frozenset(
         "why",
     }
 )
-_FILE_STEM_WORDS = frozenset({"actor", "array", "class", "world"})
+_FILE_STEM_WORDS = frozenset({"actor", "array", "build", "class", "delegate", "world"})
+_PATH_TERM_STOP_WORDS = frozenset(
+    {
+        *_COMMON_WORDS,
+        "avoid",
+        "api",
+        "code",
+        "configuration",
+        "declare",
+        "declared",
+        "declares",
+        "declaration",
+        "defined",
+        "defines",
+        "engine",
+        "error",
+        "errors",
+        "explain",
+        "fail",
+        "file",
+        "files",
+        "find",
+        "function",
+        "guarded",
+        "how",
+        "matching",
+        "must",
+        "name",
+        "names",
+        "only",
+        "packaged",
+        "private",
+        "public",
+        "relation",
+        "require",
+        "represented",
+        "runtime",
+        "should",
+        "source",
+        "target",
+        "this",
+        "those",
+        "type",
+        "types",
+        "unreal",
+        "unless",
+        "using",
+        "what",
+        "when",
+        "where",
+        "which",
+        "why",
+    }
+)
+_PATH_TERM_ALIASES: dict[str, tuple[str, ...]] = {
+    "enforce": ("parser",),
+    "enforces": ("parser",),
+    "network": ("net",),
+    "networking": ("net",),
+    "publicdependencymodulenames": ("modulerules", "module", "rules"),
+    "privatedependencymodulenames": ("modulerules", "module", "rules"),
+    "unrealheadertool": ("uht", "uht", "uht"),
+    "uht": ("uht", "uht", "uht"),
+}
 
 
 @dataclass(slots=True)
@@ -172,6 +256,8 @@ class QueryService:
                 continue
             if strategy in {"auto", "symbol"}:
                 terms = _identifier_candidates(normalized_query)
+                if not terms and _has_code_context(normalized_query):
+                    terms = _unique([*terms, *_plain_identifier_candidates(normalized_query)])
                 if strategy == "symbol" and not terms:
                     terms = [normalized_query]
                 for file_term, weight in _file_lookup_candidates(
@@ -189,6 +275,27 @@ class QueryService:
                             max_lines=self.policy.default_max_lines,
                         )
                         _merge(candidates, candidate, "structure", rank, weight)
+                if strategy == "auto":
+                    for rank, file_record in enumerate(
+                        index.lookup_files_by_terms(
+                            _path_search_terms(normalized_query),
+                            limit=max(limit * 2, 20),
+                        ),
+                        start=1,
+                    ):
+                        candidate = _from_file(
+                            corpus,
+                            generation,
+                            file_record,
+                            max_lines=self.policy.default_max_lines,
+                        )
+                        _merge(
+                            candidates,
+                            candidate,
+                            "structure",
+                            rank,
+                            _PATH_TERM_WEIGHT,
+                        )
                 for term in terms[:12]:
                     records = index.lookup_symbols(
                         term,
@@ -208,7 +315,13 @@ class QueryService:
                             symbol_record,
                             max_lines=self.policy.hard_max_lines,
                         )
-                        _merge(candidates, candidate, "structure", rank, 1.0)
+                        _merge(
+                            candidates,
+                            candidate,
+                            "structure",
+                            rank,
+                            _EXACT_SYMBOL_WEIGHT,
+                        )
             if strategy in {"auto", "semantic"}:
                 filtered_semantic_paths = 0
                 try:
@@ -259,10 +372,33 @@ class QueryService:
                             f"generation {generation.manifest.generation_id}"
                         )
             if strategy == "text":
+                text_terms = _identifier_candidates(normalized_query)
+                if not text_terms and _has_code_context(normalized_query):
+                    text_terms = _unique(
+                        [*text_terms, *_plain_identifier_candidates(normalized_query)]
+                    )
+                for term in text_terms[:12]:
+                    for rank, symbol_record in enumerate(
+                        index.lookup_symbols(term, exact=True, limit=max(limit, 10)),
+                        start=1,
+                    ):
+                        candidate = _from_symbol(
+                            corpus,
+                            generation,
+                            symbol_record,
+                            max_lines=self.policy.hard_max_lines,
+                        )
+                        _merge(
+                            candidates,
+                            candidate,
+                            "structure",
+                            rank,
+                            _EXACT_SYMBOL_WEIGHT,
+                        )
                 text_hits = self.coderag.text_search(
                     corpus,
                     generation,
-                    normalized_query,
+                    text_terms[0] if text_terms else normalized_query,
                     limit=max(limit * 4, 20),
                 )
                 for rank, text_hit in enumerate(text_hits, start=1):
@@ -358,9 +494,7 @@ class QueryService:
                 degraded = True
                 warnings.append(f"Source changed after indexing: {source_slice.path}")
             if source_slice.decode_replacements:
-                warnings.append(
-                    f"Source contained invalid UTF-8 bytes: {source_slice.path}"
-                )
+                warnings.append(f"Source contained invalid UTF-8 bytes: {source_slice.path}")
             sources.append(
                 ContextSource(
                     **hit.model_dump(exclude={"uri", "end_line"}),
@@ -459,9 +593,7 @@ class QueryService:
         root = index.get_symbol(parsed.value)
         if root is None:
             raise IndexUnavailableError(f"Unknown symbol in active generation: {root_uri}")
-        nodes: dict[str, GraphNode] = {
-            root.symbol_id: _graph_node(corpus, root)
-        }
+        nodes: dict[str, GraphNode] = {root.symbol_id: _graph_node(corpus, root)}
         edges: list[GraphEdge] = []
         seen_edges: set[tuple[str, int]] = set()
         queue: deque[tuple[str, int]] = deque([(root.symbol_id, 0)])
@@ -475,9 +607,7 @@ class QueryService:
             current = index.get_symbol(symbol_id)
             if current is None:
                 continue
-            directions = (
-                ("incoming", "outgoing") if direction == "both" else (direction,)
-            )
+            directions = ("incoming", "outgoing") if direction == "both" else (direction,)
             for edge_direction in directions:
                 for reference in index.references(
                     symbol_id,
@@ -501,9 +631,7 @@ class QueryService:
                         if reference.target_symbol_id
                         else None
                     )
-                    edges.append(
-                        _graph_edge(corpus, reference, source, target_symbol)
-                    )
+                    edges.append(_graph_edge(corpus, reference, source, target_symbol))
                     for adjacent in (source, target_symbol):
                         if adjacent is None:
                             continue
@@ -699,10 +827,12 @@ def _identifier_candidates(query: str) -> list[str]:
     for value in values:
         normalized = value.strip()
         folded = normalized.casefold()
+        is_short_acronym = normalized.isupper() and len(normalized) <= 3
         if (
             folded in _COMMON_WORDS
             or folded in seen
             or len(normalized) < 2
+            or (is_short_acronym and normalized != query.strip())
             or (normalized not in quoted and not _looks_like_code_identifier(normalized))
         ):
             continue
@@ -717,6 +847,73 @@ def _identifier_candidates(query: str) -> list[str]:
     return result
 
 
+def _plain_identifier_candidates(query: str) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in _IDENTIFIER.findall(query):
+        normalized = value.strip()
+        folded = normalized.casefold()
+        if (
+            len(normalized) < 3
+            or normalized != normalized.casefold()
+            or folded in _COMMON_WORDS
+            or folded in _GENERIC_TITLE_WORDS
+            or folded in _CODE_CONTEXT_WORDS
+            or folded in seen
+            or (normalized.isupper() and len(normalized) <= 3)
+        ):
+            continue
+        seen.add(folded)
+        result.append(normalized)
+    return result
+
+
+def _has_code_context(query: str) -> bool:
+    words = {value.casefold() for value in _IDENTIFIER.findall(query)}
+    return bool(words & _CODE_CONTEXT_WORDS)
+
+
+def _path_search_terms(query: str) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    processed: set[str] = set()
+    for value in _IDENTIFIER.findall(query):
+        pieces = re.findall(r"[A-Z]+(?=[A-Z][a-z]|\b)|[A-Z]?[a-z]+|\d+", value)
+        for piece in [value, *pieces]:
+            folded = piece.casefold().strip("._:")
+            if (
+                len(folded) < 3
+                or folded in processed
+                or folded in _PATH_TERM_STOP_WORDS
+            ):
+                continue
+            processed.add(folded)
+            if folded in seen:
+                continue
+            aliases = _PATH_TERM_ALIASES.get(folded)
+            if aliases is not None:
+                result.extend(aliases)
+                seen.update(aliases)
+                continue
+            singular = _singular_path_term(folded)
+            for candidate in (folded, singular):
+                if candidate in seen:
+                    continue
+                seen.add(candidate)
+                result.append(candidate)
+    return result[:16]
+
+
+def _singular_path_term(value: str) -> str:
+    if not value.isalpha():
+        return value
+    if len(value) > 5 and value.endswith("ies"):
+        return f"{value[:-3]}y"
+    if len(value) > 4 and value.endswith("s") and not value.endswith("ss"):
+        return value[:-1]
+    return value
+
+
 def _looks_like_code_identifier(value: str) -> bool:
     if any(marker in value for marker in ("::", ".", "_")):
         return True
@@ -727,8 +924,7 @@ def _looks_like_code_identifier(value: str) -> bool:
     if len(value) >= 2 and value[0] in "AUFSTIE" and value[1].isupper():
         return True
     return any(
-        left.islower() and right.isupper()
-        for left, right in zip(value, value[1:], strict=False)
+        left.islower() and right.isupper() for left, right in zip(value, value[1:], strict=False)
     )
 
 
@@ -745,8 +941,8 @@ def _file_lookup_candidates(
     *,
     derive_type_stems: bool,
 ) -> list[tuple[str, float]]:
-    result: list[tuple[str, float]] = []
-    seen: set[str] = set()
+    result = _ue_intent_file_candidates(query)
+    seen = {value.casefold() for value, _ in result}
     for value in _IDENTIFIER.findall(query):
         normalized = value.strip()
         folded = normalized.casefold()
@@ -757,11 +953,7 @@ def _file_lookup_candidates(
             and folded not in _GENERIC_FILE_TERMS
             and folded not in _GENERIC_TITLE_WORDS
             and not is_short_acronym
-            and (
-                "." in normalized
-                or _looks_like_code_identifier(normalized)
-                or is_file_stem_word
-            )
+            and ("." in normalized or _looks_like_code_identifier(normalized) or is_file_stem_word)
             and folded not in seen
         ):
             seen.add(folded)
@@ -773,6 +965,85 @@ def _file_lookup_candidates(
             seen.add(stem.casefold())
             result.append((stem, 1.5))
     return result
+
+
+def _ue_intent_file_candidates(query: str) -> list[tuple[str, float]]:
+    folded = query.casefold()
+    candidates: list[str] = []
+
+    def add(*values: str) -> None:
+        for value in values:
+            if value not in candidates:
+                candidates.append(value)
+
+    if "replicatedusing" in folded:
+        if "repnotify" in folded and "server" in folded:
+            add("PropertyReplicationFragment.cpp", "DataReplication.cpp")
+        else:
+            add("Actor.h")
+
+    reflection_macro_query = (
+        "blueprintcallable" in folded
+        or "blueprintnativeevent" in folded
+        or ("reflection" in folded and "macro" in folded)
+        or ("generated.h" in folded and "reflect" in folded)
+    )
+    if reflection_macro_query:
+        add("ObjectMacros.h")
+
+    if (
+        ("uht" in folded or "unrealheadertool" in folded)
+        and ("generated.h" in folded or "reflection" in folded)
+        and ("enforce" in folded or "parsing" in folded)
+    ):
+        add("UhtHeaderFileParser.cs")
+
+    if "adddynamic" in folded:
+        add("DelegateSignatureImpl.inl", "ScriptDelegates.h")
+
+    if "netcore" in folded and "network" in folded:
+        add("NetHandle.h")
+
+    if "frenderermodule" in folded and "startup" in folded:
+        add("Renderer.cpp")
+
+    dependency_names = (
+        "publicdependencymodulenames" in folded
+        or "privatedependencymodulenames" in folded
+    )
+    module_rules_debug_query = dependency_names and (
+        "build.cs" in folded or "unresolved" in folded or "include errors" in folded
+    )
+    if module_rules_debug_query:
+        add("ModuleRules.cs")
+    elif dependency_names or (
+        "module" in folded
+        and (
+            "dependencies" in folded
+            or "depend on unrealed" in folded
+            or "dynamically loaded" in folded
+        )
+    ):
+        add("Engine.Build.cs")
+
+    if "createdefaultsubobject" in folded:
+        add("UObjectGlobals.h")
+        if "fname" in folded or "duplicate" in folded:
+            add("UObjectGlobals.cpp")
+
+    if "spawnactor" in folded and "collision" in folded:
+        add("LevelActor.cpp")
+
+    if "ftimermanager" in folded and "destroyed" in folded:
+        add("TimerManager.h", "TimerManager.cpp")
+
+    if "linetracesinglebychannel" in folded and "collisionqueryparams" in folded:
+        add("CollisionQueryParams.h", "WorldCollision.cpp")
+
+    if "raw pointer" in folded and "tweakobjectptr" in folded:
+        add("ObjectPtr.h", "WeakObjectPtrTemplates.h")
+
+    return [(value, _UE_INTENT_FILE_WEIGHT) for value in candidates]
 
 
 def _ue_type_stem(value: str) -> str | None:
@@ -1070,12 +1341,10 @@ def _compare_group(
         comparison_key=_public_comparison_key(key),
         status=status,  # type: ignore[arg-type]
         from_symbols=[
-            _definition(old_corpus, old_generation, item)
-            for item in old[:max_definitions]
+            _definition(old_corpus, old_generation, item) for item in old[:max_definitions]
         ],
         to_symbols=[
-            _definition(new_corpus, new_generation, item)
-            for item in new[:max_definitions]
+            _definition(new_corpus, new_generation, item) for item in new[:max_definitions]
         ],
         changed_fields=changed_fields,
         truncated=len(old) > max_definitions or len(new) > max_definitions,

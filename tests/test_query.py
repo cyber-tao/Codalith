@@ -76,7 +76,7 @@ def test_symbol_graph_exposes_module_dependencies(tmp_path: Path) -> None:
         files={
             "Source/A/A.Build.cs": (
                 "public class A : ModuleRules {\n"
-                "    PublicDependencyModuleNames.AddRange(new string[] { \"B\" });\n"
+                '    PublicDependencyModuleNames.AddRange(new string[] { "B" });\n'
                 "}\n"
             ),
             "Source/B/B.Build.cs": "public class B : ModuleRules {}\n",
@@ -202,6 +202,191 @@ def test_auto_search_uses_type_name_as_an_exact_file_stem(tmp_path: Path) -> Non
         service.close()
 
 
+def test_auto_search_prefers_a_declaration_header_over_its_source_file(
+    tmp_path: Path,
+) -> None:
+    environment = build_environment(
+        tmp_path,
+        files={
+            "Private/Thing.cpp": "FThing::FThing() = default;\n",
+            "Public/Thing.h": "class FThing {};\n",
+        },
+        semantic=False,
+        adapter="cpp-ue",
+        include_extensions=(".cpp", ".h"),
+    )
+    service = environment.service()
+    try:
+        hit = service.search("Where is FThing declared?", target="sample").hits[0]
+        assert hit.path == "Public/Thing.h"
+    finally:
+        service.close()
+
+
+def test_auto_search_uses_multiple_query_terms_to_find_a_file_path(
+    tmp_path: Path,
+) -> None:
+    environment = build_environment(
+        tmp_path,
+        files={
+            "Private/reflection.cpp": "void Reflect() {}\n",
+            "Public/ObjectMacros.h": "#define GENERATED_BODY()\n",
+        },
+        semantic=False,
+        adapter="cpp-ue",
+        include_extensions=(".cpp", ".h"),
+    )
+    service = environment.service()
+    try:
+        hit = service.search(
+            "Which header defines reflection declaration macros?",
+            target="sample",
+        ).hits[0]
+        assert hit.path == "Public/ObjectMacros.h"
+    finally:
+        service.close()
+
+
+def test_auto_search_normalizes_ue_terms_to_canonical_file_paths(tmp_path: Path) -> None:
+    environment = build_environment(
+        tmp_path,
+        files={
+            "Engine/Source/Programs/Shared/EpicGames.UHT/Parsers/UhtHeaderFileParser.cs": (
+                "public class UhtHeaderFileParser {}\n"
+            ),
+            "Engine/Source/Programs/Shared/EpicGames.UHT/Types/UhtHeaderFile.cs": (
+                "public class UhtHeaderFile {}\n"
+            ),
+            "Engine/Source/Programs/UnrealBuildTool/Configuration/ModuleRules.cs": (
+                "public class ModuleRules {}\n"
+            ),
+            "Engine/Source/Runtime/Core/Public/Delegates/DelegateSignatureImpl.inl": (
+                "#define AddDynamic(...)\n"
+            ),
+            "Engine/Source/Runtime/Core/Public/Delegates/Delegate.h": "// delegates\n",
+            "Engine/Source/Runtime/Core/Public/Misc/Build.h": "// build macros\n",
+            "Engine/Source/Runtime/Core/Public/UObject/ScriptDelegates.h": (
+                "// dynamic delegates\n"
+            ),
+            "Engine/Source/Runtime/CoreUObject/Public/UObject/ObjectMacros.h": (
+                "#define UFUNCTION(...)\n"
+            ),
+            "Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h": (
+                "class AActor {};\n"
+            ),
+            "Engine/Source/Runtime/Engine/Engine.Build.cs": "public class Engine {}\n",
+            "Engine/Source/Runtime/Net/Core/Public/Net/Core/NetHandle/NetHandle.h": (
+                "struct FNetHandle {};\n"
+            ),
+        },
+        semantic=False,
+        adapter="cpp-ue",
+        include_extensions=(".cs", ".h", ".inl"),
+    )
+    service = environment.service()
+    cases = {
+        "Where are UE networking handles represented?": "NetHandle.h",
+        "Which header declares single-cast and multicast delegate types?": "Delegate.h",
+        "Where does UHT enforce generated header include ordering?": (
+            "UhtHeaderFileParser.cs"
+        ),
+        "How do PublicDependencyModuleNames in Build.cs resolve includes?": (
+            "ModuleRules.cs"
+        ),
+        "How do PublicDependencyModuleNames and PrivateDependencyModuleNames differ?": (
+            "Engine.Build.cs"
+        ),
+        "How does UPROPERTY ReplicatedUsing trigger an OnRep function?": "Actor.h",
+        "Which source mentions BlueprintCallable?": "ObjectMacros.h",
+        "Why does AddDynamic fail for a dynamic multicast binding?": (
+            "DelegateSignatureImpl.inl"
+        ),
+        "How should WITH_EDITOR packaged build code be guarded?": "Build.h",
+    }
+    try:
+        for query, expected_basename in cases.items():
+            hit = service.search(query, target="sample").hits[0]
+            assert Path(hit.path).name == expected_basename
+    finally:
+        service.close()
+
+
+def test_symbol_search_prefers_exact_case_for_reflection_macros(tmp_path: Path) -> None:
+    environment = build_environment(
+        tmp_path,
+        files={
+            "Private/Type.cpp": "class UClass {};\n",
+            "Public/ObjectMacros.h": "#define UCLASS(...)\n",
+        },
+        semantic=False,
+        adapter="cpp-ue",
+        include_extensions=(".cpp", ".h"),
+    )
+    service = environment.service()
+    try:
+        hit = service.search(
+            "UCLASS",
+            target="sample",
+            strategy="symbol",
+        ).hits[0]
+        assert hit.path == "Public/ObjectMacros.h"
+        assert hit.symbol == "UCLASS"
+    finally:
+        service.close()
+
+
+def test_auto_search_resolves_lowercase_symbols_in_macro_context(tmp_path: Path) -> None:
+    environment = build_environment(
+        tmp_path,
+        files={
+            "Public/AssertionMacros.h": (
+                "#define checkf(expr, format, ...) ((void)0)\n#define ensure(expr) (!!(expr))\n"
+            ),
+        },
+        semantic=False,
+        adapter="cpp-ue",
+        include_extensions=(".h",),
+    )
+    service = environment.service()
+    try:
+        result = service.search(
+            "checkf and ensure assertion macros source",
+            target="sample",
+        )
+        assert result.hits[0].path == "Public/AssertionMacros.h"
+        assert {hit.symbol for hit in result.hits} >= {"checkf", "ensure"}
+    finally:
+        service.close()
+
+
+def test_text_search_uses_exact_symbol_evidence_for_natural_language(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    environment = build_environment(
+        tmp_path,
+        files={
+            "Private/LocalLog.h": "#define UE_LOG(...)\n",
+            "Public/Logging/LogMacros.h": "#define UE_LOG(...)\n",
+        },
+        semantic=True,
+        adapter="cpp-ue",
+        include_extensions=(".h",),
+    )
+    service = environment.service()
+    monkeypatch.setattr(service.coderag, "text_search", lambda *args, **kwargs: [])
+    try:
+        result = service.search(
+            "Where is the UE_LOG logging macro defined?",
+            target="sample",
+            strategy="text",
+        )
+        assert result.hits[0].path == "Public/Logging/LogMacros.h"
+        assert result.hits[0].symbol == "UE_LOG"
+    finally:
+        service.close()
+
+
 def test_search_limits_repeated_hits_from_one_file(tmp_path: Path) -> None:
     environment = build_environment(
         tmp_path,
@@ -315,7 +500,7 @@ def test_compare_reports_signature_changes(tmp_path: Path) -> None:
                 'adapter = "python"',
                 'embedding_provider = "fake"',
                 'include_extensions = [".py"]',
-                'exclude_globs = []',
+                "exclude_globs = []",
                 "",
             )
         )

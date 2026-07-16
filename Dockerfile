@@ -34,7 +34,10 @@ ENV PATH="/opt/codalith/.venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-RUN useradd --create-home --uid 10001 codalith \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ripgrep \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --uid 10001 codalith \
     && mkdir -p /app/data /var/lib/codalith \
     && chown -R codalith:codalith /app /var/lib/codalith
 COPY --from=runtime-build --chown=codalith:codalith /opt/codalith /opt/codalith
