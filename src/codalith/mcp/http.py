@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
+import os
 import socket
 from collections import deque
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from pathlib import Path
 
 import uvicorn
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
@@ -15,10 +17,13 @@ from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse
-from starlette.routing import Route
+from starlette.responses import JSONResponse, RedirectResponse
+from starlette.routing import BaseRoute, Mount, Route
+from starlette.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from codalith.dashboard.telemetry import TelemetryStore
+from codalith.errors import CodalithError
 from codalith.mcp.server import create_sdk_server
 from codalith.query.service import QueryService
 
@@ -145,10 +150,17 @@ class SessionManagerASGI:
         await self.manager.handle_request(scope, receive, send)
 
 
-def create_http_app(service: QueryService, config: HTTPConfig) -> Starlette:
+def create_http_app(
+    service: QueryService,
+    config: HTTPConfig,
+    *,
+    telemetry: TelemetryStore | None = None,
+    dashboard_dir: Path | None = None,
+) -> Starlette:
     config.validate()
+    telemetry_store = telemetry or TelemetryStore()
     manager = StreamableHTTPSessionManager(
-        create_sdk_server(service),
+        create_sdk_server(service, telemetry_store),
         json_response=True,
         stateless=False,
         security_settings=TransportSecuritySettings(
@@ -170,6 +182,40 @@ def create_http_app(service: QueryService, config: HTTPConfig) -> Starlette:
             status_code=200 if response.ready else 503,
         )
 
+    async def dashboard_snapshot(request: Request) -> JSONResponse:
+        target = request.query_params.get("target") or service.registry.default_target
+        window_key = request.query_params.get("range", "1h")
+        try:
+            response = service.status(target=target)
+            payload = telemetry_store.snapshot(
+                window_key=window_key,
+                target=response.target,
+                status=response,
+                targets=_dashboard_targets(service),
+            )
+        except (CodalithError, ValueError) as exc:
+            return JSONResponse(
+                {"error": {"code": "invalid_dashboard_query", "message": str(exc)}},
+                status_code=400,
+                headers={"Cache-Control": "no-store"},
+            )
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
+    resolved_dashboard_dir = _dashboard_dir(dashboard_dir)
+
+    async def dashboard_root(_: Request) -> JSONResponse | RedirectResponse:
+        if resolved_dashboard_dir is None:
+            return JSONResponse(
+                {
+                    "error": {
+                        "code": "dashboard_not_built",
+                        "message": "Build the dashboard with `bun --cwd dashboard run build`.",
+                    }
+                },
+                status_code=503,
+            )
+        return RedirectResponse("/dashboard/", status_code=307)
+
     @asynccontextmanager
     async def lifespan(_: Starlette) -> AsyncIterator[None]:
         async with manager.run():
@@ -178,12 +224,24 @@ def create_http_app(service: QueryService, config: HTTPConfig) -> Starlette:
             finally:
                 service.close()
 
+    routes: list[BaseRoute] = [
+        Route("/healthz", endpoint=health, methods=["GET"]),
+        Route("/readyz", endpoint=ready, methods=["GET"]),
+        Route("/api/dashboard/snapshot", endpoint=dashboard_snapshot, methods=["GET"]),
+        Route("/dashboard", endpoint=dashboard_root, methods=["GET"]),
+        Route(config.endpoint, endpoint=endpoint, methods=["GET", "POST", "DELETE"]),
+    ]
+    if resolved_dashboard_dir is not None:
+        routes.append(
+            Mount(
+                "/dashboard",
+                app=StaticFiles(directory=resolved_dashboard_dir, html=True),
+                name="dashboard",
+            )
+        )
+
     return Starlette(
-        routes=[
-            Route("/healthz", endpoint=health, methods=["GET"]),
-            Route("/readyz", endpoint=ready, methods=["GET"]),
-            Route(config.endpoint, endpoint=endpoint, methods=["GET", "POST", "DELETE"]),
-        ],
+        routes=routes,
         lifespan=lifespan,
         middleware=[
             Middleware(RequestLogMiddleware, enabled=config.access_log),
@@ -269,6 +327,47 @@ def _allowed_origins(config: HTTPConfig) -> list[str]:
         *config.allowed_origins,
     ]
     return list(dict.fromkeys(value.strip() for value in values))
+
+
+def _dashboard_targets(service: QueryService) -> list[dict[str, str]]:
+    targets = [
+        {
+            "id": corpus.corpus_id,
+            "label": corpus.display_name,
+            "kind": "corpus",
+        }
+        for corpus in service.registry.corpora.values()
+    ]
+    targets.extend(
+        {
+            "id": workspace.workspace_id,
+            "label": workspace.workspace_id,
+            "kind": "workspace",
+        }
+        for workspace in service.registry.workspaces.values()
+    )
+    return targets
+
+
+def _dashboard_dir(configured: Path | None) -> Path | None:
+    candidates: list[Path] = []
+    if configured is not None:
+        candidates.append(configured)
+    environment = os.getenv("CODALITH_DASHBOARD_DIR")
+    if environment:
+        candidates.append(Path(environment))
+    project_root = Path(__file__).resolve().parents[3]
+    candidates.extend(
+        (
+            project_root / "dashboard" / "dist",
+            Path(__file__).resolve().parents[1] / "dashboard_dist",
+        )
+    )
+    for candidate in candidates:
+        resolved = candidate.expanduser().resolve()
+        if (resolved / "index.html").is_file():
+            return resolved
+    return None
 
 
 async def _json_error(

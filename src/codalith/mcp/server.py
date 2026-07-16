@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import time
+from datetime import UTC, datetime
 from typing import Any
 
 import anyio
@@ -14,6 +16,7 @@ from pydantic import AnyUrl, ValidationError
 
 from codalith import __version__
 from codalith.corpus.uris import parse_uri, status_uri
+from codalith.dashboard.telemetry import TelemetryStore, default_target, monotonic_duration_ms
 from codalith.errors import CodalithError
 from codalith.mcp.schemas import (
     TOOL_BY_NAME,
@@ -32,7 +35,10 @@ from codalith.query.service import QueryService
 _LOG = logging.getLogger(__name__)
 
 
-def create_sdk_server(service: QueryService) -> Server[Any]:
+def create_sdk_server(
+    service: QueryService,
+    telemetry: TelemetryStore | None = None,
+) -> Server[Any]:
     server: Server[Any] = Server(
         "codalith",
         version=__version__,
@@ -62,13 +68,47 @@ def create_sdk_server(service: QueryService) -> Server[Any]:
         name: str,
         arguments: dict[str, Any],
     ) -> dict[str, Any] | mcp_types.CallToolResult:
+        started_at = datetime.now(UTC)
+        started = time.perf_counter()
+        target = default_target(arguments, service.registry.default_target)
         try:
-            return await anyio.to_thread.run_sync(_invoke, service, name, arguments)
+            result = await anyio.to_thread.run_sync(_invoke, service, name, arguments)
         except (CodalithError, ValidationError, TypeError, ValueError) as exc:
+            if telemetry is not None:
+                telemetry.record_call(
+                    tool=name,
+                    arguments=arguments,
+                    target=target,
+                    started_at=started_at,
+                    duration_ms=monotonic_duration_ms(started),
+                    result=None,
+                    error=exc,
+                )
             return _tool_error(exc, retryable=False)
-        except Exception:
+        except Exception as exc:
             _LOG.exception("Unhandled Codalith tool failure: %s", name)
+            if telemetry is not None:
+                telemetry.record_call(
+                    tool=name,
+                    arguments=arguments,
+                    target=target,
+                    started_at=started_at,
+                    duration_ms=monotonic_duration_ms(started),
+                    result=None,
+                    error=exc,
+                )
             return _tool_error(RuntimeError("Internal tool error"), retryable=True)
+        if telemetry is not None:
+            telemetry.record_call(
+                tool=name,
+                arguments=arguments,
+                target=target,
+                started_at=started_at,
+                duration_ms=monotonic_duration_ms(started),
+                result=result,
+                error=None,
+            )
+        return result
 
     @server.list_resources()  # type: ignore[no-untyped-call, untyped-decorator]
     async def list_resources() -> list[mcp_types.Resource]:

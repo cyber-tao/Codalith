@@ -92,6 +92,21 @@ async def _exercise_http_contract(endpoint: str) -> None:
             ]
             templates = await session.list_resource_templates()
             assert len(templates.resourceTemplates) == 2
+    dashboard_url = endpoint.removesuffix("/mcp") + "/api/dashboard/snapshot"
+    async with httpx.AsyncClient(timeout=5, trust_env=False) as client:
+        dashboard = await client.get(
+            dashboard_url,
+            params={"range": "1h", "target": "sample"},
+        )
+    assert dashboard.status_code == 200
+    payload = dashboard.json()
+    assert payload["service"]["ready"] is True
+    assert payload["summary"]["total_queries"] >= 2
+    assert {item["name"] for item in payload["tools"]} >= {
+        "codalith_status",
+        "codalith_context",
+    }
+    assert payload["corpora"][0]["corpus_id"] == "sample"
 
 
 def test_streamable_http_uses_the_official_mcp_contract(
