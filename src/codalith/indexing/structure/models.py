@@ -33,6 +33,15 @@ class SymbolRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class ComparisonGroup:
+    """Symbols sharing one comparison key, with digests in ascending order."""
+
+    key: str
+    digests: tuple[bytes, ...]
+    symbol_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class ReferenceRecord:
     reference_id: int
     source_symbol_id: str | None

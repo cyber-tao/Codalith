@@ -19,6 +19,7 @@ from codalith.indexing.coderag.backend import (
     store_fingerprint,
 )
 from codalith.indexing.structure.builder import StructureBuilder, build_lock
+from codalith.indexing.structure.models import ComparisonGroup
 from codalith.indexing.structure.schema import SYMBOL_SEARCH_SQL
 from codalith.indexing.structure.store import StructureIndex
 from codalith.indexing.text_search import search_text
@@ -207,7 +208,31 @@ def test_fuzzy_symbol_lookup_never_scans_or_sorts_all_symbols(
     search_plans = [plan for plan in plans if any("symbol_search" in step for step in plan)]
     assert search_plans
     assert all("USE TEMP B-TREE FOR ORDER BY" not in plan for plan in search_plans)
-    assert not any(step.startswith("SCAN symbols") for plan in plans for step in plan)
+    assert not any(_scans_symbols(step) for plan in plans for step in plan)
+
+
+def _scans_symbols(step: str) -> bool:
+    return step.startswith(("SCAN symbols", "SCAN TABLE symbols"))
+
+
+def test_comparison_groups_stream_from_the_covering_index(tmp_path: Path) -> None:
+    index = _widget_index(tmp_path)
+    try:
+        groups: list[ComparisonGroup] = []
+        plans = _query_plans(index, lambda: groups.extend(index.iter_comparison_groups()))
+        records = index.get_symbols([item for group in groups for item in group.symbol_ids])
+    finally:
+        index.close()
+    assert len(plans) == 1
+    assert any(
+        _scans_symbols(step) and "COVERING INDEX symbols_comparison_idx" in step
+        for step in plans[0]
+    )
+    assert not any("TEMP B-TREE" in step for step in plans[0])
+    assert [group.key for group in groups] == sorted(group.key for group in groups)
+    assert all(list(group.digests) == sorted(group.digests) for group in groups)
+    keys = {record.symbol_id: record.comparison_key for record in records}
+    assert all(keys[item] == group.key for group in groups for item in group.symbol_ids)
 
 
 def test_build_fails_clearly_without_sqlite_trigram_support(

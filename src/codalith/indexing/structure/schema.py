@@ -20,6 +20,7 @@ CREATE TABLE files (
 CREATE TABLE symbols (
     symbol_id TEXT PRIMARY KEY,
     comparison_key TEXT NOT NULL,
+    comparison_digest BLOB NOT NULL CHECK(length(comparison_digest) = 16),
     qualified_name TEXT NOT NULL,
     name TEXT NOT NULL,
     kind TEXT NOT NULL,
@@ -71,7 +72,7 @@ CREATE VIRTUAL TABLE symbol_search USING fts5(
 INDEX_SQL = """
 CREATE INDEX symbols_name_idx ON symbols(name COLLATE NOCASE);
 CREATE INDEX symbols_qualified_idx ON symbols(qualified_name COLLATE NOCASE);
-CREATE INDEX symbols_comparison_idx ON symbols(comparison_key);
+CREATE INDEX symbols_comparison_idx ON symbols(comparison_key, comparison_digest);
 CREATE INDEX symbols_path_line_idx ON symbols(path, start_line, end_line);
 
 CREATE INDEX references_source_idx ON "references"(source_symbol_id);

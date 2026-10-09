@@ -142,6 +142,7 @@ class CompareResponse(StrictModel):
     to_corpus: str
     changes: list[CompareChange]
     truncated: bool
+    warnings: list[str]
 
 
 class CorpusStatus(StrictModel):

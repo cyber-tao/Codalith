@@ -43,6 +43,8 @@ Input: canonical symbol `root_uri`, `direction`, `depth` (1–3), and edge `limi
 
 Input: `from_corpus`, `to_corpus`, `include_unchanged`, and `limit` (1–1,000). Returns added/removed/changed/unchanged/ambiguous symbol groups and changed fields. Each group returns at most 20 definitions per side and marks group-level truncation explicitly.
 
+Groups are compared in comparison-key order, by signature, path, module, and metadata. A comparison stops after 30 seconds: `truncated` is then true and `warnings` says how many groups were compared. `truncated` is also true when more than `limit` groups differ.
+
 ### `codalith_status`
 
 Input: optional `target`. Returns per-corpus state without loading embedding models or scanning source: `ready` (structural and semantic planes valid), `degraded` (no semantic plane), `missing` (no published generation), or `invalid` (the active generation no longer matches its artifacts, store provenance, or configuration).

@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import math
 import re
+import time
 from collections import deque
-from collections.abc import Callable, Iterator
-from contextlib import ExitStack
+from collections.abc import Callable, Generator
+from contextlib import ExitStack, closing
 from dataclasses import dataclass, field
 from typing import Literal, cast
 
@@ -33,6 +34,7 @@ from codalith.indexing.coderag import CodeRAGBackend
 from codalith.indexing.coderag.backend import generation_store_provenance
 from codalith.indexing.leases import GenerationLeases
 from codalith.indexing.structure.models import (
+    ComparisonGroup,
     FileRecord,
     ModuleDependencyRecord,
     ReferenceRecord,
@@ -87,6 +89,7 @@ _COMMON_WORDS = frozenset(
 _MAX_SEMANTIC_POOL = 1_000
 _EXACT_SYMBOL_WEIGHT = 1.2
 _PATH_TERM_WEIGHT = 1.1
+_COMPARE_TIME_BUDGET_SECONDS = 30.0
 _CODE_CONTEXT_WORDS = frozenset(
     {
         "api",
@@ -888,32 +891,52 @@ class QueryService:
             raise ValueError("limit must be between 1 and 1000")
         old_corpus = self.registry.get_corpus(from_corpus)
         new_corpus = self.registry.get_corpus(to_corpus)
+        deadline = time.monotonic() + _COMPARE_TIME_BUDGET_SECONDS
         changes: list[CompareChange] = []
+        warnings: list[str] = []
         truncated = False
         with _Request(self) as request:
             old_snapshot = request.snapshot(old_corpus)
             new_snapshot = request.snapshot(new_corpus)
-            for key, old, new in _merged_symbol_groups(old_snapshot.index, new_snapshot.index):
-                change = _compare_group(
-                    key,
-                    old,
-                    new,
-                    old_corpus,
-                    old_snapshot.generation,
-                    new_corpus,
-                    new_snapshot.generation,
-                )
-                if change.status == "unchanged" and not include_unchanged:
-                    continue
-                if len(changes) >= limit:
-                    truncated = True
-                    break
-                changes.append(change)
+            with closing(
+                _merged_comparison_groups(old_snapshot.index, new_snapshot.index)
+            ) as groups:
+                for compared, (key, old, new) in enumerate(groups):
+                    if time.monotonic() >= deadline:
+                        truncated = True
+                        warnings.append(
+                            f"Comparison stopped at its {_COMPARE_TIME_BUDGET_SECONDS:g}s budget "
+                            f"after {compared} symbol groups; later groups were not compared"
+                        )
+                        break
+                    if (
+                        not include_unchanged
+                        and old is not None
+                        and new is not None
+                        and old.digests == new.digests
+                    ):
+                        continue
+                    change = _compare_group(
+                        key,
+                        _group_records(old_snapshot.index, old),
+                        _group_records(new_snapshot.index, new),
+                        old_corpus,
+                        old_snapshot.generation,
+                        new_corpus,
+                        new_snapshot.generation,
+                    )
+                    if change.status == "unchanged" and not include_unchanged:
+                        continue
+                    if len(changes) >= limit:
+                        truncated = True
+                        break
+                    changes.append(change)
         return CompareResponse(
             from_corpus=from_corpus,
             to_corpus=to_corpus,
             changes=changes,
             truncated=truncated,
+            warnings=warnings,
         )
 
     def status(self, *, target: str | None = None) -> StatusResponse:
@@ -1385,26 +1408,35 @@ def _module_graph_edge(
     )
 
 
-def _merged_symbol_groups(
+def _merged_comparison_groups(
     old_index: StructureIndex,
     new_index: StructureIndex,
-) -> Iterator[tuple[str, list[SymbolRecord], list[SymbolRecord]]]:
-    old_groups = iter(old_index.iter_symbol_groups())
-    new_groups = iter(new_index.iter_symbol_groups())
-    old = next(old_groups, None)
-    new = next(new_groups, None)
-    while old is not None or new is not None:
-        if old is not None and (new is None or old[0] < new[0]):
-            yield old[0], old[1], []
-            old = next(old_groups, None)
-        elif new is not None and (old is None or new[0] < old[0]):
-            yield new[0], [], new[1]
-            new = next(new_groups, None)
-        else:
-            assert old is not None and new is not None
-            yield old[0], old[1], new[1]
-            old = next(old_groups, None)
-            new = next(new_groups, None)
+) -> Generator[tuple[str, ComparisonGroup | None, ComparisonGroup | None], None, None]:
+    with (
+        closing(old_index.iter_comparison_groups()) as old_groups,
+        closing(new_index.iter_comparison_groups()) as new_groups,
+    ):
+        old = next(old_groups, None)
+        new = next(new_groups, None)
+        while old is not None or new is not None:
+            if old is not None and (new is None or old.key < new.key):
+                yield old.key, old, None
+                old = next(old_groups, None)
+            elif new is not None and (old is None or new.key < old.key):
+                yield new.key, None, new
+                new = next(new_groups, None)
+            else:
+                assert old is not None and new is not None
+                yield old.key, old, new
+                old = next(old_groups, None)
+                new = next(new_groups, None)
+
+
+def _group_records(index: StructureIndex, group: ComparisonGroup | None) -> list[SymbolRecord]:
+    if group is None:
+        return []
+    records = index.get_symbols(group.symbol_ids)
+    return sorted(records, key=lambda record: (record.path, record.start_line, record.symbol_id))
 
 
 def _compare_group(

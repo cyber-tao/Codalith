@@ -5,12 +5,13 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
-from collections.abc import Iterator, Sequence
+from collections.abc import Generator, Sequence
 from pathlib import Path
 from typing import cast
 
 from codalith.errors import IndexInvalidError
 from codalith.indexing.structure.models import (
+    ComparisonGroup,
     FileRecord,
     ModuleDependencyRecord,
     ReferenceRecord,
@@ -259,30 +260,33 @@ class StructureIndex:
         )
         return [ModuleDependencyRecord(**dict(row)) for row in rows]
 
-    def iter_symbol_groups(self) -> Iterator[tuple[str, list[SymbolRecord]]]:
-        """Stream comparison-key groups without materializing the symbol table."""
+    def iter_comparison_groups(self) -> Generator[ComparisonGroup, None, None]:
+        """Stream comparison-key groups from the covering comparison index."""
 
         with self._lock:
             cursor = self._connection.execute(
-                "SELECT * FROM symbols ORDER BY comparison_key, path, start_line"
+                "SELECT comparison_key, comparison_digest, symbol_id FROM symbols "
+                "ORDER BY comparison_key, comparison_digest, symbol_id"
             )
-        current_key: str | None = None
-        group: list[SymbolRecord] = []
+            cursor.row_factory = None
+        key: str | None = None
+        digests: list[bytes] = []
+        symbol_ids: list[str] = []
         try:
             while True:
                 with self._lock:
                     rows = cursor.fetchmany(_FETCH_BATCH)
                 if not rows:
                     break
-                for row in rows:
-                    key = str(row["comparison_key"])
-                    if current_key is not None and key != current_key:
-                        yield current_key, group
-                        group = []
-                    current_key = key
-                    group.append(_symbol(row))
-            if current_key is not None:
-                yield current_key, group
+                for row_key, digest, symbol_id in rows:
+                    if row_key != key:
+                        if key is not None:
+                            yield ComparisonGroup(key, tuple(digests), tuple(symbol_ids))
+                        key, digests, symbol_ids = row_key, [], []
+                    digests.append(digest)
+                    symbol_ids.append(symbol_id)
+            if key is not None:
+                yield ComparisonGroup(key, tuple(digests), tuple(symbol_ids))
         finally:
             with self._lock:
                 cursor.close()
@@ -298,6 +302,7 @@ class StructureIndex:
 
 def _symbol(row: sqlite3.Row) -> SymbolRecord:
     raw = dict(row)
+    raw.pop("comparison_digest")
     metadata_raw = raw.pop("metadata_json")
     try:
         metadata = json.loads(metadata_raw)

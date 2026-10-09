@@ -79,7 +79,7 @@ Published Compose ports default to `127.0.0.1`. Add exact Host/Origin values onl
 The audit remediation changed persisted formats and public contracts. Rebuild or re-adopt every generation after upgrading; old generations report `invalid` until then.
 
 - Manifest schema 3: `source_selection_hash` (now covering the source policy's deny globs and byte limit) replaces `chunk_policy_hash`, and semantic generations record `coderag_store`, `coderag_covered_files`, and `coderag_extra_files`.
-- Structure schema 3 adds the `name_match` reference resolution and the `symbol_search` trigram index; the `cpp-ue` adapter version 6 no longer stores `#include` directives as module dependencies. Building requires SQLite with FTS5 and the trigram tokenizer (3.34 or newer), which the container image and standard Python builds provide.
+- Structure schema 4 adds the `name_match` reference resolution, the `symbol_search` trigram index, and per-symbol comparison digests; the `cpp-ue` adapter version 6 no longer stores `#include` directives as module dependencies. Building requires SQLite with FTS5 and the trigram tokenizer (3.34 or newer), which the container image and standard Python builds provide.
 - `--allow-external-rebuild` is removed. `--semantic build` always builds a generation-local store; `--semantic adopt` is the only way to use an external store.
-- MCP error codes are a fixed contract (see [MCP API](mcp-api.md)), `codalith_read` responses and graph nodes carry `generation_id`, graph edges may report `name_match`, and source URIs require `#Lx-Ly` ranges.
+- MCP error codes are a fixed contract (see [MCP API](mcp-api.md)), `codalith_read` responses and graph nodes carry `generation_id`, graph edges may report `name_match`, `codalith_compare` responses carry `warnings` and stop at a 30-second budget, and source URIs require `#Lx-Ly` ranges.
 - `text` search now matches the whole query literally and no longer requires a semantic store.

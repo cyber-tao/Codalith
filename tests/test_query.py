@@ -709,21 +709,20 @@ def test_auto_search_reports_missing_semantic_plane_without_creating_a_store(
         service.close()
 
 
-def test_compare_reports_signature_changes(tmp_path: Path) -> None:
+def _compare_service(tmp_path: Path, sources: dict[str, str]) -> QueryService:
+    """Build one Python corpus per entry, each holding ``api.py`` with the given text."""
+
     policy_path = tmp_path / "policy.toml"
     policy_path.write_text(
         "default_max_lines = 20\nhard_max_lines = 100\nmax_file_bytes = 100000\n"
         'deny_globs = ["**/.env"]\n',
         encoding="utf-8",
     )
-    rows: list[str] = ["schema_version = 2", 'default_target = "old"', ""]
-    for corpus_id, signature in (("old", "int"), ("new", "str")):
+    rows: list[str] = ["schema_version = 2", f'default_target = "{next(iter(sources))}"', ""]
+    for corpus_id, text in sources.items():
         source = tmp_path / corpus_id / "source"
         source.mkdir(parents=True)
-        (source / "api.py").write_text(
-            f"def run(value: {signature}) -> {signature}:\n    return value\n",
-            encoding="utf-8",
-        )
+        (source / "api.py").write_text(text, encoding="utf-8")
         rows.extend(
             (
                 "[[corpora]]",
@@ -743,9 +742,35 @@ def test_compare_reports_signature_changes(tmp_path: Path) -> None:
     registry = CorpusRegistry.from_file(registry_path)
     policy = SourcePolicy.from_file(policy_path)
     builder = StructureBuilder(policy)
-    builder.build(registry.get_corpus("old"))
-    builder.build(registry.get_corpus("new"))
-    service = QueryService(registry, policy)
+    for corpus_id in sources:
+        builder.build(registry.get_corpus(corpus_id))
+    return QueryService(registry, policy)
+
+
+_OLD_API = (
+    "def same(value: int) -> int:\n    return value\n\n\n"
+    "def changed(value: int) -> int:\n    return value\n\n\n"
+    "def removed() -> None:\n    pass\n\n\n"
+    "def dup(value: int) -> int:\n    return value\n\n\n"
+    "def dup(value: str) -> str:\n    return value\n"
+)
+_NEW_API = (
+    "def same(value: int) -> int:\n    return value\n\n\n"
+    "def changed(value: str) -> str:\n    return value\n\n\n"
+    "def added() -> None:\n    pass\n\n\n"
+    "def dup(value: int) -> int:\n    return value\n\n\n"
+    "def dup(value: bytes) -> bytes:\n    return value\n"
+)
+
+
+def test_compare_reports_signature_changes(tmp_path: Path) -> None:
+    service = _compare_service(
+        tmp_path,
+        {
+            corpus_id: f"def run(value: {signature}) -> {signature}:\n    return value\n"
+            for corpus_id, signature in (("old", "int"), ("new", "str"))
+        },
+    )
     try:
         result = service.compare("old", "new")
         change = next(item for item in result.changes if item.comparison_key == "run (function)")
@@ -753,3 +778,46 @@ def test_compare_reports_signature_changes(tmp_path: Path) -> None:
         assert change.changed_fields == ["signature"]
     finally:
         service.close()
+
+
+def test_compare_classifies_symbol_groups(tmp_path: Path) -> None:
+    service = _compare_service(tmp_path, {"old": _OLD_API, "new": _NEW_API})
+    try:
+        result = service.compare("old", "new")
+        everything = service.compare("old", "new", include_unchanged=True)
+        limited = service.compare("old", "new", limit=1)
+    finally:
+        service.close()
+    assert [(item.comparison_key, item.status, item.changed_fields) for item in result.changes] == [
+        ("added (function)", "added", []),
+        ("changed (function)", "changed", ["signature"]),
+        ("dup (function)", "ambiguous", ["overloads"]),
+        ("removed (function)", "removed", []),
+    ]
+    assert [item.signature for item in result.changes[2].from_symbols] == [
+        "def dup(value: int) -> int",
+        "def dup(value: str) -> str",
+    ]
+    assert not result.truncated
+    assert not result.warnings
+    assert [item.comparison_key for item in everything.changes if item.status == "unchanged"] == [
+        "same (function)"
+    ]
+    assert [item.comparison_key for item in limited.changes] == ["added (function)"]
+    assert limited.truncated
+
+
+def test_compare_returns_partial_results_when_its_time_budget_runs_out(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = _compare_service(tmp_path, {"old": _OLD_API, "new": _NEW_API})
+    monkeypatch.setattr("codalith.query.service._COMPARE_TIME_BUDGET_SECONDS", 0.0)
+    try:
+        result = service.compare("old", "new")
+    finally:
+        service.close()
+    assert result.truncated
+    assert result.changes == []
+    assert len(result.warnings) == 1
+    assert "budget" in result.warnings[0]

@@ -50,6 +50,7 @@ from codalith.languages.catalog import (
 )
 
 _MAX_REPORTED_WARNINGS = 200
+_COMPARISON_DIGEST_BYTES = 16
 
 
 @dataclass(frozen=True, slots=True)
@@ -312,10 +313,21 @@ class StructureBuilder:
                         file_symbols.append(
                             (symbol.qualified_name, symbol_id, symbol.start_line, symbol.end_line)
                         )
+                        metadata_json = json.dumps(
+                            symbol.metadata,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        )
                         symbol_rows.append(
                             (
                                 symbol_id,
                                 f"{symbol.qualified_name}\0{symbol.kind}",
+                                _comparison_digest(
+                                    symbol.signature,
+                                    relative,
+                                    symbol.module,
+                                    metadata_json,
+                                ),
                                 symbol.qualified_name,
                                 symbol.name,
                                 symbol.kind,
@@ -324,11 +336,7 @@ class StructureBuilder:
                                 symbol.start_line,
                                 symbol.end_line,
                                 symbol.module,
-                                json.dumps(
-                                    symbol.metadata,
-                                    sort_keys=True,
-                                    separators=(",", ":"),
-                                ),
+                                metadata_json,
                             ),
                         )
                         symbol_key_rows.extend(
@@ -352,9 +360,10 @@ class StructureBuilder:
                             )
                     connection.executemany(
                         "INSERT INTO symbols("
-                        "symbol_id, comparison_key, qualified_name, name, kind, signature, "
-                        "path, start_line, end_line, module, parent_symbol_id, metadata_json"
-                        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)",
+                        "symbol_id, comparison_key, comparison_digest, qualified_name, name, "
+                        "kind, signature, path, start_line, end_line, module, "
+                        "parent_symbol_id, metadata_json"
+                        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)",
                         symbol_rows,
                     )
                     connection.executemany(
@@ -554,6 +563,18 @@ def _symbol_id(corpus_id: str, symbol: SymbolObservation) -> str:
         )
     )
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:24]
+
+
+def _comparison_digest(
+    signature: str,
+    path: str,
+    module: str | None,
+    metadata_json: str,
+) -> bytes:
+    """Digest exactly the fields codalith_compare compares, so equal groups need no records."""
+
+    payload = json.dumps([signature, path, module, metadata_json], separators=(",", ":"))
+    return hashlib.blake2b(payload.encode("ascii"), digest_size=_COMPARISON_DIGEST_BYTES).digest()
 
 
 def _create_symbol_search(connection: sqlite3.Connection) -> None:
