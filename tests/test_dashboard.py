@@ -85,6 +85,28 @@ def test_dashboard_snapshot_rejects_unknown_range() -> None:
         )
 
 
+def test_dashboard_orders_simultaneous_queries_newest_first() -> None:
+    store = TelemetryStore()
+    started_at = datetime.now(UTC)
+    for query in ("first", "second"):
+        store.record_call(
+            tool="codalith_search",
+            arguments={"query": query, "target": "sample"},
+            target="sample",
+            started_at=started_at,
+            duration_ms=1.0,
+            result={"hits": []},
+            error=None,
+        )
+
+    payload = store.snapshot(window_key="1h", target="sample", status=_status(), targets=[])
+
+    assert [item["query"] for item in payload["recent_queries"]] == [  # type: ignore[index]
+        "second",
+        "first",
+    ]
+
+
 def test_dashboard_snapshot_keeps_diagnostic_logs_visible_after_busy_period() -> None:
     store = TelemetryStore()
     store.record_call(

@@ -6,7 +6,7 @@ import json
 import logging
 import time
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Protocol
 
 import anyio
 import mcp.types as mcp_types
@@ -16,7 +16,6 @@ from pydantic import AnyUrl, ValidationError
 
 from codalith import __version__
 from codalith.corpus.uris import parse_uri, status_uri
-from codalith.dashboard.telemetry import TelemetryStore, default_target, monotonic_duration_ms
 from codalith.errors import CodalithError
 from codalith.mcp.schemas import (
     TOOL_BY_NAME,
@@ -35,9 +34,23 @@ from codalith.query.service import QueryService
 _LOG = logging.getLogger(__name__)
 
 
+class ToolCallRecorder(Protocol):
+    def record_call(
+        self,
+        *,
+        tool: str,
+        arguments: dict[str, Any],
+        target: str,
+        started_at: datetime,
+        duration_ms: float,
+        result: dict[str, Any] | None,
+        error: Exception | None,
+    ) -> None: ...
+
+
 def create_sdk_server(
     service: QueryService,
-    telemetry: TelemetryStore | None = None,
+    recorder: ToolCallRecorder | None = None,
 ) -> Server[Any]:
     server: Server[Any] = Server(
         "codalith",
@@ -70,44 +83,30 @@ def create_sdk_server(
     ) -> dict[str, Any] | mcp_types.CallToolResult:
         started_at = datetime.now(UTC)
         started = time.perf_counter()
-        target = default_target(arguments, service.registry.default_target)
+
+        def record(result: dict[str, Any] | None, error: Exception | None) -> None:
+            if recorder is None:
+                return
+            recorder.record_call(
+                tool=name,
+                arguments=arguments,
+                target=_call_target(arguments, service.registry.default_target),
+                started_at=started_at,
+                duration_ms=max(0.0, (time.perf_counter() - started) * 1_000),
+                result=result,
+                error=error,
+            )
+
         try:
             result = await anyio.to_thread.run_sync(_invoke, service, name, arguments)
         except (CodalithError, ValidationError, TypeError, ValueError) as exc:
-            if telemetry is not None:
-                telemetry.record_call(
-                    tool=name,
-                    arguments=arguments,
-                    target=target,
-                    started_at=started_at,
-                    duration_ms=monotonic_duration_ms(started),
-                    result=None,
-                    error=exc,
-                )
+            record(None, exc)
             return _tool_error(exc, retryable=False)
         except Exception as exc:
             _LOG.exception("Unhandled Codalith tool failure: %s", name)
-            if telemetry is not None:
-                telemetry.record_call(
-                    tool=name,
-                    arguments=arguments,
-                    target=target,
-                    started_at=started_at,
-                    duration_ms=monotonic_duration_ms(started),
-                    result=None,
-                    error=exc,
-                )
+            record(None, exc)
             return _tool_error(RuntimeError("Internal tool error"), retryable=True)
-        if telemetry is not None:
-            telemetry.record_call(
-                tool=name,
-                arguments=arguments,
-                target=target,
-                started_at=started_at,
-                duration_ms=monotonic_duration_ms(started),
-                result=result,
-                error=None,
-            )
+        record(result, None)
         return result
 
     @server.list_resources()  # type: ignore[no-untyped-call, untyped-decorator]
@@ -165,6 +164,14 @@ def build_instructions(service: QueryService) -> str:
         "codalith_search for discovery, and codalith_read for exact cited ranges. "
         "Every source result carries a codalith:// URI, revision, and generation id."
     )
+
+
+def _call_target(arguments: dict[str, Any], fallback: str) -> str:
+    for key in ("target", "from_corpus"):
+        value = arguments.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return fallback
 
 
 def _invoke(

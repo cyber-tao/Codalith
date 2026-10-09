@@ -1,10 +1,23 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 from codalith.cli.main import main
 from conftest import TestEnvironment
+
+
+def test_cli_imports_without_posix_only_modules() -> None:
+    code = "import sys; sys.modules['resource'] = None; import codalith.cli.main"
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_version_and_http_client_config_do_not_require_local_config(

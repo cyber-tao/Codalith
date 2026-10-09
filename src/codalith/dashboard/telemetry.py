@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import math
 import os
-import resource
 import sys
 import threading
 import time
@@ -210,11 +209,15 @@ class TelemetryStore:
         ]
         current_summary = _summary(current_events, resources)
         previous_summary = _summary(previous_events, resources)
-        recent_queries = sorted(current_events, key=lambda item: item.timestamp, reverse=True)[:25]
+        recent_queries = sorted(
+            reversed(current_events),
+            key=lambda item: item.timestamp,
+            reverse=True,
+        )[:25]
         matching_logs = sorted(
             (
                 item
-                for item in logs
+                for item in reversed(logs)
                 if item.target == target and item.timestamp >= current_start
             ),
             key=lambda item: item.timestamp,
@@ -522,26 +525,53 @@ def _truncate(value: str, length: int) -> str:
 
 
 def _peak_memory_mb() -> float:
+    if sys.platform == "win32":
+        return _windows_peak_working_set_bytes() / 1024 / 1024
+    import resource
+
     raw = float(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
     if sys.platform == "darwin":
         return raw / 1024 / 1024
     return raw / 1024
 
 
-def default_target(arguments: dict[str, Any], fallback: str) -> str:
-    """Resolve the target label without invoking or scanning the corpus."""
+if sys.platform == "win32":
+    import ctypes
+    from ctypes import wintypes
 
-    value = arguments.get("target")
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    from_corpus = arguments.get("from_corpus")
-    if isinstance(from_corpus, str) and from_corpus.strip():
-        return from_corpus.strip()
-    return fallback
+    class _ProcessMemoryCounters(ctypes.Structure):
+        _fields_ = [
+            ("cb", wintypes.DWORD),
+            ("PageFaultCount", wintypes.DWORD),
+            ("PeakWorkingSetSize", ctypes.c_size_t),
+            ("WorkingSetSize", ctypes.c_size_t),
+            ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+            ("PagefileUsage", ctypes.c_size_t),
+            ("PeakPagefileUsage", ctypes.c_size_t),
+        ]
 
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    _kernel32.K32GetProcessMemoryInfo.argtypes = (
+        wintypes.HANDLE,
+        ctypes.POINTER(_ProcessMemoryCounters),
+        wintypes.DWORD,
+    )
+    _kernel32.K32GetProcessMemoryInfo.restype = wintypes.BOOL
 
-def monotonic_duration_ms(started: float) -> float:
-    return max(0.0, (time.perf_counter() - started) * 1_000)
+    def _windows_peak_working_set_bytes() -> int:
+        counters = _ProcessMemoryCounters()
+        counters.cb = ctypes.sizeof(_ProcessMemoryCounters)
+        if not _kernel32.K32GetProcessMemoryInfo(
+            _kernel32.GetCurrentProcess(),
+            ctypes.byref(counters),
+            counters.cb,
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return int(counters.PeakWorkingSetSize)
 
 
 def process_identity() -> dict[str, object]:

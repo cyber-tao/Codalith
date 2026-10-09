@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import sys
 import threading
 import time
@@ -147,6 +148,20 @@ def test_stdio_transport_keeps_protocol_output_clean(
     semantic_environment: TestEnvironment,
 ) -> None:
     anyio.run(_exercise_stdio, semantic_environment)
+
+
+def test_stdio_transport_does_not_load_the_dashboard() -> None:
+    code = (
+        "import sys; import codalith.mcp.stdio; "
+        "assert not any(name.startswith('codalith.dashboard') for name in sys.modules)"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_http_security_rejects_rebinding_and_oversized_streams(
