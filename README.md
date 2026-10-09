@@ -2,7 +2,7 @@
 
 [中文说明](README.zh-CN.md)
 
-Codalith is a local-first MCP source-intelligence service for AI coding agents. It combines an immutable SQLite structural index with CodeRAG retrieval, then returns bounded, hash-verified source evidence through the official MCP protocol.
+Codalith is a local-first MCP source-intelligence service for AI coding agents. It combines an immutable SQLite structural index with hybrid semantic retrieval, then returns bounded, hash-verified source evidence through the official MCP protocol.
 
 The core is language-neutral. Python, C#, and C++/Unreal Engine have structural adapters today; other text corpora can use the generic adapter without pretending to provide symbols.
 
@@ -22,14 +22,12 @@ Codalith is not a hosted multi-tenant gateway. Authentication, RBAC, audit datab
 
 - Python 3.11+
 - [uv](https://docs.astral.sh/uv/)
-- Git submodules
 - [Bun](https://bun.sh/) (optional, to build the operations dashboard locally)
 - Docker Compose (optional)
 
 ## Quick start
 
 ```bash
-git submodule update --init --recursive
 uv sync --frozen --extra dev
 uv run codalith index build --corpus sample --semantic build
 uv run codalith doctor --target sample --deep
@@ -69,11 +67,11 @@ See [MCP API](docs/mcp-api.md) for schemas and error behavior.
 configs/                 TOML corpus registry and source policy
 benchmarks/datasets/     independent sample, UE regression, and holdout sets
 dashboard/               React operations dashboard (built with Bun)
-external/CodeRAG/        pinned retrieval-engine submodule
 fixtures/sample_corpus/  deterministic local smoke corpus
 src/codalith/corpus/     registry, policy, URIs, generations, source reads
 src/codalith/languages/  adapter catalog, contracts, and implementations
-src/codalith/indexing/   SQLite builder, CodeRAG integration, literal text search
+src/codalith/semantic/   hybrid retrieval engine (chunking, embeddings, LanceDB)
+src/codalith/indexing/   SQLite builder, semantic generation binding, literal text search
 src/codalith/query/      transport-independent query service
 src/codalith/mcp/        official SDK bindings and transports
 src/codalith/dashboard/  process-local telemetry and dashboard HTTP routes

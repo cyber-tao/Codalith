@@ -3,9 +3,10 @@
 Codalith has one transport-independent query core and two retrieval planes:
 
 1. The structural plane is an immutable SQLite snapshot built by a language adapter.
-2. The semantic plane is a CodeRAG store bound to that snapshot. `--semantic build` embeds a
-   materialized copy of exactly the snapshot's files into the generation's own store;
-   `--semantic adopt` verifies an external store against the snapshot and pins it.
+2. The semantic plane is a hybrid retrieval store bound to that snapshot. The engine lives in
+   `codalith.semantic`. `--semantic build` embeds a materialized copy of exactly the snapshot's
+   files into the generation's own store; `--semantic adopt` verifies an external store against
+   the snapshot and pins it.
 
 The query service fuses both planes and is the only API used by MCP transports. The HTTP application additionally hosts the operations dashboard; the MCP binding itself never imports dashboard code.
 
@@ -31,12 +32,12 @@ Version comparison is expressed as two corpora. There is no implicit overlay or 
 
 A build holds an OS-level lock on the index root, writes a hidden staging directory, validates SQLite integrity, prepares the semantic plane, re-hashes every indexed source file, fsyncs the generation, renames staging to its final generation ID, and atomically replaces `current.json` through an fsynced temporary file. A failed build leaves the active generation and its store untouched. Old generations are never mutated or silently deleted.
 
-The manifest (schema 3) binds source revision and fingerprint, adapter ID and version, a source-selection hash covering the corpus extensions and excludes plus the source policy's deny globs and byte limit, structure schema, CodeRAG version, embedding provider, model and dimension, the semantic store location, fingerprint and coverage, counts, and local artifact hashes. Configuration, policy, adapter, or CodeRAG version drift invalidates the active generation, which must then be rebuilt.
+The manifest (schema 3) binds source revision and fingerprint, adapter ID and version, a source-selection hash covering the corpus extensions and excludes plus the source policy's deny globs and byte limit, structure schema, semantic engine version, embedding provider, model and dimension, the semantic store location, fingerprint and coverage, counts, and local artifact hashes. Configuration, policy, adapter, or semantic engine version drift invalidates the active generation, which must then be rebuilt.
 
 ## Semantic plane
 
-- **Build** materializes the snapshot's files into a temporary view and lets CodeRAG index all of them as text; every snapshot file must be stored with the same SHA-256 unless it has no indexable text (empty or binary).
-- **Adopt** never writes the external store. It refuses a store whose recorded embedding model or dimension differs from the configured provider (CodeRAG would otherwise clear it), rejects any shared file whose content hash differs from the snapshot, records how many snapshot files the store covers and how many extra files it holds, and pins the store's absolute path in the manifest.
+- **Build** materializes the snapshot's files into a temporary view and indexes all of them as text; every snapshot file must be stored with the same SHA-256 unless it has no indexable text (empty or binary).
+- **Adopt** never writes the external store. It refuses a store whose recorded embedding model or dimension differs from the configured provider (opening it would otherwise clear the store), rejects any shared file whose content hash differs from the snapshot, records how many snapshot files the store covers and how many extra files it holds, and pins the store's absolute path in the manifest.
 - **Queries** open a store only after checking its recorded provenance against the manifest, configure the embedding provider from the manifest rather than live configuration, discard hits outside the snapshot, and over-fetch in proportion to an adopted store's extra files.
 
 ## Structural schema
@@ -68,7 +69,7 @@ Each request resolves every target corpus once and keeps that generation's resou
 
 Every output passes through the source policy: denied paths are withheld from search, context, symbol, and graph results and reported in warnings.
 
-`codalith_context` removes overlapping ranges, enforces span and character budgets, reads current source through the policy layer, marks spans shortened by the line limit or the budget as `truncated`, and reports stale hashes or decoding replacements. Confidence is high only for corroborated structure plus CodeRAG evidence; degraded or stale results are low confidence.
+`codalith_context` removes overlapping ranges, enforces span and character budgets, reads current source through the policy layer, marks spans shortened by the line limit or the budget as `truncated`, and reports stale hashes or decoding replacements. Confidence is high only for corroborated structure plus semantic evidence; degraded or stale results are low confidence.
 
 ## Local security boundary
 

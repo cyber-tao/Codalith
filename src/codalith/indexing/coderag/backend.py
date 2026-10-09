@@ -1,4 +1,4 @@
-"""CodeRAG integration using only its public Config and CodeRAG APIs."""
+"""Semantic-index integration through the in-tree engine's public API."""
 
 from __future__ import annotations
 
@@ -14,8 +14,6 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from coderag import CodeRAG, Config
-
 from codalith.corpus.registry import Corpus
 from codalith.corpus.source_policy import SourcePolicy
 from codalith.corpus.store_manifest import ActiveGeneration
@@ -27,6 +25,8 @@ from codalith.errors import (
     RetrievalError,
 )
 from codalith.indexing.leases import GenerationLeases
+from codalith.semantic.api import SemanticEngine
+from codalith.semantic.config import Config
 
 _STORE_PROVENANCE_FILE = "meta.json"
 _CODERAG_BINARY_SNIFF_BYTES = 8192
@@ -72,7 +72,7 @@ class StoreProvenance:
 class CodeRAGBackend:
     def __init__(self, policy: SourcePolicy) -> None:
         self.policy = policy
-        self._engines: GenerationLeases[CodeRAG] = GenerationLeases(_close_engine)
+        self._engines: GenerationLeases[SemanticEngine] = GenerationLeases(_close_engine)
 
     def search(
         self,
@@ -111,7 +111,7 @@ class CodeRAGBackend:
         self,
         corpus: Corpus,
         generation: ActiveGeneration,
-    ) -> AbstractContextManager[CodeRAG]:
+    ) -> AbstractContextManager[SemanticEngine]:
         manifest = generation.manifest
         if not manifest.semantic_available:
             raise RetrievalError(
@@ -124,7 +124,7 @@ class CodeRAGBackend:
             lambda: self._open_engine(corpus, generation),
         )
 
-    def _open_engine(self, corpus: Corpus, generation: ActiveGeneration) -> CodeRAG:
+    def _open_engine(self, corpus: Corpus, generation: ActiveGeneration) -> SemanticEngine:
         try:
             expected = generation_store_provenance(generation)
         except IndexUnavailableError as exc:
@@ -142,7 +142,7 @@ class CodeRAGBackend:
         )
 
 
-def _close_engine(engine: CodeRAG) -> None:
+def _close_engine(engine: SemanticEngine) -> None:
     engine.close()
 
 
@@ -192,8 +192,8 @@ def _open_verified_engine(
     *,
     error: type[CodalithError],
     expected: StoreProvenance | None = None,
-) -> CodeRAG:
-    """Open an existing store only when CodeRAG's own bootstrap cannot clear it."""
+) -> SemanticEngine:
+    """Open an existing store only when bootstrap cannot clear it."""
 
     store_dir = Path(config.store_dir)
     try:
@@ -205,7 +205,7 @@ def _open_verified_engine(
             f"CodeRAG store {store_dir} records {recorded.describe()} but "
             f"{expected.describe()} was expected"
         )
-    engine = CodeRAG(config)
+    engine = SemanticEngine(config)
     try:
         provider = engine.provider
         configured = StoreProvenance(str(provider.model_id), int(provider.dim))
@@ -252,7 +252,9 @@ def prepare_semantic_index(
             )
             view_root = Path(source_view.name)
             _materialize_source_view(corpus.source_root, view_root, tuple(indexed_files))
-            engine = CodeRAG(coderag_config(corpus, store_dir, policy, source_view=view_root))
+            engine = SemanticEngine(
+                coderag_config(corpus, store_dir, policy, source_view=view_root)
+            )
         else:
             engine = _open_verified_engine(
                 coderag_config(corpus, store_dir, policy),
@@ -336,7 +338,7 @@ def _validate_semantic_request(
             importlib.import_module("openai")
         except ModuleNotFoundError as exc:
             raise IndexBuildError(
-                "OpenAI embeddings require the coderag[openai] package extra"
+                "OpenAI embeddings require the openai package"
             ) from exc
     if mode == "adopt":
         if store_dir is None:
@@ -345,7 +347,7 @@ def _validate_semantic_request(
             raise IndexBuildError(f"CodeRAG store does not exist: {store_dir}")
 
 
-def _stored_file_hashes(engine: CodeRAG) -> dict[str, str]:
+def _stored_file_hashes(engine: SemanticEngine) -> dict[str, str]:
     metas = engine.store.all_file_metas()
     return {
         str(path).replace("\\", "/"): str(meta.get("content_hash") or "")
@@ -414,7 +416,7 @@ def coderag_config(
     model: str | None = None,
     source_view: Path | None = None,
 ) -> Config:
-    """``source_view`` is a materialized snapshot that CodeRAG must index without filtering."""
+    """``source_view`` is a materialized snapshot that the engine must index without filtering."""
 
     defaults = Config()
     provider = provider or corpus.embedding_provider
@@ -428,7 +430,6 @@ def coderag_config(
         cache_dir=defaults.cache_dir,
         watched_dir=source_view or corpus.source_root,
         store_dir=store_dir,
-        languages=_coderag_languages(corpus, defaults.languages),
         ignore_globs=(
             ()
             if source_view is not None
@@ -446,7 +447,6 @@ def coderag_config(
         dense_weight=defaults.dense_weight,
         lexical_weight=defaults.lexical_weight,
         adaptive_fusion=True,
-        graph_expansion=False,
     )
 
 
@@ -479,16 +479,6 @@ def _status_int(status: dict[str, Any], key: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or value < 0:
         raise IndexBuildError(f"CodeRAG status field {key!r} is invalid")
     return value
-
-
-def _coderag_languages(corpus: Corpus, defaults: tuple[str, ...]) -> tuple[str, ...]:
-    if corpus.adapter == "python":
-        return ("python",)
-    if corpus.adapter == "csharp":
-        return ("csharp",)
-    if corpus.adapter == "cpp-ue":
-        return ("c", "cpp", "csharp")
-    return defaults
 
 
 def _materialize_source_view(

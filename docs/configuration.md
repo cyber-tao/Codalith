@@ -46,7 +46,7 @@ Patterns follow the same matching rules and are checked case-insensitively at in
 - `CODALITH_HTTP_*`: bind address, port, endpoint, allowed Host/Origin additions, body limit.
 - `CODALITH_EMBEDDING_*`: endpoint and key required by OpenAI-compatible corpora.
 - `LANCE_INCLUDE_VECTOR_CENTROIDS=false`: avoids loading large IVF centroid statistics.
-- `CODALITH_UE_*_HOST_DIR`: host bind mounts for UE source, structural indexes, and CodeRAG store.
+- `CODALITH_UE_*_HOST_DIR`: host bind mounts for UE source, structural indexes, and the semantic store.
 - `CODALITH_UE_EMBEDDING_*`: provenance expected by the adopted UE store.
 
 Compose sets the in-container registry, source policy, and listen host itself. `CODALITH_REGISTRY` and `CODALITH_SOURCE_POLICY` select the TOML files for direct local commands, and `CODALITH_DASHBOARD_DIR` points the HTTP server at prebuilt dashboard assets.

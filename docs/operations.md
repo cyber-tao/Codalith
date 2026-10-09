@@ -3,7 +3,6 @@
 ## Local sample
 
 ```bash
-git submodule update --init --recursive
 uv sync --frozen --extra dev
 uv run codalith index build --corpus sample --semantic build
 uv run codalith doctor --target sample --deep
@@ -30,7 +29,7 @@ Set these local `.env` values:
 
 - `CODALITH_UE_SOURCE_HOST_DIR`: UE checkout root containing `Engine/`.
 - `CODALITH_UE_INDEX_HOST_DIR`: writable structural generation directory.
-- `CODALITH_UE_CODERAG_HOST_DIR`: existing CodeRAG store built over the same UE source.
+- `CODALITH_UE_CODERAG_HOST_DIR`: existing semantic store built over the same UE source.
 - embedding provider/model/base URL/key matching that store.
 
 Then adopt the existing semantic store and build the structural generation:
@@ -52,7 +51,7 @@ uv run codalith index status --target sample
 uv run codalith doctor --target sample --deep
 ```
 
-Deep doctor hashes local artifacts and every CodeRAG store byte, so it can be slow for a large UE store. A fingerprint mismatch, store provenance drift, revision/config/source-policy drift, adapter or CodeRAG version change, or missing artifact makes the generation invalid instead of silently falling back. Status reports `missing` when no generation was published and `invalid` when the active one must be rebuilt.
+Deep doctor hashes local artifacts and every semantic store byte, so it can be slow for a large UE store. A fingerprint mismatch, store provenance drift, revision/config/source-policy drift, adapter or semantic engine version change, or missing artifact makes the generation invalid instead of silently falling back. Status reports `missing` when no generation was published and `invalid` when the active one must be rebuilt.
 
 Old generation directories are retained for diagnosis and rollback-by-pointer repair. Codalith intentionally has no automatic retention job during development; remove old generations only while the service is stopped and after preserving the active generation.
 

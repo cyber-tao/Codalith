@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import functools
 import hashlib
-import importlib.metadata
 import json
 import os
 import re
@@ -373,12 +371,10 @@ def count_structure_rows(connection: sqlite3.Connection) -> dict[str, int]:
     return counts
 
 
-@functools.cache
 def installed_coderag_version() -> str:
-    try:
-        return importlib.metadata.version("coderag")
-    except importlib.metadata.PackageNotFoundError:
-        return "unavailable"
+    from codalith.semantic import ENGINE_VERSION
+
+    return ENGINE_VERSION
 
 
 def _file_stamp(path: Path) -> _FileStamp | None:

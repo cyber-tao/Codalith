@@ -1,0 +1,9 @@
+This package is derived from CodeRAG 1.0.0, commit
+ab0bb12de93506d4b979977b380b80e46128a21e, written by Neverdecel and licensed under
+the Apache License, Version 2.0. See the LICENSE file in this directory. The
+upstream repository https://github.com/Neverdecel/CodeRAG is no longer public.
+
+The indexing and hybrid-search engine was moved into codalith.semantic. The
+original CLI, HTTP API, web UI, MCP server, installer, filesystem watcher,
+evaluation harness, LLM answer surface, cross-encoder reranker, and call-graph
+expansion were not included.

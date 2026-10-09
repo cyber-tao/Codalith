@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-Codalith 是为 Claude Code、Codex 等 AI 编程工具提供源码查询能力的本地优先 MCP 服务。它把不可变的 SQLite 结构索引与 CodeRAG 检索结合起来，通过官方 MCP 协议返回有范围限制、可校验哈希的源码证据。
+Codalith 是为 Claude Code、Codex 等 AI 编程工具提供源码查询能力的本地优先 MCP 服务。它把不可变的 SQLite 结构索引与混合语义检索结合起来，通过官方 MCP 协议返回有范围限制、可校验哈希的源码证据。
 
 核心框架不绑定领域。当前 Python、C# 与 C++/Unreal Engine 提供结构化适配器；其他文本语料可使用通用适配器，但不会伪造符号能力。
 
@@ -22,14 +22,12 @@ Codalith 不是托管式多租户网关，因此不再包含鉴权、RBAC、审�
 
 - Python 3.11+
 - [uv](https://docs.astral.sh/uv/)
-- Git submodule
 - [Bun](https://bun.sh/)（可选，用于本地构建运维面板）
 - Docker Compose（可选）
 
 ## 快速开始
 
 ```bash
-git submodule update --init --recursive
 uv sync --frozen --extra dev
 uv run codalith index build --corpus sample --semantic build
 uv run codalith doctor --target sample --deep
@@ -69,11 +67,11 @@ docker compose up --build mcp-http
 configs/                 TOML corpus registry 与源码策略
 benchmarks/datasets/     sample、UE 回归集与独立 holdout
 dashboard/               React 运维面板（用 Bun 构建）
-external/CodeRAG/        固定提交的检索引擎 submodule
 fixtures/sample_corpus/  确定性本地冒烟语料
 src/codalith/corpus/     registry、policy、URI、generation、源码读取
 src/codalith/languages/  适配器目录（catalog）、协议与实现
-src/codalith/indexing/   SQLite 构建器、CodeRAG 集成、字面文本检索
+src/codalith/semantic/   混合检索引擎（分块、embedding、LanceDB）
+src/codalith/indexing/   SQLite 构建器、语义 generation 绑定、字面文本检索
 src/codalith/query/      与传输无关的查询服务
 src/codalith/mcp/        官方 SDK 绑定与传输层
 src/codalith/dashboard/  进程内遥测与运维面板 HTTP 路由

@@ -9,7 +9,6 @@
 - 修改后依次运行相关测试、`ruff`、`mypy`，涉及部署时再跑 Compose 和真实 MCP。
 - 验证通过后创建英文 Conventional Commit 的本地 checkpoint；不得自主 push、tag、release 或修改分支。
 - `.env`、`.local/`、`data/`、`reports/`、编辑器配置和用户 MCP 配置不得提交；只有用户明确要求本地语料验收时才读取必要的路径配置，绝不输出密钥值。
-- 不修改 `external/CodeRAG` 子模块内部源码；依赖行为通过 Codalith 的公开适配层约束。
 
 ## 当前架构
 
@@ -18,7 +17,7 @@ TOML registry + source policy
             |
             v
 language adapter -> immutable SQLite structure.sqlite
-            |                  + generation-bound CodeRAG store
+            |                  + generation-bound semantic store
             +----------------------------+
                                          v
                                   QueryService
@@ -28,9 +27,10 @@ language adapter -> immutable SQLite structure.sqlite
 
 模块边界：
 
-- `codalith.corpus`：配置、canonical URI、源策略、generation manifest、源码读取；不导入 tree-sitter 或 CodeRAG。
+- `codalith.corpus`：配置、canonical URI、源策略、generation manifest、源码读取；不导入 tree-sitter，也不导入语义引擎的 store 或 embedding 实现。
 - `codalith.languages`：无 I/O 的结构抽取协议；`catalog` 是 adapter id、version、`RetrievalProfile` 与扩展名映射的唯一来源；UE 特性只存在于 `cpp_ue` 适配器和 UE profile。
-- `codalith.indexing`：构建并原子发布 SQLite/CodeRAG generation，字面文本检索。
+- `codalith.semantic`：分块、embedding、LanceDB 与 dense+BM25 混合检索。generation 绑定仍在 indexing。
+- `codalith.indexing`：构建并原子发布 SQLite 与语义 generation，字面文本检索。
 - `codalith.query`：检索融合、context/read/symbol/graph/compare/status；每个请求对每个语料只解析一次 generation。
 - `codalith.mcp`：官方 MCP SDK 绑定；不放业务逻辑，`server`/`stdio` 不导入 `codalith.dashboard`。
 - `codalith.dashboard`：进程内遥测与面板 HTTP 路由，只由 HTTP 应用组装。

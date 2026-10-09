@@ -20,7 +20,6 @@ COPY --from=uv /uv /uvx /usr/local/bin/
 WORKDIR /opt/codalith
 
 COPY pyproject.toml uv.lock README.md ./
-COPY external/CodeRAG ./external/CodeRAG
 COPY src ./src
 COPY configs ./configs
 COPY fixtures ./fixtures
