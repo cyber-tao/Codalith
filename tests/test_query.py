@@ -13,7 +13,7 @@ from codalith.corpus.store_manifest import GenerationRepository
 from codalith.errors import RetrievalError, SourcePolicyError
 from codalith.indexing.coderag.backend import store_fingerprint
 from codalith.indexing.structure.builder import StructureBuilder
-from codalith.query.service import QueryService
+from codalith.query.service import QueryService, _semantic_pool
 from conftest import EnvironmentFactory, TestEnvironment, build_environment
 
 
@@ -558,6 +558,25 @@ def test_status_rejects_a_generation_with_a_missing_semantic_store(
         assert "Missing CodeRAG store" in (status.corpora[0].message or "")
     finally:
         service.close()
+
+
+def test_semantic_pool_scales_with_adopted_files_outside_the_generation(
+    semantic_environment: TestEnvironment,
+) -> None:
+    manifest = (
+        GenerationRepository(semantic_environment.policy)
+        .active(semantic_environment.corpus)
+        .manifest
+    )
+    assert _semantic_pool(10, manifest) == 40
+    assert (
+        _semantic_pool(10, replace(manifest, coderag_covered_files=100, coderag_extra_files=300))
+        == 160
+    )
+    assert (
+        _semantic_pool(50, replace(manifest, coderag_covered_files=1, coderag_extra_files=10_000))
+        == 1_000
+    )
 
 
 def test_semantic_queries_refuse_a_store_with_drifted_provenance(

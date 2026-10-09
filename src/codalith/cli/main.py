@@ -104,7 +104,6 @@ def _index(
         report = StructureBuilder(policy).build(
             corpus,
             semantic_mode=args.semantic,
-            allow_external_rebuild=args.allow_external_rebuild,
             progress=lambda message: print(message, file=sys.stderr, flush=True),
         )
         _print_json(report.to_dict())
@@ -281,7 +280,6 @@ def _parser() -> argparse.ArgumentParser:
     build = index_commands.add_parser("build")
     build.add_argument("--corpus", required=True)
     build.add_argument("--semantic", choices=("none", "build", "adopt"), default="none")
-    build.add_argument("--allow-external-rebuild", action="store_true")
     status = index_commands.add_parser("status")
     status.add_argument("--target")
 

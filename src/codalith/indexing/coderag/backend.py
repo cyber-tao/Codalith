@@ -11,7 +11,8 @@ import shutil
 import subprocess
 import tempfile
 import threading
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,7 @@ from codalith.corpus.store_manifest import ActiveGeneration
 from codalith.errors import CodalithError, IndexBuildError, IndexUnavailableError, RetrievalError
 
 _STORE_PROVENANCE_FILE = "meta.json"
+_CODERAG_BINARY_SNIFF_BYTES = 8192
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,17 +47,12 @@ class SemanticBuildInfo:
     dimension: int
     total_files: int
     total_chunks: int
+    covered_files: int
+    extra_files: int
     store_fingerprint: str
 
     def to_dict(self) -> dict[str, object]:
-        return {
-            "provider": self.provider,
-            "model": self.model,
-            "dimension": self.dimension,
-            "total_files": self.total_files,
-            "total_chunks": self.total_chunks,
-            "store_fingerprint": self.store_fingerprint,
-        }
+        return asdict(self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -369,58 +366,65 @@ def prepare_semantic_index(
     policy: SourcePolicy,
     *,
     mode: str,
-    indexed_paths: tuple[str, ...] = (),
-    allow_external_rebuild: bool = False,
+    indexed_files: Mapping[str, str],
 ) -> SemanticBuildInfo:
-    _validate_semantic_request(
-        corpus,
-        store_dir,
-        mode=mode,
-        allow_external_rebuild=allow_external_rebuild,
-    )
+    """Build a fresh store or adopt an external one for exactly one structural snapshot.
+
+    ``indexed_files`` maps every snapshot path to its SHA-256.
+    """
+
+    _validate_semantic_request(corpus, mode=mode, store_dir=store_dir)
+    if not indexed_files:
+        raise IndexBuildError("Cannot prepare a semantic index without indexed source files")
+    if mode == "build" and store_dir.exists():
+        raise IndexBuildError(f"Semantic build target already exists: {store_dir}")
     source_view: tempfile.TemporaryDirectory[str] | None = None
-    watched_root = corpus.source_root
-    if mode == "build":
-        if not indexed_paths:
-            raise IndexBuildError("Cannot build a semantic index without indexed source files")
-        source_view = tempfile.TemporaryDirectory(
-            prefix=".codalith-source-",
-            dir=corpus.index_root,
-        )
-        watched_root = Path(source_view.name)
-        try:
-            _materialize_source_view(corpus.source_root, watched_root, indexed_paths)
-        except Exception:
-            source_view.cleanup()
-            raise
-    config = coderag_config(corpus, store_dir, policy, watched_root=watched_root)
-    engine = (
-        CodeRAG(config)
-        if mode == "build"
-        else _open_verified_engine(config, error=IndexBuildError)
-    )
     try:
         if mode == "build":
-            engine.index(full=True)
-        status = engine.status()
-    except Exception as exc:
-        raise IndexBuildError(
-            f"Cannot {mode} CodeRAG store for {corpus.corpus_id}: {type(exc).__name__}: {exc}"
-        ) from exc
+            source_view = tempfile.TemporaryDirectory(
+                prefix=".codalith-source-",
+                dir=corpus.index_root,
+            )
+            view_root = Path(source_view.name)
+            _materialize_source_view(corpus.source_root, view_root, tuple(indexed_files))
+            engine = CodeRAG(coderag_config(corpus, store_dir, policy, source_view=view_root))
+        else:
+            engine = _open_verified_engine(
+                coderag_config(corpus, store_dir, policy),
+                error=IndexBuildError,
+            )
+        try:
+            if mode == "build":
+                engine.index(full=True)
+            status = engine.status()
+            stored = _stored_file_hashes(engine)
+        except Exception as exc:
+            raise IndexBuildError(
+                f"Cannot {mode} CodeRAG store for {corpus.corpus_id}: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
+        finally:
+            engine.close()
     finally:
-        engine.close()
         if source_view is not None:
             source_view.cleanup()
     total_files = _status_int(status, "total_files")
     total_chunks = _status_int(status, "total_chunks")
     if total_files <= 0 or total_chunks <= 0:
         raise IndexBuildError("CodeRAG store is empty")
+    if mode == "build":
+        covered_files = _verify_built_store(corpus.source_root, stored, indexed_files)
+        extra_files = 0
+    else:
+        covered_files, extra_files = _verify_adopted_store(stored, indexed_files)
     return SemanticBuildInfo(
         provider=str(status.get("provider", corpus.embedding_provider)),
         model=str(status.get("model", corpus.embedding_model)),
         dimension=_status_int(status, "embedding_dim"),
         total_files=total_files,
         total_chunks=total_chunks,
+        covered_files=covered_files,
+        extra_files=extra_files,
         store_fingerprint=store_fingerprint(store_dir),
     )
 
@@ -430,24 +434,14 @@ def preflight_semantic_index(
     policy: SourcePolicy,
     *,
     mode: str,
-    allow_external_rebuild: bool = False,
 ) -> None:
     """Fail fast before an expensive structural scan when semantic setup is invalid."""
 
-    store_dir = corpus.coderag_store
-    if mode == "adopt" and store_dir is None:
-        raise IndexBuildError("Semantic adopt mode requires corpus.coderag_store")
-    effective_store = store_dir or corpus.index_root / ".semantic-preflight"
-    _validate_semantic_request(
-        corpus,
-        effective_store,
-        mode=mode,
-        allow_external_rebuild=allow_external_rebuild,
-    )
-    if mode != "adopt":
+    _validate_semantic_request(corpus, mode=mode, store_dir=corpus.coderag_store)
+    if mode != "adopt" or corpus.coderag_store is None:
         return
     engine = _open_verified_engine(
-        coderag_config(corpus, effective_store, policy),
+        coderag_config(corpus, corpus.coderag_store, policy),
         error=IndexBuildError,
     )
     try:
@@ -466,10 +460,9 @@ def preflight_semantic_index(
 
 def _validate_semantic_request(
     corpus: Corpus,
-    store_dir: Path,
     *,
     mode: str,
-    allow_external_rebuild: bool,
+    store_dir: Path | None,
 ) -> None:
     if mode not in {"build", "adopt"}:
         raise ValueError("Semantic mode must be build or adopt")
@@ -480,17 +473,71 @@ def _validate_semantic_request(
             raise IndexBuildError(
                 "OpenAI embeddings require the coderag[openai] package extra"
             ) from exc
-    if mode == "adopt" and not store_dir.is_dir():
-        raise IndexBuildError(f"CodeRAG store does not exist: {store_dir}")
-    if (
-        mode == "build"
-        and store_dir.exists()
-        and corpus.coderag_store is not None
-        and not allow_external_rebuild
-    ):
+    if mode == "adopt":
+        if store_dir is None:
+            raise IndexBuildError("Semantic adopt mode requires corpus.coderag_store")
+        if not store_dir.is_dir():
+            raise IndexBuildError(f"CodeRAG store does not exist: {store_dir}")
+
+
+def _stored_file_hashes(engine: CodeRAG) -> dict[str, str]:
+    metas = engine.store.all_file_metas()
+    return {
+        str(path).replace("\\", "/"): str(meta.get("content_hash") or "")
+        for path, meta in metas.items()
+    }
+
+
+def _verify_built_store(
+    source_root: Path,
+    stored: Mapping[str, str],
+    indexed_files: Mapping[str, str],
+) -> int:
+    outside = sorted(set(stored) - set(indexed_files))
+    if outside:
         raise IndexBuildError(
-            "Refusing to rebuild an external CodeRAG store without explicit permission"
+            f"CodeRAG indexed {len(outside)} file(s) outside the structural snapshot: "
+            f"{', '.join(outside[:5])}"
         )
+    changed = sorted(path for path, digest in stored.items() if indexed_files[path] != digest)
+    if changed:
+        raise IndexBuildError(
+            f"Source changed while building the semantic index: {', '.join(changed[:5])}"
+        )
+    skipped = sorted(
+        path
+        for path in set(indexed_files) - set(stored)
+        if _has_indexable_text(source_root / path)
+    )
+    if skipped:
+        raise IndexBuildError(
+            f"CodeRAG skipped {len(skipped)} indexable source file(s): {', '.join(skipped[:5])}"
+        )
+    return len(stored)
+
+
+def _verify_adopted_store(
+    stored: Mapping[str, str],
+    indexed_files: Mapping[str, str],
+) -> tuple[int, int]:
+    common = stored.keys() & indexed_files.keys()
+    if not common:
+        raise IndexBuildError("Adopted CodeRAG store covers no file in the structural snapshot")
+    drifted = sorted(path for path in common if stored[path] != indexed_files[path])
+    if drifted:
+        raise IndexBuildError(
+            f"Adopted CodeRAG store content differs from the structural snapshot for "
+            f"{len(drifted)} file(s): {', '.join(drifted[:5])}"
+        )
+    return len(common), len(stored) - len(common)
+
+
+def _has_indexable_text(path: Path) -> bool:
+    try:
+        data = path.read_bytes()
+    except OSError as exc:
+        raise IndexBuildError(f"Indexed source file disappeared: {path}") from exc
+    return bool(data.strip()) and b"\x00" not in data[:_CODERAG_BINARY_SNIFF_BYTES]
 
 
 def coderag_config(
@@ -500,8 +547,10 @@ def coderag_config(
     *,
     provider: str | None = None,
     model: str | None = None,
-    watched_root: Path | None = None,
+    source_view: Path | None = None,
 ) -> Config:
+    """``source_view`` is a materialized snapshot that CodeRAG must index without filtering."""
+
     defaults = Config()
     provider = provider or corpus.embedding_provider
     model = corpus.embedding_model if model is None else model
@@ -512,12 +561,16 @@ def coderag_config(
         openai_api_key=os.getenv("CODALITH_EMBEDDING_API_KEY"),
         openai_base_url=os.getenv("CODALITH_EMBEDDING_BASE_URL"),
         cache_dir=defaults.cache_dir,
-        watched_dir=watched_root or corpus.source_root,
+        watched_dir=source_view or corpus.source_root,
         store_dir=store_dir,
         languages=_coderag_languages(corpus, defaults.languages),
-        ignore_globs=tuple(dict.fromkeys([*defaults.ignore_globs, *corpus.exclude_globs])),
-        use_gitignore=True,
-        index_all_text=False,
+        ignore_globs=(
+            ()
+            if source_view is not None
+            else tuple(dict.fromkeys([*defaults.ignore_globs, *corpus.exclude_globs]))
+        ),
+        use_gitignore=source_view is None,
+        index_all_text=source_view is not None,
         max_file_bytes=policy.max_file_bytes,
         max_chunk_lines=defaults.max_chunk_lines,
         window_lines=defaults.window_lines,

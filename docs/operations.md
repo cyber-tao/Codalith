@@ -41,7 +41,7 @@ docker compose --profile ue up -d mcp-http-ue
 uv run codalith client-config --client codex --transport http
 ```
 
-`adopt` never re-embeds. To intentionally replace an external store, run the local/container index command with `--semantic build --allow-external-rebuild`; this is expensive and may call a paid embedding endpoint.
+`adopt` never re-embeds and never writes the external store. It refuses a store whose recorded embedding model or dimension differs from the configured provider, rejects files whose content hash differs from the structural snapshot, records coverage, and pins the store's absolute path in the generation manifest. `--semantic build` always embeds into the new generation's own `coderag/` directory; it is expensive and may call a paid embedding endpoint.
 
 ## Diagnostics
 

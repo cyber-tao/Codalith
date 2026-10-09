@@ -161,8 +161,97 @@ def test_adopt_refuses_a_store_built_with_another_embedding_model(
     with pytest.raises(IndexBuildError, match="refusing to open"):
         preflight_semantic_index(adopted, environment.policy, mode="adopt")
     with pytest.raises(IndexBuildError, match="refusing to open"):
-        prepare_semantic_index(adopted, store, environment.policy, mode="adopt")
+        prepare_semantic_index(
+            adopted,
+            store,
+            environment.policy,
+            mode="adopt",
+            indexed_files={"src/core/cache.py": "0" * 64},
+        )
     assert store_fingerprint(store) == before
+
+
+def test_adopt_pins_the_external_store_and_records_coverage(
+    environment_factory: EnvironmentFactory,
+    tmp_path: Path,
+) -> None:
+    environment = environment_factory(
+        semantic=True,
+        files={
+            "src/alpha.py": "def alpha():\n    return 1\n",
+            "src/beta.py": "def beta():\n    return 2\n",
+        },
+    )
+    repository = GenerationRepository(environment.policy)
+    external = tmp_path / "external-store"
+    shutil.copytree(repository.active(environment.corpus).coderag_path, external)
+    (environment.source_root / "src/beta.py").unlink()
+    adopter = replace(environment.corpus, coderag_store=external)
+    StructureBuilder(environment.policy).build(adopter, semantic_mode="adopt")
+    generation = repository.active(adopter)
+    assert generation.coderag_path == external.resolve()
+    assert generation.manifest.coderag_covered_files == 1
+    assert generation.manifest.coderag_extra_files == 1
+    moved = replace(adopter, coderag_store=tmp_path / "another-store")
+    assert repository.active(moved).coderag_path == external.resolve()
+
+
+def test_adopt_rejects_a_store_whose_content_drifted(
+    environment_factory: EnvironmentFactory,
+    tmp_path: Path,
+) -> None:
+    environment = environment_factory(semantic=True)
+    repository = GenerationRepository(environment.policy)
+    original = repository.active(environment.corpus)
+    external = tmp_path / "external-store"
+    shutil.copytree(original.coderag_path, external)
+    cache = environment.source_root / "src/core/cache.py"
+    cache.write_text(cache.read_text(encoding="utf-8") + "# drift\n", encoding="utf-8")
+    with pytest.raises(IndexBuildError, match="differs from the structural snapshot"):
+        StructureBuilder(environment.policy).build(
+            replace(environment.corpus, coderag_store=external),
+            semantic_mode="adopt",
+        )
+    assert (
+        repository.active(environment.corpus).manifest.generation_id
+        == original.manifest.generation_id
+    )
+
+
+def test_build_mode_semantic_plane_covers_every_indexable_file(tmp_path: Path) -> None:
+    environment = build_environment(
+        tmp_path,
+        files={
+            "Source/Core/Public/Delegate.h": "class FDelegate {};\n",
+            "Source/Core/Public/DelegateImpl.inl": "inline void BindDelegate() {}\n",
+            "Source/Core/Public/Empty.h": "",
+        },
+        semantic=True,
+        adapter="cpp-ue",
+        include_extensions=(".h", ".inl"),
+    )
+    generation = GenerationRepository(environment.policy).active(environment.corpus)
+    assert generation.coderag_path == generation.root / "coderag"
+    assert generation.manifest.files == 3
+    assert generation.manifest.coderag_covered_files == 2
+    assert generation.manifest.coderag_extra_files == 0
+
+
+def test_build_mode_never_writes_the_configured_external_store(
+    environment_factory: EnvironmentFactory,
+    tmp_path: Path,
+) -> None:
+    environment = environment_factory(semantic=False)
+    external = tmp_path / "external-store"
+    external.mkdir()
+    (external / "marker").write_text("keep", encoding="utf-8")
+    before = store_fingerprint(external)
+    corpus = replace(environment.corpus, coderag_store=external)
+    StructureBuilder(environment.policy).build(corpus, semantic_mode="build")
+    generation = GenerationRepository(environment.policy).active(corpus)
+    assert generation.coderag_path == generation.root / "coderag"
+    assert generation.manifest.semantic_available
+    assert store_fingerprint(external) == before
 
 
 def test_semantic_generation_is_invalid_after_a_coderag_upgrade(

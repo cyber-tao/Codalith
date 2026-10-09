@@ -17,6 +17,7 @@ from typing import Protocol
 from codalith.corpus.registry import Corpus
 from codalith.corpus.source_policy import SourcePolicy
 from codalith.corpus.store_manifest import (
+    GENERATION_STORE_DIR,
     MANIFEST_SCHEMA_VERSION,
     STRUCTURE_SCHEMA_VERSION,
     Artifact,
@@ -93,7 +94,6 @@ class StructureBuilder:
         corpus: Corpus,
         *,
         semantic_mode: str = "none",
-        allow_external_rebuild: bool = False,
         progress: Callable[[str], None] | None = None,
     ) -> BuildReport:
         if semantic_mode not in {"none", "build", "adopt"}:
@@ -102,12 +102,7 @@ class StructureBuilder:
             raise IndexBuildError(f"Corpus source root does not exist: {corpus.source_root}")
         if semantic_mode != "none":
             _report(progress, f"Preflighting semantic index in {semantic_mode} mode")
-            preflight_semantic_index(
-                corpus,
-                self.policy,
-                mode=semantic_mode,
-                allow_external_rebuild=allow_external_rebuild,
-            )
+            preflight_semantic_index(corpus, self.policy, mode=semantic_mode)
         seed = f"{corpus.corpus_id}\0{corpus.revision}\0{time.time_ns()}".encode()
         generation_id = new_generation_id(seed)
         generations_root = corpus.index_root / "generations"
@@ -140,16 +135,23 @@ class StructureBuilder:
                 size_bytes=database.stat().st_size,
             )]
             semantic_info = None
+            recorded_store: str | None = None
             if semantic_mode != "none":
                 _report(progress, f"Preparing semantic index in {semantic_mode} mode")
-                semantic_store = corpus.coderag_store or (staging / "coderag")
+                if semantic_mode == "build":
+                    semantic_store = staging / GENERATION_STORE_DIR
+                    recorded_store = GENERATION_STORE_DIR
+                elif corpus.coderag_store is not None:
+                    semantic_store = corpus.coderag_store.resolve()
+                    recorded_store = str(semantic_store)
+                else:
+                    raise IndexBuildError("Semantic adopt mode requires corpus.coderag_store")
                 semantic_info = prepare_semantic_index(
                     corpus,
                     semantic_store,
                     self.policy,
                     mode=semantic_mode,
-                    indexed_paths=_indexed_paths(database),
-                    allow_external_rebuild=allow_external_rebuild,
+                    indexed_files=_indexed_files(database),
                 )
                 _report(progress, "Semantic provenance verified")
                 semantic_metadata = staging / "coderag-meta.json"
@@ -181,6 +183,9 @@ class StructureBuilder:
                 coderag_store_fingerprint=(
                     semantic_info.store_fingerprint if semantic_info else None
                 ),
+                coderag_store=recorded_store,
+                coderag_covered_files=semantic_info.covered_files if semantic_info else None,
+                coderag_extra_files=semantic_info.extra_files if semantic_info else None,
                 source_selection_hash=source_selection_hash(corpus, self.policy),
                 adapter=corpus.adapter,
                 adapter_version=create_adapter(corpus.adapter).version,
@@ -438,13 +443,15 @@ def _table_count(connection: sqlite3.Connection, table: str) -> int:
     return int(row[0]) if row is not None else 0
 
 
-def _indexed_paths(database: Path) -> tuple[str, ...]:
+def _indexed_files(database: Path) -> dict[str, str]:
     connection = sqlite3.connect(f"file:{database.as_posix()}?mode=ro", uri=True)
     try:
-        return tuple(
-            str(row[0])
-            for row in connection.execute("SELECT path FROM files ORDER BY path")
-        )
+        return {
+            str(path): str(digest)
+            for path, digest in connection.execute(
+                "SELECT path, sha256 FROM files ORDER BY path"
+            )
+        }
     finally:
         connection.close()
 

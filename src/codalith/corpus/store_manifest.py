@@ -18,8 +18,9 @@ from codalith.corpus.registry import Corpus
 from codalith.corpus.source_policy import SourcePolicy
 from codalith.errors import IndexBuildError, IndexUnavailableError
 
-MANIFEST_SCHEMA_VERSION = 2
+MANIFEST_SCHEMA_VERSION = 3
 STRUCTURE_SCHEMA_VERSION = 1
+GENERATION_STORE_DIR = "coderag"
 _GENERATION_ID = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}$")
 
 
@@ -43,6 +44,9 @@ class IndexManifest:
     embedding_model: str
     embedding_dimension: int | None
     coderag_store_fingerprint: str | None
+    coderag_store: str | None
+    coderag_covered_files: int | None
+    coderag_extra_files: int | None
     source_selection_hash: str
     adapter: str
     adapter_version: int
@@ -116,7 +120,32 @@ class IndexManifest:
                 r"[0-9a-f]{64}", self.coderag_store_fingerprint
             ):
                 raise IndexUnavailableError("Semantic index has no valid store fingerprint")
-        elif self.embedding_dimension is not None or self.coderag_store_fingerprint is not None:
+            if not self.coderag_store or (
+                self.coderag_store != GENERATION_STORE_DIR
+                and not Path(self.coderag_store).is_absolute()
+            ):
+                raise IndexUnavailableError("Semantic index has no valid store location")
+            covered = self.coderag_covered_files
+            extra = self.coderag_extra_files
+            if (
+                not isinstance(covered, int)
+                or isinstance(covered, bool)
+                or not 1 <= covered <= self.files
+                or not isinstance(extra, int)
+                or isinstance(extra, bool)
+                or extra < 0
+            ):
+                raise IndexUnavailableError("Semantic index has invalid coverage counts")
+        elif any(
+            value is not None
+            for value in (
+                self.embedding_dimension,
+                self.coderag_store_fingerprint,
+                self.coderag_store,
+                self.coderag_covered_files,
+                self.coderag_extra_files,
+            )
+        ):
             raise IndexUnavailableError("Non-semantic generation contains semantic provenance")
         if not self.artifacts:
             raise IndexUnavailableError("Index manifest has no artifacts")
@@ -225,7 +254,11 @@ class GenerationRepository:
             root=root,
             manifest_path=manifest_path,
             structure_path=root / "structure.sqlite",
-            coderag_path=corpus.coderag_store or (root / "coderag"),
+            coderag_path=(
+                Path(manifest.coderag_store)
+                if manifest.coderag_store and manifest.coderag_store != GENERATION_STORE_DIR
+                else root / GENERATION_STORE_DIR
+            ),
             manifest=manifest,
         )
         if not generation.structure_path.is_file():

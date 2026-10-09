@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import threading
 from collections import deque
@@ -13,7 +14,11 @@ from typing import Literal, cast
 from codalith.corpus.registry import Corpus, CorpusRegistry
 from codalith.corpus.source_policy import SourcePolicy
 from codalith.corpus.source_reader import FileCatalog, SourceReader
-from codalith.corpus.store_manifest import ActiveGeneration, GenerationRepository
+from codalith.corpus.store_manifest import (
+    ActiveGeneration,
+    GenerationRepository,
+    IndexManifest,
+)
 from codalith.corpus.uris import parse_uri, source_uri, symbol_uri
 from codalith.errors import (
     IndexUnavailableError,
@@ -73,7 +78,7 @@ _COMMON_WORDS = frozenset(
         "with",
     }
 )
-_EXTERNAL_SEMANTIC_POOL = 1_000
+_MAX_SEMANTIC_POOL = 1_000
 _EXACT_SYMBOL_WEIGHT = 1.2
 _PATH_TERM_WEIGHT = 1.1
 _UE_INTENT_FILE_WEIGHT = 2.5
@@ -363,11 +368,7 @@ class QueryService:
                         corpus,
                         generation,
                         normalized_query,
-                        limit=(
-                            _EXTERNAL_SEMANTIC_POOL
-                            if corpus.coderag_store is not None
-                            else max(limit * 4, 20)
-                        ),
+                        limit=_semantic_pool(limit, generation.manifest),
                     )
                 except RetrievalError as exc:
                     if strategy == "semantic":
@@ -873,6 +874,17 @@ class QueryService:
                 index = StructureIndex(generation.structure_path)
                 self._indices[key] = index
             return index
+
+
+def _semantic_pool(limit: int, manifest: IndexManifest) -> int:
+    """Over-fetch in proportion to adopted-store files that fall outside the snapshot."""
+
+    base = max(limit * 4, 20)
+    covered = manifest.coderag_covered_files or 0
+    extra = manifest.coderag_extra_files or 0
+    if not covered or not extra:
+        return base
+    return min(_MAX_SEMANTIC_POOL, math.ceil(base * (covered + extra) / covered))
 
 
 def _validated_query(query: str) -> str:
