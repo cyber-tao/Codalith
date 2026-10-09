@@ -9,7 +9,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import cast
 
-from codalith.errors import IndexUnavailableError
+from codalith.errors import IndexInvalidError
 from codalith.indexing.structure.models import (
     FileRecord,
     ModuleDependencyRecord,
@@ -21,7 +21,7 @@ from codalith.indexing.structure.models import (
 class StructureIndex:
     def __init__(self, path: Path) -> None:
         if not path.is_file():
-            raise IndexUnavailableError(f"Structure index does not exist: {path}")
+            raise IndexInvalidError(f"Structure index does not exist: {path}")
         uri = path.resolve().as_uri() + "?mode=ro"
         self._connection = sqlite3.connect(uri, uri=True, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row

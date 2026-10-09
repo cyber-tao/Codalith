@@ -21,10 +21,12 @@ from codalith.corpus.store_manifest import (
 )
 from codalith.corpus.uris import parse_uri, source_uri, symbol_uri
 from codalith.errors import (
+    IndexMissingError,
     IndexUnavailableError,
     RetrievalError,
     SourcePolicyError,
     SourceReadError,
+    SymbolNotFoundError,
     URIResolutionError,
 )
 from codalith.indexing.coderag import CodeRAGBackend
@@ -731,8 +733,9 @@ class QueryService:
         index = snapshot.index
         root = index.get_symbol(root_id)
         if root is None:
-            raise IndexUnavailableError(
-                f"Unknown symbol in active generation: {symbol_uri(corpus.corpus_id, root_id)}"
+            raise SymbolNotFoundError(
+                f"Unknown symbol in generation {generation_id}: "
+                f"{symbol_uri(corpus.corpus_id, root_id)}"
             )
         if self.policy.is_denied(root.path):
             raise SourcePolicyError(f"Source policy denies path: {root.path}")
@@ -875,7 +878,9 @@ class QueryService:
             snapshot = request.snapshot(corpus)
             symbol = snapshot.index.get_symbol(parsed.value)
         if symbol is None:
-            raise IndexUnavailableError(f"Unknown symbol in active generation: {uri}")
+            raise SymbolNotFoundError(
+                f"Unknown symbol in generation {snapshot.generation_id}: {uri}"
+            )
         if self.policy.is_denied(symbol.path):
             raise SourcePolicyError(f"Source policy denies path: {symbol.path}")
         return _definition(corpus, snapshot.generation, symbol)
@@ -933,7 +938,7 @@ class QueryService:
             except IndexUnavailableError as exc:
                 message = str(exc)
                 state: Literal["missing", "invalid"] = (
-                    "missing" if "No active index generation" in message else "invalid"
+                    "missing" if isinstance(exc, IndexMissingError) else "invalid"
                 )
                 rows.append(
                     CorpusStatus(

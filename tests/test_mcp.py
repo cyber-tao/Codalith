@@ -6,6 +6,7 @@ import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 
 import anyio
 import httpx
@@ -14,8 +15,48 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamable_http_client
 
+from codalith import errors
 from codalith.mcp.http import HTTPConfig, MCPHTTPServer
+from codalith.mcp.server import _error_payload
 from conftest import TestEnvironment
+
+DOCS = Path(__file__).parents[1] / "docs"
+
+
+@pytest.mark.parametrize(
+    ("error", "code", "retryable"),
+    [
+        (errors.URIResolutionError("bad uri"), "invalid_uri", False),
+        (errors.IndexMissingError("none"), "index_missing", False),
+        (errors.IndexInvalidError("drift"), "index_invalid", False),
+        (errors.SymbolNotFoundError("stale"), "symbol_not_found", False),
+        (errors.RetrievalError("timeout"), "retrieval_failed", True),
+        (ValueError("limit must be between 1 and 50"), "invalid_arguments", False),
+        (RuntimeError("D:/private/path exploded"), "internal", True),
+    ],
+)
+def test_tool_errors_follow_the_documented_contract(
+    error: Exception,
+    code: str,
+    retryable: bool,
+) -> None:
+    payload = _error_payload(error)["error"]
+    assert (payload["code"], payload["retryable"]) == (code, retryable)
+    if code == "internal":
+        assert payload["message"] == "Internal tool error"
+
+
+def test_every_error_code_is_documented() -> None:
+    def subclasses(cls: type[errors.CodalithError]) -> set[type[errors.CodalithError]]:
+        found = set(cls.__subclasses__())
+        for child in list(found):
+            found |= subclasses(child)
+        return found
+
+    codes = {cls.code for cls in subclasses(errors.CodalithError)}
+    codes |= {errors.INVALID_ARGUMENTS_CODE, errors.INTERNAL_ERROR_CODE}
+    documented = (DOCS / "mcp-api.md").read_text(encoding="utf-8")
+    assert {code for code in codes if f"`{code}`" not in documented} == set()
 
 
 @pytest.mark.parametrize("endpoint", ["/", "//mcp", "/../mcp", "/mcp?debug=1"])

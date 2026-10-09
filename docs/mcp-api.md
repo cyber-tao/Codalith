@@ -44,12 +44,12 @@ Listed resources expose corpus status. Templates expose indexed source and symbo
 
 ## Errors
 
-Expected configuration, validation, index, policy, URI, source, and retrieval failures return MCP tool errors with:
+Tool failures return an MCP error result whose structured content is:
 
 ```json
 {
   "error": {
-    "code": "snake_case_type",
+    "code": "index_missing",
     "message": "human-readable detail",
     "retryable": false,
     "details": {}
@@ -57,4 +57,20 @@ Expected configuration, validation, index, policy, URI, source, and retrieval fa
 }
 ```
 
-Unexpected failures are logged without request bodies and return `internal` with `retryable: true`.
+Codes are a stable contract declared in `codalith.errors`, not derived from exception class names. Resource reads return the same payload as their JSON content.
+
+| Code | Meaning | Retryable |
+| --- | --- | --- |
+| `invalid_arguments` | Input failed schema or range validation | no |
+| `invalid_uri` | Malformed or non-canonical `codalith://` URI | no |
+| `corpus_not_found` | Unknown corpus or workspace | no |
+| `symbol_not_found` | Symbol id is not part of the active generation | no |
+| `source_policy` | Path or line range violates the source policy | no |
+| `source_unreadable` | Indexed file is missing or unreadable now | no |
+| `index_missing` | The corpus has no published generation | no |
+| `index_invalid` | The active generation no longer matches its artifacts or configuration | no |
+| `index_unavailable` | No corpus in the target can serve the request | no |
+| `retrieval_failed` | Semantic or text retrieval failed, for example an embedding endpoint error | yes |
+| `configuration_invalid` | Registry or source policy is invalid | no |
+| `index_build_failed` | Building or publishing a generation failed (CLI) | no |
+| `internal` | Unexpected failure; logged without request bodies, message withheld | yes |

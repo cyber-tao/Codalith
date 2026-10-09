@@ -623,6 +623,19 @@ def test_status_is_side_effect_free_and_reports_semantic_readiness(
         service.close()
 
 
+def test_status_distinguishes_missing_from_invalid_generations(tmp_path: Path) -> None:
+    environment = build_environment(tmp_path, semantic=False)
+    pointer = environment.index_root / "current.json"
+    pointer.unlink()
+    service = environment.service()
+    try:
+        assert service.status(target="sample").corpora[0].state == "missing"
+        pointer.write_text("{", encoding="utf-8")
+        assert service.status(target="sample").corpora[0].state == "invalid"
+    finally:
+        service.close()
+
+
 def test_status_rejects_a_generation_with_a_missing_semantic_store(
     environment_factory: EnvironmentFactory,
 ) -> None:

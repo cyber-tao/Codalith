@@ -12,11 +12,11 @@ import anyio
 import mcp.types as mcp_types
 from mcp.server import Server
 from mcp.server.lowlevel.helper_types import ReadResourceContents
-from pydantic import AnyUrl, ValidationError
+from pydantic import AnyUrl
 
 from codalith import __version__
 from codalith.corpus.uris import parse_uri, status_uri
-from codalith.errors import CodalithError
+from codalith.errors import INTERNAL_ERROR_CODE, CodalithError, describe_error
 from codalith.mcp.schemas import (
     TOOL_BY_NAME,
     TOOLS,
@@ -99,13 +99,11 @@ def create_sdk_server(
 
         try:
             result = await anyio.to_thread.run_sync(_invoke, service, name, arguments)
-        except (CodalithError, ValidationError, TypeError, ValueError) as exc:
-            record(None, exc)
-            return _tool_error(exc, retryable=False)
         except Exception as exc:
-            _LOG.exception("Unhandled Codalith tool failure: %s", name)
+            if describe_error(exc)[0] == INTERNAL_ERROR_CODE:
+                _LOG.exception("Unhandled Codalith tool failure: %s", name)
             record(None, exc)
-            return _tool_error(RuntimeError("Internal tool error"), retryable=True)
+            return _tool_error(exc)
         record(result, None)
         return result
 
@@ -143,7 +141,7 @@ def create_sdk_server(
         try:
             payload = await anyio.to_thread.run_sync(_read_resource, service, str(uri))
         except (CodalithError, TypeError, ValueError) as exc:
-            payload = _error_payload(exc, retryable=False)
+            payload = _error_payload(exc)
         return [
             ReadResourceContents(
                 content=json.dumps(payload, ensure_ascii=False, indent=2),
@@ -214,8 +212,8 @@ def _read_resource(service: QueryService, uri: str) -> dict[str, Any]:
     raise ValueError(f"Unsupported resource URI: {uri}")
 
 
-def _tool_error(exc: Exception, *, retryable: bool) -> mcp_types.CallToolResult:
-    payload = _error_payload(exc, retryable=retryable)
+def _tool_error(exc: Exception) -> mcp_types.CallToolResult:
+    payload = _error_payload(exc)
     return mcp_types.CallToolResult(
         content=[
             mcp_types.TextContent(
@@ -228,26 +226,13 @@ def _tool_error(exc: Exception, *, retryable: bool) -> mcp_types.CallToolResult:
     )
 
 
-def _error_payload(exc: Exception, *, retryable: bool) -> dict[str, Any]:
+def _error_payload(exc: Exception) -> dict[str, Any]:
+    code, retryable = describe_error(exc)
     return {
         "error": {
-            "code": _error_code(exc),
-            "message": str(exc),
+            "code": code,
+            "message": "Internal tool error" if code == INTERNAL_ERROR_CODE else str(exc),
             "retryable": retryable,
             "details": {},
         }
     }
-
-
-def _error_code(exc: Exception) -> str:
-    name = type(exc).__name__
-    return re_snake_case(name.removesuffix("Error")) or "internal"
-
-
-def re_snake_case(value: str) -> str:
-    output: list[str] = []
-    for index, character in enumerate(value):
-        if character.isupper() and index and output[-1] != "_":
-            output.append("_")
-        output.append(character.lower())
-    return "".join(output)

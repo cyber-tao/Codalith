@@ -14,6 +14,7 @@ from typing import Any, Literal
 from uuid import uuid4
 
 from codalith import __version__
+from codalith.errors import describe_error
 from codalith.query.models import StatusResponse
 
 WindowKey = Literal["15m", "1h", "6h", "24h", "7d"]
@@ -124,7 +125,7 @@ class TelemetryStore:
     ) -> None:
         status: Literal["success", "error"] = "error" if error is not None else "success"
         degraded = bool(result and result.get("degraded"))
-        error_code = _error_code(error) if error is not None else None
+        error_code = describe_error(error)[0] if error is not None else None
         error_message = _safe_error_message(error) if error is not None else None
         event = QueryEvent(
             event_id=str(uuid4()),
@@ -502,16 +503,6 @@ def _percent_change(current: float, previous: float) -> float | None:
     if previous == 0:
         return None
     return round((current - previous) / previous * 100, 2)
-
-
-def _error_code(error: Exception) -> str:
-    name = type(error).__name__.removesuffix("Error")
-    output: list[str] = []
-    for index, character in enumerate(name):
-        if character.isupper() and index:
-            output.append("_")
-        output.append(character.lower())
-    return "".join(output) or "internal"
 
 
 def _safe_error_message(error: Exception) -> str:

@@ -19,7 +19,13 @@ from coderag import CodeRAG, Config
 from codalith.corpus.registry import Corpus
 from codalith.corpus.source_policy import SourcePolicy
 from codalith.corpus.store_manifest import ActiveGeneration
-from codalith.errors import CodalithError, IndexBuildError, IndexUnavailableError, RetrievalError
+from codalith.errors import (
+    CodalithError,
+    IndexBuildError,
+    IndexInvalidError,
+    IndexUnavailableError,
+    RetrievalError,
+)
 from codalith.indexing.leases import GenerationLeases
 
 _STORE_PROVENANCE_FILE = "meta.json"
@@ -147,7 +153,7 @@ def read_store_provenance(store_dir: Path) -> StoreProvenance:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise IndexUnavailableError(
+        raise IndexInvalidError(
             f"CodeRAG store has no readable provenance {path}: {exc}"
         ) from exc
     model = raw.get("embed_model") if isinstance(raw, dict) else None
@@ -159,7 +165,7 @@ def read_store_provenance(store_dir: Path) -> StoreProvenance:
         or isinstance(dimension, bool)
         or dimension <= 0
     ):
-        raise IndexUnavailableError(f"CodeRAG store provenance is invalid: {path}")
+        raise IndexInvalidError(f"CodeRAG store provenance is invalid: {path}")
     return StoreProvenance(model, dimension)
 
 
@@ -168,13 +174,13 @@ def generation_store_provenance(generation: ActiveGeneration) -> StoreProvenance
 
     manifest = generation.manifest
     if manifest.embedding_dimension is None:
-        raise IndexUnavailableError(
+        raise IndexInvalidError(
             f"Generation {manifest.generation_id} has no semantic embedding dimension"
         )
     expected = StoreProvenance(manifest.embedding_model, manifest.embedding_dimension)
     recorded = read_store_provenance(generation.coderag_path)
     if recorded != expected:
-        raise IndexUnavailableError(
+        raise IndexInvalidError(
             f"CodeRAG store {generation.coderag_path} records {recorded.describe()} but "
             f"generation {manifest.generation_id} expects {expected.describe()}"
         )
