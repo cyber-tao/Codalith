@@ -67,3 +67,5 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - run: docker compose config --quiet
+      - run: docker compose --profile ue config --quiet
+      - run: docker compose --profile test config --quiet
