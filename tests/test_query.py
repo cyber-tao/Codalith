@@ -211,6 +211,53 @@ def test_search_hits_always_fit_the_source_read_policy(tmp_path: Path) -> None:
         service.close()
 
 
+def test_context_marks_clamped_and_budget_trimmed_sources_as_truncated(
+    tmp_path: Path,
+) -> None:
+    environment = build_environment(
+        tmp_path,
+        files={
+            "src/big.py": "class BigType:\n" + "    value = 1\n" * 400,
+            "src/small.py": "def small_value():\n    return 1\n",
+        },
+        semantic=False,
+    )
+    service = environment.service()
+    try:
+        clamped = service.context("BigType", target="sample", max_chars=100_000)
+        big = next(source for source in clamped.sources if source.symbol == "BigType")
+        assert big.end_line - big.start_line + 1 == environment.policy.hard_max_lines
+        assert big.truncated
+        trimmed = service.context("BigType", target="sample", max_chars=1_000)
+        assert trimmed.sources[0].truncated
+        assert len(trimmed.sources[0].text) <= 1_000
+        assert service.read(trimmed.sources[0].uri).text == trimmed.sources[0].text
+        complete = service.context("small_value", target="sample")
+        small = next(source for source in complete.sources if source.symbol == "small_value")
+        assert not small.truncated
+    finally:
+        service.close()
+
+
+def test_context_keeps_filling_the_budget_after_a_span_that_cannot_fit(
+    tmp_path: Path,
+) -> None:
+    environment = build_environment(
+        tmp_path,
+        files={
+            "src/a_wide.py": "class WideType:  # " + "x" * 1_500 + "\n    pass\n",
+            "src/b_narrow.py": "class NarrowType:\n    pass\n",
+        },
+        semantic=False,
+    )
+    service = environment.service()
+    try:
+        result = service.context("WideType NarrowType", target="sample", max_chars=1_000)
+        assert [source.path for source in result.sources] == ["src/b_narrow.py"]
+    finally:
+        service.close()
+
+
 def test_symbol_lookup_prefers_type_definitions_over_same_named_fields(
     tmp_path: Path,
 ) -> None:

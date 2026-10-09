@@ -197,6 +197,7 @@ class _Candidate:
     symbol_id: str | None
     kind: str
     snippet: str
+    span_end: int
     score: float = 0.0
     backends: list[str] = field(default_factory=list)
 
@@ -209,6 +210,15 @@ class _Candidate:
             self.end_line,
             self.symbol,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class _SearchResult:
+    query: str
+    target: str
+    degraded: bool
+    warnings: list[str]
+    hits: list[tuple[_Candidate, SearchHit]]
 
 
 class QueryService:
@@ -241,6 +251,24 @@ class QueryService:
         strategy: SearchStrategy = "auto",
         limit: int = 10,
     ) -> SearchResponse:
+        result = self._search(query, target=target, strategy=strategy, limit=limit)
+        return SearchResponse(
+            query=result.query,
+            target=result.target,
+            strategy=strategy,
+            degraded=result.degraded,
+            warnings=_unique(result.warnings),
+            hits=[hit for _, hit in result.hits],
+        )
+
+    def _search(
+        self,
+        query: str,
+        *,
+        target: str | None,
+        strategy: SearchStrategy,
+        limit: int,
+    ) -> _SearchResult:
         normalized_query = _validated_query(query)
         if strategy not in _STRATEGIES:
             raise ValueError(f"Unknown search strategy: {strategy}")
@@ -370,6 +398,7 @@ class QueryService:
                             symbol_id=None,
                             kind=hit.kind,
                             snippet=_bounded_snippet(hit.snippet),
+                            span_end=max(end_line, hit.end_line),
                         )
                         _merge(candidates, candidate, "coderag", rank, 1.0)
                     if filtered_semantic_paths:
@@ -422,6 +451,7 @@ class QueryService:
                         symbol_id=None,
                         kind="text",
                         snippet=_bounded_snippet(text_hit.text),
+                        span_end=text_hit.line,
                     )
                     _merge(candidates, candidate, "text", rank, 1.2)
         if active_count == 0:
@@ -434,14 +464,12 @@ class QueryService:
         if withheld:
             warnings.append(_withheld_warning(withheld, "hit"))
         maximum = selected[0].score if selected else 1.0
-        hits = [_public_hit(item, item.score / maximum) for item in selected]
-        return SearchResponse(
+        return _SearchResult(
             query=normalized_query,
             target=resolution.target_id,
-            strategy=strategy,
             degraded=degraded,
-            warnings=_unique(warnings),
-            hits=hits,
+            warnings=warnings,
+            hits=[(item, _public_hit(item, item.score / maximum)) for item in selected],
         )
 
     def context(
@@ -456,7 +484,7 @@ class QueryService:
             raise ValueError("max_spans must be between 1 and 20")
         if not 1_000 <= max_chars <= 100_000:
             raise ValueError("max_chars must be between 1000 and 100000")
-        result = self.search(
+        result = self._search(
             query,
             target=target,
             strategy="auto",
@@ -467,7 +495,7 @@ class QueryService:
         selected_ranges: list[tuple[str, str, int, int]] = []
         remaining = max_chars
         degraded = result.degraded
-        for hit in result.hits:
+        for candidate, hit in result.hits:
             if len(sources) >= max_spans or remaining <= 0:
                 break
             if any(
@@ -478,7 +506,12 @@ class QueryService:
             ):
                 continue
             try:
-                source_slice = self.sources.read_uri(hit.uri)
+                source_slice = self.sources.read(
+                    candidate.corpus.corpus_id,
+                    candidate.path,
+                    start_line=candidate.start_line,
+                    end_line=candidate.end_line,
+                )
             except (SourceReadError, IndexUnavailableError) as exc:
                 warnings.append(str(exc))
                 degraded = True
@@ -490,13 +523,8 @@ class QueryService:
                     character_budget=remaining,
                 )
                 if fitted_end < source_slice.start_line:
-                    break
-                source_slice = self.sources.read(
-                    source_slice.corpus_id,
-                    source_slice.path,
-                    start_line=source_slice.start_line,
-                    end_line=fitted_end,
-                )
+                    continue
+                source_slice = source_slice.ending_at(fitted_end)
             remaining -= len(source_slice.text)
             if source_slice.stale:
                 degraded = True
@@ -512,7 +540,7 @@ class QueryService:
                     text=source_slice.text,
                     sha256=source_slice.sha256,
                     indexed_sha256=source_slice.indexed_sha256,
-                    truncated=source_slice.truncated,
+                    truncated=source_slice.end_line < candidate.span_end,
                     decode_replacements=source_slice.decode_replacements,
                 )
             )
@@ -1148,6 +1176,7 @@ def _from_symbol(
         symbol_id=symbol.symbol_id,
         kind=symbol.kind,
         snippet=symbol.signature,
+        span_end=max(end_line, symbol.end_line),
     )
 
 
@@ -1169,6 +1198,7 @@ def _from_file(
         symbol_id=None,
         kind="file",
         snippet=record.path,
+        span_end=record.line_count,
     )
 
 
@@ -1190,6 +1220,7 @@ def _merge(
         existing = incoming
         candidates[incoming.key] = existing
     existing.score += weight / (60 + rank)
+    existing.span_end = max(existing.span_end, incoming.span_end)
     if backend not in existing.backends:
         existing.backends.append(backend)
     if len(incoming.snippet) > len(existing.snippet):

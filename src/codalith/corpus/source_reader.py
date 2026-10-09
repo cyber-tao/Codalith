@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -42,6 +42,28 @@ class SourceSlice:
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
+
+    def ending_at(self, end_line: int) -> SourceSlice:
+        """Shorten the slice in memory; hashes still describe the whole file."""
+
+        if not self.start_line <= end_line <= self.end_line:
+            raise ValueError("end_line must fall inside the slice")
+        if end_line == self.end_line:
+            return self
+        text = "\n".join(self.text.split("\n")[: end_line - self.start_line + 1])
+        return replace(
+            self,
+            uri=source_uri(
+                self.corpus_id,
+                self.path,
+                start_line=self.start_line,
+                end_line=end_line,
+            ),
+            end_line=end_line,
+            text=text,
+            truncated=True,
+            decode_replacements=text.count("\ufffd"),
+        )
 
 
 class SourceReader:
