@@ -40,6 +40,7 @@ from codalith.indexing.structure.models import (
 )
 from codalith.indexing.structure.store import StructureIndex
 from codalith.indexing.text_search import search_text
+from codalith.languages.catalog import RetrievalProfile, retrieval_profile
 from codalith.query.models import (
     CompareChange,
     CompareResponse,
@@ -86,7 +87,6 @@ _COMMON_WORDS = frozenset(
 _MAX_SEMANTIC_POOL = 1_000
 _EXACT_SYMBOL_WEIGHT = 1.2
 _PATH_TERM_WEIGHT = 1.1
-_UE_INTENT_FILE_WEIGHT = 2.5
 _CODE_CONTEXT_WORDS = frozenset(
     {
         "api",
@@ -105,12 +105,10 @@ _CODE_CONTEXT_WORDS = frozenset(
         "types",
     }
 )
-_GENERIC_FILE_TERMS = frozenset({"build.cs", "generated.h", "target.cs"})
 _GENERIC_TITLE_WORDS = frozenset(
     {
         "code",
         "component",
-        "engine",
         "file",
         "files",
         "find",
@@ -118,10 +116,8 @@ _GENERIC_TITLE_WORDS = frozenset(
         "how",
         "module",
         "modules",
-        "runtime",
         "source",
         "system",
-        "unreal",
         "what",
         "when",
         "where",
@@ -129,7 +125,6 @@ _GENERIC_TITLE_WORDS = frozenset(
         "why",
     }
 )
-_FILE_STEM_WORDS = frozenset({"actor", "array", "build", "class", "delegate", "world"})
 _PATH_TERM_STOP_WORDS = frozenset(
     {
         *_COMMON_WORDS,
@@ -143,7 +138,6 @@ _PATH_TERM_STOP_WORDS = frozenset(
         "declaration",
         "defined",
         "defines",
-        "engine",
         "error",
         "errors",
         "explain",
@@ -165,7 +159,6 @@ _PATH_TERM_STOP_WORDS = frozenset(
         "relation",
         "require",
         "represented",
-        "runtime",
         "should",
         "source",
         "target",
@@ -173,7 +166,6 @@ _PATH_TERM_STOP_WORDS = frozenset(
         "those",
         "type",
         "types",
-        "unreal",
         "unless",
         "using",
         "what",
@@ -183,16 +175,6 @@ _PATH_TERM_STOP_WORDS = frozenset(
         "why",
     }
 )
-_PATH_TERM_ALIASES: dict[str, tuple[str, ...]] = {
-    "enforce": ("parser",),
-    "enforces": ("parser",),
-    "network": ("net",),
-    "networking": ("net",),
-    "publicdependencymodulenames": ("modulerules", "module", "rules"),
-    "privatedependencymodulenames": ("modulerules", "module", "rules"),
-    "unrealheadertool": ("uht", "uht", "uht"),
-    "uht": ("uht", "uht", "uht"),
-}
 
 
 @dataclass(slots=True)
@@ -267,7 +249,10 @@ class _Request:
                 self._service.indices.lease(
                     corpus.corpus_id,
                     generation.manifest.generation_id,
-                    lambda: StructureIndex(generation.structure_path),
+                    lambda: StructureIndex(
+                        generation.structure_path,
+                        retrieval_profile(corpus.adapter),
+                    ),
                 )
             )
             snapshot = _Snapshot(corpus, generation, index)
@@ -336,14 +321,18 @@ class QueryService:
             active_count += 1
             generation = snapshot.generation
             index = snapshot.index
+            profile = retrieval_profile(corpus.adapter)
             if strategy in {"auto", "symbol"}:
-                terms = _identifier_candidates(normalized_query)
+                terms = _identifier_candidates(normalized_query, profile)
                 if not terms and _has_code_context(normalized_query):
-                    terms = _unique([*terms, *_plain_identifier_candidates(normalized_query)])
+                    terms = _unique(
+                        [*terms, *_plain_identifier_candidates(normalized_query, profile)]
+                    )
                 if strategy == "symbol" and not terms:
                     terms = [normalized_query]
                 for file_term, weight in _file_lookup_candidates(
                     normalized_query,
+                    profile,
                     derive_type_stems=strategy == "auto",
                 )[:12]:
                     for rank, file_record in enumerate(
@@ -360,7 +349,7 @@ class QueryService:
                 if strategy == "auto":
                     for rank, file_record in enumerate(
                         index.lookup_files_by_terms(
-                            _path_search_terms(normalized_query),
+                            _path_search_terms(normalized_query, profile),
                             limit=max(limit * 2, 20),
                         ),
                         start=1,
@@ -451,10 +440,10 @@ class QueryService:
                             f"generation {generation.manifest.generation_id}"
                         )
             if strategy == "text":
-                text_terms = _identifier_candidates(normalized_query)
+                text_terms = _identifier_candidates(normalized_query, profile)
                 if not text_terms and _has_code_context(normalized_query):
                     text_terms = _unique(
-                        [*text_terms, *_plain_identifier_candidates(normalized_query)]
+                        [*text_terms, *_plain_identifier_candidates(normalized_query, profile)]
                     )
                 for term in text_terms[:12]:
                     for rank, symbol_record in enumerate(
@@ -997,7 +986,7 @@ def _validated_query(query: str) -> str:
     return normalized
 
 
-def _identifier_candidates(query: str) -> list[str]:
+def _identifier_candidates(query: str, profile: RetrievalProfile) -> list[str]:
     quoted = _QUOTED_IDENTIFIER.findall(query)
     values = [*quoted, *(_IDENTIFIER.findall(query))]
     result: list[str] = []
@@ -1011,12 +1000,15 @@ def _identifier_candidates(query: str) -> list[str]:
             or folded in seen
             or len(normalized) < 2
             or (is_short_acronym and normalized != query.strip())
-            or (normalized not in quoted and not _looks_like_code_identifier(normalized))
+            or (
+                normalized not in quoted
+                and not _looks_like_code_identifier(normalized, profile)
+            )
         ):
             continue
         seen.add(folded)
         result.append(normalized)
-        module_name = _module_name_from_rules_file(normalized)
+        module_name = _module_name_from_rules_file(normalized, profile)
         if module_name is not None and module_name.casefold() not in seen:
             seen.add(module_name.casefold())
             result.append(module_name)
@@ -1025,7 +1017,7 @@ def _identifier_candidates(query: str) -> list[str]:
     return result
 
 
-def _plain_identifier_candidates(query: str) -> list[str]:
+def _plain_identifier_candidates(query: str, profile: RetrievalProfile) -> list[str]:
     result: list[str] = []
     seen: set[str] = set()
     for value in _IDENTIFIER.findall(query):
@@ -1036,6 +1028,7 @@ def _plain_identifier_candidates(query: str) -> list[str]:
             or normalized != normalized.casefold()
             or folded in _COMMON_WORDS
             or folded in _GENERIC_TITLE_WORDS
+            or folded in profile.stop_words
             or folded in _CODE_CONTEXT_WORDS
             or folded in seen
             or (normalized.isupper() and len(normalized) <= 3)
@@ -1051,34 +1044,23 @@ def _has_code_context(query: str) -> bool:
     return bool(words & _CODE_CONTEXT_WORDS)
 
 
-def _path_search_terms(query: str) -> list[str]:
+def _path_search_terms(query: str, profile: RetrievalProfile) -> list[str]:
     result: list[str] = []
     seen: set[str] = set()
-    processed: set[str] = set()
     for value in _IDENTIFIER.findall(query):
         pieces = re.findall(r"[A-Z]+(?=[A-Z][a-z]|\b)|[A-Z]?[a-z]+|\d+", value)
         for piece in [value, *pieces]:
             folded = piece.casefold().strip("._:")
             if (
                 len(folded) < 3
-                or folded in processed
                 or folded in _PATH_TERM_STOP_WORDS
+                or folded in profile.stop_words
             ):
                 continue
-            processed.add(folded)
-            if folded in seen:
-                continue
-            aliases = _PATH_TERM_ALIASES.get(folded)
-            if aliases is not None:
-                result.extend(aliases)
-                seen.update(aliases)
-                continue
-            singular = _singular_path_term(folded)
-            for candidate in (folded, singular):
-                if candidate in seen:
-                    continue
-                seen.add(candidate)
-                result.append(candidate)
+            for candidate in (folded, _singular_path_term(folded)):
+                if candidate not in seen:
+                    seen.add(candidate)
+                    result.append(candidate)
     return result[:16]
 
 
@@ -1092,23 +1074,27 @@ def _singular_path_term(value: str) -> str:
     return value
 
 
-def _looks_like_code_identifier(value: str) -> bool:
+def _looks_like_code_identifier(value: str, profile: RetrievalProfile) -> bool:
     if any(marker in value for marker in ("::", ".", "_")):
         return True
     if any(character.isdigit() for character in value):
         return True
     if value.isupper() and any(character.isalpha() for character in value):
         return True
-    if len(value) >= 2 and value[0] in "AUFSTIE" and value[1].isupper():
+    if _has_type_prefix(value, profile):
         return True
     return any(
         left.islower() and right.isupper() for left, right in zip(value, value[1:], strict=False)
     )
 
 
-def _module_name_from_rules_file(value: str) -> str | None:
+def _has_type_prefix(value: str, profile: RetrievalProfile) -> bool:
+    return len(value) >= 2 and value[0] in profile.type_prefixes and value[1].isupper()
+
+
+def _module_name_from_rules_file(value: str, profile: RetrievalProfile) -> str | None:
     folded = value.casefold()
-    for suffix in (".build.cs", ".target.cs"):
+    for suffix in profile.rules_file_suffixes:
         if folded.endswith(suffix) and len(value) > len(suffix):
             return value[: -len(suffix)].rsplit("/", 1)[-1]
     return None
@@ -1116,120 +1102,41 @@ def _module_name_from_rules_file(value: str) -> str | None:
 
 def _file_lookup_candidates(
     query: str,
+    profile: RetrievalProfile,
     *,
     derive_type_stems: bool,
 ) -> list[tuple[str, float]]:
-    result = _ue_intent_file_candidates(query)
-    seen = {value.casefold() for value, _ in result}
+    result: list[tuple[str, float]] = []
+    seen: set[str] = set()
     for value in _IDENTIFIER.findall(query):
         normalized = value.strip()
         folded = normalized.casefold()
-        is_file_stem_word = folded in _FILE_STEM_WORDS
         is_short_acronym = normalized.isupper() and len(normalized) <= 3
         if (
             len(normalized) >= 2
-            and folded not in _GENERIC_FILE_TERMS
+            and folded not in profile.generic_file_names
             and folded not in _GENERIC_TITLE_WORDS
+            and folded not in profile.stop_words
             and not is_short_acronym
-            and ("." in normalized or _looks_like_code_identifier(normalized) or is_file_stem_word)
+            and ("." in normalized or _looks_like_code_identifier(normalized, profile))
             and folded not in seen
         ):
             seen.add(folded)
             result.append((normalized, 2.0))
         if not derive_type_stems:
             continue
-        stem = _ue_type_stem(normalized)
+        stem = _type_stem(normalized, profile)
         if stem is not None and stem.casefold() not in seen:
             seen.add(stem.casefold())
             result.append((stem, 1.5))
     return result
 
 
-def _ue_intent_file_candidates(query: str) -> list[tuple[str, float]]:
-    folded = query.casefold()
-    candidates: list[str] = []
-
-    def add(*values: str) -> None:
-        for value in values:
-            if value not in candidates:
-                candidates.append(value)
-
-    if "replicatedusing" in folded:
-        if "repnotify" in folded and "server" in folded:
-            add("PropertyReplicationFragment.cpp", "DataReplication.cpp")
-        else:
-            add("Actor.h")
-
-    reflection_macro_query = (
-        "blueprintcallable" in folded
-        or "blueprintnativeevent" in folded
-        or ("reflection" in folded and "macro" in folded)
-        or ("generated.h" in folded and "reflect" in folded)
-    )
-    if reflection_macro_query:
-        add("ObjectMacros.h")
-
-    if (
-        ("uht" in folded or "unrealheadertool" in folded)
-        and ("generated.h" in folded or "reflection" in folded)
-        and ("enforce" in folded or "parsing" in folded)
-    ):
-        add("UhtHeaderFileParser.cs")
-
-    if "adddynamic" in folded:
-        add("DelegateSignatureImpl.inl", "ScriptDelegates.h")
-
-    if "netcore" in folded and "network" in folded:
-        add("NetHandle.h")
-
-    if "frenderermodule" in folded and "startup" in folded:
-        add("Renderer.cpp")
-
-    dependency_names = (
-        "publicdependencymodulenames" in folded
-        or "privatedependencymodulenames" in folded
-    )
-    module_rules_debug_query = dependency_names and (
-        "build.cs" in folded or "unresolved" in folded or "include errors" in folded
-    )
-    if module_rules_debug_query:
-        add("ModuleRules.cs")
-    elif dependency_names or (
-        "module" in folded
-        and (
-            "dependencies" in folded
-            or "depend on unrealed" in folded
-            or "dynamically loaded" in folded
-        )
-    ):
-        add("Engine.Build.cs")
-
-    if "createdefaultsubobject" in folded:
-        add("UObjectGlobals.h")
-        if "fname" in folded or "duplicate" in folded:
-            add("UObjectGlobals.cpp")
-
-    if "spawnactor" in folded and "collision" in folded:
-        add("LevelActor.cpp")
-
-    if "ftimermanager" in folded and "destroyed" in folded:
-        add("TimerManager.h", "TimerManager.cpp")
-
-    if "linetracesinglebychannel" in folded and "collisionqueryparams" in folded:
-        add("CollisionQueryParams.h", "WorldCollision.cpp")
-
-    if "raw pointer" in folded and "tweakobjectptr" in folded:
-        add("ObjectPtr.h", "WeakObjectPtrTemplates.h")
-
-    return [(value, _UE_INTENT_FILE_WEIGHT) for value in candidates]
-
-
-def _ue_type_stem(value: str) -> str | None:
+def _type_stem(value: str, profile: RetrievalProfile) -> str | None:
     if (
         len(value) >= 3
         and not value.isupper()
-        and value[0] in "AUFSTIE"
-        and value[1].isupper()
+        and _has_type_prefix(value, profile)
         and value.isidentifier()
     ):
         return value[1:]

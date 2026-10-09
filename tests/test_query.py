@@ -16,7 +16,15 @@ from codalith.corpus.uris import source_uri
 from codalith.errors import RetrievalError, SourcePolicyError
 from codalith.indexing.coderag.backend import store_fingerprint
 from codalith.indexing.structure.builder import StructureBuilder
-from codalith.query.service import QueryService, _Request, _semantic_pool
+from codalith.languages.catalog import NEUTRAL_PROFILE, UNREAL_PROFILE
+from codalith.query.service import (
+    QueryService,
+    _identifier_candidates,
+    _path_search_terms,
+    _Request,
+    _semantic_pool,
+    _type_stem,
+)
 from conftest import EnvironmentFactory, TestEnvironment, build_environment
 
 
@@ -381,68 +389,40 @@ def test_auto_search_uses_multiple_query_terms_to_find_a_file_path(
         service.close()
 
 
-def test_auto_search_normalizes_ue_terms_to_canonical_file_paths(tmp_path: Path) -> None:
+def test_unreal_profile_resolves_module_rules_files_to_module_symbols(tmp_path: Path) -> None:
     environment = build_environment(
         tmp_path,
         files={
-            "Engine/Source/Programs/Shared/EpicGames.UHT/Parsers/UhtHeaderFileParser.cs": (
-                "public class UhtHeaderFileParser {}\n"
+            "Plugins/Gizmo/Source/Gizmo/Gizmo.Build.cs": (
+                "public class Gizmo : ModuleRules {\n"
+                '    PublicDependencyModuleNames.Add("Core");\n'
+                "}\n"
             ),
-            "Engine/Source/Programs/Shared/EpicGames.UHT/Types/UhtHeaderFile.cs": (
-                "public class UhtHeaderFile {}\n"
-            ),
-            "Engine/Source/Programs/UnrealBuildTool/Configuration/ModuleRules.cs": (
-                "public class ModuleRules {}\n"
-            ),
-            "Engine/Source/Runtime/Core/Public/Delegates/DelegateSignatureImpl.inl": (
-                "#define AddDynamic(...)\n"
-            ),
-            "Engine/Source/Runtime/Core/Public/Delegates/Delegate.h": "// delegates\n",
-            "Engine/Source/Runtime/Core/Public/Misc/Build.h": "// build macros\n",
-            "Engine/Source/Runtime/Core/Public/UObject/ScriptDelegates.h": (
-                "// dynamic delegates\n"
-            ),
-            "Engine/Source/Runtime/CoreUObject/Public/UObject/ObjectMacros.h": (
-                "#define UFUNCTION(...)\n"
-            ),
-            "Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h": (
-                "class AActor {};\n"
-            ),
-            "Engine/Source/Runtime/Engine/Engine.Build.cs": "public class Engine {}\n",
-            "Engine/Source/Runtime/Net/Core/Public/Net/Core/NetHandle/NetHandle.h": (
-                "struct FNetHandle {};\n"
-            ),
+            "Plugins/Gizmo/Source/Gizmo/Private/GizmoModule.cpp": "void StartGizmo() {}\n",
         },
         semantic=False,
         adapter="cpp-ue",
-        include_extensions=(".cs", ".h", ".inl"),
+        include_extensions=(".cs", ".cpp"),
     )
     service = environment.service()
-    cases = {
-        "Where are UE networking handles represented?": "NetHandle.h",
-        "Which header declares single-cast and multicast delegate types?": "Delegate.h",
-        "Where does UHT enforce generated header include ordering?": (
-            "UhtHeaderFileParser.cs"
-        ),
-        "How do PublicDependencyModuleNames in Build.cs resolve includes?": (
-            "ModuleRules.cs"
-        ),
-        "How do PublicDependencyModuleNames and PrivateDependencyModuleNames differ?": (
-            "Engine.Build.cs"
-        ),
-        "How does UPROPERTY ReplicatedUsing trigger an OnRep function?": "Actor.h",
-        "Which source mentions BlueprintCallable?": "ObjectMacros.h",
-        "Why does AddDynamic fail for a dynamic multicast binding?": (
-            "DelegateSignatureImpl.inl"
-        ),
-        "How should WITH_EDITOR packaged build code be guarded?": "Build.h",
-    }
     try:
-        for query, expected_basename in cases.items():
-            hit = service.search(query, target="sample").hits[0]
-            assert Path(hit.path).name == expected_basename
+        result = service.search("What does Gizmo.Build.cs depend on?", target="sample")
+        assert result.hits[0].path == "Plugins/Gizmo/Source/Gizmo/Gizmo.Build.cs"
+        assert any(hit.kind == "module" and hit.symbol == "Gizmo" for hit in result.hits)
     finally:
         service.close()
+
+
+def test_retrieval_conventions_come_only_from_the_corpus_profile() -> None:
+    assert _type_stem("FVector", UNREAL_PROFILE) == "Vector"
+    assert _type_stem("FVector", NEUTRAL_PROFILE) is None
+    assert "engine" not in _path_search_terms("render engine startup", UNREAL_PROFILE)
+    assert "engine" in _path_search_terms("render engine startup", NEUTRAL_PROFILE)
+    assert _identifier_candidates("Gizmo.Build.cs", UNREAL_PROFILE) == [
+        "Gizmo.Build.cs",
+        "Gizmo",
+    ]
+    assert _identifier_candidates("Gizmo.Build.cs", NEUTRAL_PROFILE) == ["Gizmo.Build.cs"]
 
 
 def test_symbol_search_prefers_exact_case_for_reflection_macros(tmp_path: Path) -> None:

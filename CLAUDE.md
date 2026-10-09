@@ -46,6 +46,7 @@ language adapter -> immutable SQLite structure.sqlite
 - MCP schema `extra=forbid`；所有公开工具只读、幂等、closed-world。
 - HTTP 默认 loopback publish，Host/Origin 白名单和完整流式 body 上限不可绕过。
 - 新 adapter 或 adapter 语义变更必须提升 `version`，旧 generation 自动失效。
+- 检索代码不得编码评测问句、关键词或期望答案路径；语言/引擎约定只能经 adapter 的 `RetrievalProfile` 进入查询层。
 
 ## 常用命令
 

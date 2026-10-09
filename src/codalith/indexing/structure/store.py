@@ -16,16 +16,18 @@ from codalith.indexing.structure.models import (
     ReferenceRecord,
     SymbolRecord,
 )
+from codalith.languages.catalog import NEUTRAL_PROFILE, RetrievalProfile
 
 
 class StructureIndex:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, profile: RetrievalProfile = NEUTRAL_PROFILE) -> None:
         if not path.is_file():
             raise IndexInvalidError(f"Structure index does not exist: {path}")
         uri = path.resolve().as_uri() + "?mode=ro"
         self._connection = sqlite3.connect(uri, uri=True, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
         self._lock = threading.RLock()
+        self._declaration_order = _declaration_path_order(profile)
 
     def close(self) -> None:
         with self._lock:
@@ -53,7 +55,7 @@ class StructureIndex:
             "OR path LIKE ? ESCAPE '\\' COLLATE NOCASE "
             "OR path LIKE ? ESCAPE '\\' COLLATE NOCASE "
             "ORDER BY CASE WHEN path = ? COLLATE NOCASE THEN 0 ELSE 1 END, "
-            f"{_declaration_path_order()}, length(path), path LIMIT ?",
+            f"{self._declaration_order}length(path), path LIMIT ?",
             (normalized, suffix, stem_suffix, normalized, limit),
         )
         return [FileRecord(**dict(row)) for row in rows]
@@ -86,7 +88,7 @@ class StructureIndex:
             "SELECT path, language, sha256, size_bytes, line_count, module, "
             f"({score}) AS term_hits FROM files WHERE {where} "
             "ORDER BY term_hits DESC, "
-            f"{_declaration_path_order()}, length(path), path LIMIT ?",
+            f"{self._declaration_order}length(path), path LIMIT ?",
             (*patterns, *patterns, limit),
         )
         return [FileRecord(**{key: row[key] for key in FileRecord.__annotations__}) for row in rows]
@@ -109,7 +111,7 @@ class StructureIndex:
                 "ORDER BY CASE WHEN qualified_name = ? THEN 0 WHEN name = ? THEN 1 "
                 "WHEN qualified_name = ? COLLATE NOCASE THEN 2 ELSE 3 END, "
                 f"{_definition_kind_order()}, "
-                f"{_declaration_path_order()}, "
+                f"{self._declaration_order}"
                 "length(qualified_name), path, start_line LIMIT ?",
                 (query, query, query, query, query, limit),
             )
@@ -122,7 +124,7 @@ class StructureIndex:
                 "ORDER BY CASE WHEN name = ? COLLATE NOCASE THEN 0 "
                 "WHEN name LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 1 ELSE 2 END, "
                 f"{_definition_kind_order()}, "
-                f"{_declaration_path_order()}, "
+                f"{self._declaration_order}"
                 "length(qualified_name), path, start_line LIMIT ?",
                 (pattern, pattern, query, f"{_escape_like(query)}%", limit),
             )
@@ -258,12 +260,33 @@ def _definition_kind_order() -> str:
     )
 
 
-def _declaration_path_order() -> str:
-    return (
-        "CASE WHEN lower(path) LIKE '%.h' OR lower(path) LIKE '%.hh' "
-        "OR lower(path) LIKE '%.hpp' OR lower(path) LIKE '%.hxx' "
-        "OR lower(path) LIKE '%.inl' THEN 0 ELSE 1 END, "
-        "CASE WHEN path LIKE 'Public/%' OR path LIKE 'Classes/%' "
-        "OR path LIKE '%/Public/%' OR path LIKE '%/Classes/%' THEN 0 "
-        "WHEN path LIKE 'Private/%' OR path LIKE '%/Private/%' THEN 2 ELSE 1 END"
+def _declaration_path_order(profile: RetrievalProfile) -> str:
+    """Return ORDER BY terms, each followed by a separator, that rank declarations first."""
+
+    terms: list[str] = []
+    if profile.declaration_suffixes:
+        suffixes = " OR ".join(
+            f"lower(path) LIKE {_like_literal('%' + _escape_like(suffix.lower()))} ESCAPE '\\'"
+            for suffix in profile.declaration_suffixes
+        )
+        terms.append(f"CASE WHEN {suffixes} THEN 0 ELSE 1 END")
+    if profile.public_dirs or profile.private_dirs:
+        terms.append(
+            f"CASE WHEN {_directory_match(profile.public_dirs)} THEN 0 "
+            f"WHEN {_directory_match(profile.private_dirs)} THEN 2 ELSE 1 END"
+        )
+    return "".join(f"{term}, " for term in terms)
+
+
+def _directory_match(directories: tuple[str, ...]) -> str:
+    if not directories:
+        return "0"
+    return " OR ".join(
+        f"path LIKE {_like_literal(pattern)} ESCAPE '\\'"
+        for directory in directories
+        for pattern in (f"{_escape_like(directory)}/%", f"%/{_escape_like(directory)}/%")
     )
+
+
+def _like_literal(pattern: str) -> str:
+    return "'" + pattern.replace("'", "''") + "'"
