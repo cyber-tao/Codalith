@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.metadata
 import json
 import os
 import re
@@ -201,6 +202,13 @@ class GenerationRepository:
             )
         if corpus.embedding_model and manifest.embedding_model != corpus.embedding_model:
             raise IndexUnavailableError("Index embedding model does not match corpus configuration")
+        if manifest.semantic_available:
+            installed = installed_coderag_version()
+            if manifest.coderag_version != installed:
+                raise IndexUnavailableError(
+                    f"Semantic index was built with CodeRAG {manifest.coderag_version}; "
+                    f"installed CodeRAG is {installed}"
+                )
         generation = ActiveGeneration(
             root=root,
             manifest_path=manifest_path,
@@ -286,6 +294,13 @@ class GenerationRepository:
             encoding="utf-8",
         )
         os.replace(temporary, pointer)
+
+
+def installed_coderag_version() -> str:
+    try:
+        return importlib.metadata.version("coderag")
+    except importlib.metadata.PackageNotFoundError:
+        return "unavailable"
 
 
 def new_generation_id(seed: bytes) -> str:

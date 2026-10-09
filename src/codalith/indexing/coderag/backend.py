@@ -20,7 +20,9 @@ from coderag import CodeRAG, Config
 from codalith.corpus.registry import Corpus
 from codalith.corpus.source_policy import SourcePolicy
 from codalith.corpus.store_manifest import ActiveGeneration
-from codalith.errors import IndexBuildError, RetrievalError
+from codalith.errors import CodalithError, IndexBuildError, IndexUnavailableError, RetrievalError
+
+_STORE_PROVENANCE_FILE = "meta.json"
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +63,15 @@ class TextHit:
     path: str
     line: int
     text: str
+
+
+@dataclass(frozen=True, slots=True)
+class StoreProvenance:
+    model: str
+    dimension: int
+
+    def describe(self) -> str:
+        return f"{self.model} ({self.dimension} dimensions)"
 
 
 class CodeRAGBackend:
@@ -154,21 +165,115 @@ class CodeRAGBackend:
             engine.close()
 
     def _engine(self, corpus: Corpus, generation: ActiveGeneration) -> CodeRAG:
-        if not generation.manifest.semantic_available:
+        manifest = generation.manifest
+        if not manifest.semantic_available:
             raise RetrievalError(
                 f"Semantic index is unavailable for {corpus.corpus_id} generation "
-                f"{generation.manifest.generation_id}"
+                f"{manifest.generation_id}"
             )
-        key = (corpus.corpus_id, generation.manifest.generation_id)
+        key = (corpus.corpus_id, manifest.generation_id)
         with self._lock:
             engine = self._engines.get(key)
             if engine is None:
                 obsolete = [item for item in self._engines if item[0] == corpus.corpus_id]
                 for old_key in obsolete:
                     self._engines.pop(old_key).close()
-                engine = CodeRAG(coderag_config(corpus, generation.coderag_path, self.policy))
+                try:
+                    expected = generation_store_provenance(generation)
+                except IndexUnavailableError as exc:
+                    raise RetrievalError(str(exc)) from exc
+                engine = _open_verified_engine(
+                    coderag_config(
+                        corpus,
+                        generation.coderag_path,
+                        self.policy,
+                        provider=manifest.embedding_provider,
+                        model=manifest.embedding_model,
+                    ),
+                    error=RetrievalError,
+                    expected=expected,
+                )
                 self._engines[key] = engine
             return engine
+
+
+def read_store_provenance(store_dir: Path) -> StoreProvenance:
+    """Read the embedding provenance CodeRAG compares before it clears a store."""
+
+    path = store_dir / _STORE_PROVENANCE_FILE
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise IndexUnavailableError(
+            f"CodeRAG store has no readable provenance {path}: {exc}"
+        ) from exc
+    model = raw.get("embed_model") if isinstance(raw, dict) else None
+    dimension = raw.get("embed_dim") if isinstance(raw, dict) else None
+    if (
+        not isinstance(model, str)
+        or not model
+        or not isinstance(dimension, int)
+        or isinstance(dimension, bool)
+        or dimension <= 0
+    ):
+        raise IndexUnavailableError(f"CodeRAG store provenance is invalid: {path}")
+    return StoreProvenance(model, dimension)
+
+
+def generation_store_provenance(generation: ActiveGeneration) -> StoreProvenance:
+    """Verify the store a semantic generation points at without loading a model."""
+
+    manifest = generation.manifest
+    if manifest.embedding_dimension is None:
+        raise IndexUnavailableError(
+            f"Generation {manifest.generation_id} has no semantic embedding dimension"
+        )
+    expected = StoreProvenance(manifest.embedding_model, manifest.embedding_dimension)
+    recorded = read_store_provenance(generation.coderag_path)
+    if recorded != expected:
+        raise IndexUnavailableError(
+            f"CodeRAG store {generation.coderag_path} records {recorded.describe()} but "
+            f"generation {manifest.generation_id} expects {expected.describe()}"
+        )
+    return expected
+
+
+def _open_verified_engine(
+    config: Config,
+    *,
+    error: type[CodalithError],
+    expected: StoreProvenance | None = None,
+) -> CodeRAG:
+    """Open an existing store only when CodeRAG's own bootstrap cannot clear it."""
+
+    store_dir = Path(config.store_dir)
+    try:
+        recorded = read_store_provenance(store_dir)
+    except IndexUnavailableError as exc:
+        raise error(str(exc)) from exc
+    if expected is not None and recorded != expected:
+        raise error(
+            f"CodeRAG store {store_dir} records {recorded.describe()} but "
+            f"{expected.describe()} was expected"
+        )
+    engine = CodeRAG(config)
+    try:
+        provider = engine.provider
+        configured = StoreProvenance(str(provider.model_id), int(provider.dim))
+    except Exception as exc:
+        engine.close()
+        raise error(
+            f"Cannot initialize embedding provider {config.provider!r}: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
+    if configured != recorded:
+        engine.close()
+        raise error(
+            f"CodeRAG store {store_dir} was built with {recorded.describe()} but the "
+            f"configured provider is {configured.describe()}; refusing to open it "
+            "because CodeRAG would clear the store"
+        )
+    return engine
 
 
 def _ripgrep_text_search(
@@ -288,7 +393,12 @@ def prepare_semantic_index(
         except Exception:
             source_view.cleanup()
             raise
-    engine = CodeRAG(coderag_config(corpus, store_dir, policy, watched_root=watched_root))
+    config = coderag_config(corpus, store_dir, policy, watched_root=watched_root)
+    engine = (
+        CodeRAG(config)
+        if mode == "build"
+        else _open_verified_engine(config, error=IndexBuildError)
+    )
     try:
         if mode == "build":
             engine.index(full=True)
@@ -336,7 +446,10 @@ def preflight_semantic_index(
     )
     if mode != "adopt":
         return
-    engine = CodeRAG(coderag_config(corpus, effective_store, policy))
+    engine = _open_verified_engine(
+        coderag_config(corpus, effective_store, policy),
+        error=IndexBuildError,
+    )
     try:
         status = engine.status()
     except Exception as exc:
@@ -385,16 +498,17 @@ def coderag_config(
     store_dir: Path,
     policy: SourcePolicy,
     *,
+    provider: str | None = None,
+    model: str | None = None,
     watched_root: Path | None = None,
 ) -> Config:
     defaults = Config()
-    model = corpus.embedding_model
+    provider = provider or corpus.embedding_provider
+    model = corpus.embedding_model if model is None else model
     return Config(
-        provider=corpus.embedding_provider,
-        model=model if corpus.embedding_provider == "fastembed" and model else defaults.model,
-        openai_model=(
-            model if corpus.embedding_provider == "openai" and model else defaults.openai_model
-        ),
+        provider=provider,
+        model=model if provider == "fastembed" and model else defaults.model,
+        openai_model=(model if provider == "openai" and model else defaults.openai_model),
         openai_api_key=os.getenv("CODALITH_EMBEDDING_API_KEY"),
         openai_base_url=os.getenv("CODALITH_EMBEDDING_BASE_URL"),
         cache_dir=defaults.cache_dir,

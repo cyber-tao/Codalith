@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import importlib.metadata
 import json
 import os
 import shutil
@@ -24,6 +23,7 @@ from codalith.corpus.store_manifest import (
     GenerationRepository,
     IndexManifest,
     chunk_policy_hash,
+    installed_coderag_version,
     new_generation_id,
     sha256_file,
 )
@@ -170,7 +170,7 @@ class StructureBuilder:
                 source_revision=corpus.revision,
                 source_fingerprint=fingerprint.hexdigest(),
                 created_at=datetime.now(UTC).isoformat(),
-                coderag_version=_coderag_version(),
+                coderag_version=installed_coderag_version(),
                 embedding_provider=(
                     semantic_info.provider if semantic_info else corpus.embedding_provider
                 ),
@@ -620,13 +620,6 @@ def re_sub_templates(value: str) -> str:
         elif depth == 0:
             output.append(character)
     return "".join(output)
-
-
-def _coderag_version() -> str:
-    try:
-        return importlib.metadata.version("coderag")
-    except importlib.metadata.PackageNotFoundError:
-        return "unavailable"
 
 
 def _report(progress: Callable[[str], None] | None, message: str) -> None:

@@ -17,6 +17,7 @@ from codalith.corpus.store_manifest import ActiveGeneration, GenerationRepositor
 from codalith.corpus.uris import parse_uri, source_uri, symbol_uri
 from codalith.errors import IndexUnavailableError, RetrievalError, SourceReadError
 from codalith.indexing.coderag import CodeRAGBackend
+from codalith.indexing.coderag.backend import generation_store_provenance
 from codalith.indexing.structure.models import (
     FileRecord,
     ModuleDependencyRecord,
@@ -752,6 +753,8 @@ class QueryService:
         for corpus in resolution.corpora:
             try:
                 generation = self.generations.active(corpus)
+                if generation.manifest.semantic_available:
+                    generation_store_provenance(generation)
             except IndexUnavailableError as exc:
                 message = str(exc)
                 state: Literal["missing", "invalid"] = (

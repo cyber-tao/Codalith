@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,8 @@ from codalith.indexing.coderag.backend import (
     CodeRAGBackend,
     _materialize_source_view,
     _ripgrep_text_search,
+    preflight_semantic_index,
+    prepare_semantic_index,
     store_fingerprint,
 )
 from codalith.indexing.structure.builder import StructureBuilder
@@ -141,6 +144,37 @@ def test_failed_build_never_replaces_the_active_pointer(
         )
     assert json.loads(pointer.read_text(encoding="utf-8"))["generation_id"] == original
     assert not list((environment.index_root / "generations").glob(".build-*"))
+
+
+def test_adopt_refuses_a_store_built_with_another_embedding_model(
+    environment_factory: EnvironmentFactory,
+) -> None:
+    environment = environment_factory(semantic=True)
+    store = GenerationRepository().active(environment.corpus).coderag_path
+    before = store_fingerprint(store)
+    adopted = replace(
+        environment.corpus,
+        coderag_store=store,
+        embedding_provider="openai",
+        embedding_model="text-embedding-3-small",
+    )
+    with pytest.raises(IndexBuildError, match="refusing to open"):
+        preflight_semantic_index(adopted, environment.policy, mode="adopt")
+    with pytest.raises(IndexBuildError, match="refusing to open"):
+        prepare_semantic_index(adopted, store, environment.policy, mode="adopt")
+    assert store_fingerprint(store) == before
+
+
+def test_semantic_generation_is_invalid_after_a_coderag_upgrade(
+    environment_factory: EnvironmentFactory,
+) -> None:
+    environment = environment_factory(semantic=True)
+    generation = GenerationRepository().active(environment.corpus)
+    payload = json.loads(generation.manifest_path.read_text(encoding="utf-8"))
+    payload["coderag_version"] = "0.0.0-previous"
+    generation.manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(IndexUnavailableError, match="built with CodeRAG 0.0.0-previous"):
+        GenerationRepository().active(environment.corpus)
 
 
 def test_store_fingerprint_detects_same_size_corruption(tmp_path: Path) -> None:

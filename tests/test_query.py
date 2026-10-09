@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
@@ -8,7 +9,8 @@ import pytest
 from codalith.corpus.registry import CorpusRegistry
 from codalith.corpus.source_policy import SourcePolicy
 from codalith.corpus.store_manifest import GenerationRepository
-from codalith.errors import SourcePolicyError
+from codalith.errors import RetrievalError, SourcePolicyError
+from codalith.indexing.coderag.backend import store_fingerprint
 from codalith.indexing.structure.builder import StructureBuilder
 from codalith.query.service import QueryService
 from conftest import EnvironmentFactory, TestEnvironment, build_environment
@@ -458,6 +460,29 @@ def test_status_rejects_a_generation_with_a_missing_semantic_store(
         assert "Missing CodeRAG store" in (status.corpora[0].message or "")
     finally:
         service.close()
+
+
+def test_semantic_queries_refuse_a_store_with_drifted_provenance(
+    environment_factory: EnvironmentFactory,
+) -> None:
+    environment = environment_factory(semantic=True)
+    generation = GenerationRepository().active(environment.corpus)
+    meta_path = generation.coderag_path / "meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta["embed_model"] = "drifted-model"
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+    before = store_fingerprint(generation.coderag_path)
+    service = environment.service()
+    try:
+        status = service.status(target="sample")
+        assert status.corpora[0].state == "invalid"
+        assert "drifted-model" in (status.corpora[0].message or "")
+        with pytest.raises(RetrievalError, match="drifted-model"):
+            service.search("CachedValue", target="sample", strategy="semantic")
+        assert service.search("CachedValue", target="sample").degraded
+    finally:
+        service.close()
+    assert store_fingerprint(generation.coderag_path) == before
 
 
 def test_auto_search_reports_missing_semantic_plane_without_creating_a_store(
