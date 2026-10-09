@@ -1,7 +1,6 @@
 .env
 .env.*
 !.env.example
-!.env.ue.example
 .cursor/
 .codex/
 .vscode/mcp.json
@@ -22,6 +21,4 @@ build/
 *.egg-info/
 data/
 reports/
-# Rendered card output that acceptance jobs write into the sample corpus.
-fixtures/sample_corpus/cards/
 .local/

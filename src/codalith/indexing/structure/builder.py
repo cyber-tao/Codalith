@@ -7,8 +7,10 @@ import json
 import os
 import shutil
 import sqlite3
+import sys
 import time
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -103,6 +105,16 @@ class StructureBuilder:
             raise IndexBuildError("semantic_mode must be none, build, or adopt")
         if not corpus.source_root.is_dir():
             raise IndexBuildError(f"Corpus source root does not exist: {corpus.source_root}")
+        with build_lock(corpus.index_root):
+            return self._build(corpus, semantic_mode=semantic_mode, progress=progress)
+
+    def _build(
+        self,
+        corpus: Corpus,
+        *,
+        semantic_mode: str,
+        progress: Callable[[str], None] | None,
+    ) -> BuildReport:
         if semantic_mode != "none":
             _report(progress, f"Preflighting semantic index in {semantic_mode} mode")
             preflight_semantic_index(corpus, self.policy, mode=semantic_mode)
@@ -430,6 +442,44 @@ def _source_files(
                 continue
             if supports(path):
                 yield path
+
+
+@contextmanager
+def build_lock(index_root: Path) -> Iterator[None]:
+    """Allow one build per index root; the OS releases the lock if the process dies."""
+
+    index_root.mkdir(parents=True, exist_ok=True)
+    lock_path = index_root / ".build.lock"
+    with lock_path.open("a+b") as handle:
+        try:
+            _lock_file(handle.fileno())
+        except OSError as exc:
+            raise IndexBuildError(f"Another index build holds {lock_path}") from exc
+        try:
+            yield
+        finally:
+            _unlock_file(handle.fileno())
+
+
+if sys.platform == "win32":
+    import msvcrt
+
+    def _lock_file(descriptor: int) -> None:
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+
+    def _unlock_file(descriptor: int) -> None:
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+
+else:
+    import fcntl
+
+    def _lock_file(descriptor: int) -> None:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def _unlock_file(descriptor: int) -> None:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
 
 
 def _fsync_tree(root: Path) -> None:

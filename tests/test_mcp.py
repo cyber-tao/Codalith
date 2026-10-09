@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import socket
 import subprocess
 import sys
 import threading
@@ -11,13 +12,14 @@ from pathlib import Path
 import anyio
 import httpx
 import pytest
+import uvicorn
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamable_http_client
 from starlette.testclient import TestClient
 
 from codalith import errors
-from codalith.mcp.http import HTTPConfig, MCPHTTPServer, create_http_app
+from codalith.mcp.http import HTTPConfig, create_http_app
 from codalith.mcp.server import _error_payload
 from conftest import TestEnvironment
 
@@ -72,13 +74,25 @@ def running_http_server(
     *,
     max_request_bytes: int = 1_048_576,
 ) -> Iterator[str]:
-    server = MCPHTTPServer(
-        environment.service(),
-        HTTPConfig(port=0, max_request_bytes=max_request_bytes),
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen()
+    host, port = listener.getsockname()[:2]
+    server = uvicorn.Server(
+        uvicorn.Config(
+            create_http_app(
+                environment.service(),
+                HTTPConfig(port=port, max_request_bytes=max_request_bytes),
+            ),
+            log_level="warning",
+        )
     )
-    thread = threading.Thread(target=server.serve_forever, name="codalith-test-http")
+    thread = threading.Thread(
+        target=server.run,
+        kwargs={"sockets": [listener]},
+        name="codalith-test-http",
+    )
     thread.start()
-    host, port = server.server_address
     endpoint = f"http://{host}:{port}/mcp"
     health = f"http://{host}:{port}/healthz"
     try:
@@ -94,9 +108,9 @@ def running_http_server(
                 raise RuntimeError("Codalith test server did not start")
         yield endpoint
     finally:
-        server.shutdown()
+        server.should_exit = True
         thread.join(timeout=10)
-        server.server_close()
+        listener.close()
         assert not thread.is_alive()
 
 

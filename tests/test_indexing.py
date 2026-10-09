@@ -16,7 +16,7 @@ from codalith.indexing.coderag.backend import (
     prepare_semantic_index,
     store_fingerprint,
 )
-from codalith.indexing.structure.builder import StructureBuilder
+from codalith.indexing.structure.builder import StructureBuilder, build_lock
 from codalith.indexing.structure.store import StructureIndex
 from codalith.indexing.text_search import search_text
 from conftest import EnvironmentFactory, TestEnvironment, build_environment
@@ -277,6 +277,16 @@ def test_semantic_generation_is_invalid_after_a_coderag_upgrade(
     generation.manifest_path.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(IndexUnavailableError, match="built with CodeRAG 0.0.0-previous"):
         GenerationRepository(environment.policy).active(environment.corpus)
+
+
+def test_concurrent_builds_of_one_corpus_are_rejected(
+    environment_factory: EnvironmentFactory,
+) -> None:
+    environment = environment_factory(semantic=False)
+    with build_lock(environment.index_root):
+        with pytest.raises(IndexBuildError, match="Another index build"):
+            StructureBuilder(environment.policy).build(environment.corpus)
+    StructureBuilder(environment.policy).build(environment.corpus)
 
 
 def test_store_fingerprint_detects_same_size_corruption(tmp_path: Path) -> None:

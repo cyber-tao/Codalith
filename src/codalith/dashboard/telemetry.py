@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-import os
 import sys
 import threading
 import time
@@ -563,7 +562,3 @@ if sys.platform == "win32":
         ):
             raise ctypes.WinError(ctypes.get_last_error())
         return int(counters.PeakWorkingSetSize)
-
-
-def process_identity() -> dict[str, object]:
-    return {"pid": os.getpid(), "python": sys.version.split()[0]}

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import logging
-import socket
 from collections import deque
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -11,7 +9,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import anyio
-import uvicorn
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.server.transport_security import (
     TransportSecurityMiddleware,
@@ -30,7 +27,6 @@ from codalith.mcp.server import create_sdk_server
 from codalith.query.service import QueryService
 
 DEFAULT_MAX_REQUEST_BYTES = 1_048_576
-_LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,34 +130,6 @@ class RequestBodyLimitMiddleware:
         await self.app(scope, replay, send)
 
 
-class RequestLogMiddleware:
-    def __init__(self, app: ASGIApp, *, enabled: bool) -> None:
-        self.app = app
-        self.enabled = enabled
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or not self.enabled:
-            await self.app(scope, receive, send)
-            return
-        status = 500
-
-        async def capture(message: Message) -> None:
-            nonlocal status
-            if message.get("type") == "http.response.start":
-                raw_status = message.get("status")
-                if isinstance(raw_status, int):
-                    status = raw_status
-            await send(message)
-
-        await self.app(scope, receive, capture)
-        _LOG.info(
-            "Codalith HTTP %s %s -> %s",
-            scope.get("method", "?"),
-            scope.get("path", "?"),
-            status,
-        )
-
-
 class SessionManagerASGI:
     def __init__(self, manager: StreamableHTTPSessionManager) -> None:
         self.manager = manager
@@ -223,63 +191,9 @@ def create_http_app(
         lifespan=lifespan,
         middleware=[
             Middleware(HostOriginGuardMiddleware, settings=security),
-            Middleware(RequestLogMiddleware, enabled=config.access_log),
             Middleware(RequestBodyLimitMiddleware, max_bytes=config.max_request_bytes),
         ],
     )
-
-
-class MCPHTTPServer:
-    """Uvicorn wrapper used by integration tests and the CLI."""
-
-    def __init__(self, service: QueryService, config: HTTPConfig) -> None:
-        config.validate()
-        self.config = config
-        self.socket = _bind_socket(config.host, config.port)
-        address = self.socket.getsockname()
-        self.server_address = (str(address[0]), int(address[1]))
-        self._server = uvicorn.Server(
-            uvicorn.Config(
-                create_http_app(service, config),
-                log_level="info" if config.access_log else "warning",
-                access_log=config.access_log,
-            )
-        )
-
-    def serve_forever(self) -> None:
-        self._server.run(sockets=[self.socket])
-
-    def shutdown(self) -> None:
-        self._server.should_exit = True
-
-    def server_close(self) -> None:
-        try:
-            self.socket.close()
-        except OSError:
-            pass
-
-
-def _bind_socket(host: str, port: int) -> socket.socket:
-    addresses = socket.getaddrinfo(
-        host,
-        port,
-        type=socket.SOCK_STREAM,
-        flags=socket.AI_PASSIVE,
-    )
-    last_error: OSError | None = None
-    for family, socktype, proto, _, address in addresses:
-        candidate = socket.socket(family, socktype, proto)
-        try:
-            candidate.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            if family == socket.AF_INET6:
-                candidate.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
-            candidate.bind(address)
-            candidate.listen()
-            return candidate
-        except OSError as exc:
-            last_error = exc
-            candidate.close()
-    raise OSError(f"Cannot bind {host}:{port}: {last_error}")
 
 
 def _allowed_hosts(config: HTTPConfig) -> list[str]:
