@@ -37,6 +37,7 @@ from codalith.indexing.structure.models import (
     SymbolRecord,
 )
 from codalith.indexing.structure.store import StructureIndex
+from codalith.indexing.text_search import search_text
 from codalith.query.models import (
     CompareChange,
     CompareResponse,
@@ -471,12 +472,18 @@ class QueryService:
                             rank,
                             _EXACT_SYMBOL_WEIGHT,
                         )
-                text_hits = self.coderag.text_search(
-                    corpus,
-                    generation,
-                    text_terms[0] if text_terms else normalized_query,
-                    limit=max(limit * 4, 20),
-                )
+                try:
+                    text_hits = search_text(
+                        corpus,
+                        index,
+                        normalized_query,
+                        limit=max(limit * 4, 20),
+                        max_file_bytes=self.policy.max_file_bytes,
+                    )
+                except RetrievalError as exc:
+                    warnings.append(str(exc))
+                    degraded = True
+                    text_hits = []
                 for rank, text_hit in enumerate(text_hits, start=1):
                     indexed_file = index.get_file(text_hit.path)
                     if indexed_file is None:

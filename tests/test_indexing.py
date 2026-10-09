@@ -12,13 +12,13 @@ from codalith.errors import IndexBuildError, IndexUnavailableError
 from codalith.indexing.coderag.backend import (
     CodeRAGBackend,
     _materialize_source_view,
-    _ripgrep_text_search,
     preflight_semantic_index,
     prepare_semantic_index,
     store_fingerprint,
 )
 from codalith.indexing.structure.builder import StructureBuilder
 from codalith.indexing.structure.store import StructureIndex
+from codalith.indexing.text_search import search_text
 from conftest import EnvironmentFactory, TestEnvironment, build_environment
 
 
@@ -66,24 +66,39 @@ def test_semantic_index_cannot_leak_files_outside_the_generation(
     }
 
 
-def test_ripgrep_text_search_treats_natural_language_as_literal(
+@pytest.mark.parametrize("ripgrep", [True, False])
+def test_text_search_matches_the_literal_query_in_indexed_files_only(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    ripgrep: bool,
 ) -> None:
-    if shutil.which("rg") is None:
+    if ripgrep and shutil.which("rg") is None:
         pytest.skip("ripgrep is not installed")
+    if not ripgrep:
+        monkeypatch.setattr("codalith.indexing.text_search.shutil.which", lambda _: None)
     environment = build_environment(
         tmp_path,
-        files={"source.py": "Where is the literal?\n"},
+        files={
+            "nested/source.py": "first line\nWhere is the LITERAL? (exact)\n",
+            "notes.md": "Where is the literal? (exact)\n",
+        },
         semantic=False,
     )
-    hits = _ripgrep_text_search(
-        environment.corpus,
-        "Where is the literal?",
-        limit=10,
-        max_file_bytes=environment.policy.max_file_bytes,
-        deny_globs=environment.policy.deny_globs,
-    )
-    assert [(hit.path, hit.line) for hit in hits] == [("source.py", 1)]
+    generation = GenerationRepository(environment.policy).active(environment.corpus)
+    index = StructureIndex(generation.structure_path)
+    try:
+        hits = search_text(
+            environment.corpus,
+            index,
+            "where is the literal? (exact)",
+            limit=10,
+            max_file_bytes=environment.policy.max_file_bytes,
+        )
+    finally:
+        index.close()
+    assert [(hit.path, hit.line, hit.text) for hit in hits] == [
+        ("nested/source.py", 2, "Where is the LITERAL? (exact)")
+    ]
 
 
 def test_resolved_reference_edges_are_stored(

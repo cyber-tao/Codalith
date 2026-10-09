@@ -59,6 +59,37 @@ def test_exact_text_search_is_filtered_by_structural_membership(
         service.close()
 
 
+def test_text_search_needs_no_semantic_plane_and_skips_unindexed_matches(
+    tmp_path: Path,
+) -> None:
+    files = {f"aaa/notes-{number:02}.txt": "needle_token here\n" for number in range(60)}
+    files["zzz/late.py"] = "VALUE = 'needle_token'\n"
+    environment = build_environment(tmp_path, files=files, semantic=False)
+    service = environment.service()
+    try:
+        result = service.search("needle_token", target="sample", strategy="text")
+        assert [(hit.path, hit.kind) for hit in result.hits] == [("zzz/late.py", "text")]
+    finally:
+        service.close()
+
+
+def test_text_search_failures_degrade_instead_of_failing_the_request(
+    semantic_environment: TestEnvironment,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail(*args: object, **kwargs: object) -> list[object]:
+        raise RetrievalError("ripgrep text search failed")
+
+    monkeypatch.setattr("codalith.query.service.search_text", fail)
+    service = semantic_environment.service()
+    try:
+        result = service.search("monotonic", target="sample", strategy="text")
+        assert result.degraded
+        assert "ripgrep text search failed" in result.warnings
+    finally:
+        service.close()
+
+
 def test_symbol_graph_has_resolved_source_evidence(
     semantic_environment: TestEnvironment,
 ) -> None:
@@ -464,7 +495,6 @@ def test_auto_search_resolves_lowercase_symbols_in_macro_context(tmp_path: Path)
 
 def test_text_search_uses_exact_symbol_evidence_for_natural_language(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     environment = build_environment(
         tmp_path,
@@ -472,12 +502,11 @@ def test_text_search_uses_exact_symbol_evidence_for_natural_language(
             "Private/LocalLog.h": "#define UE_LOG(...)\n",
             "Public/Logging/LogMacros.h": "#define UE_LOG(...)\n",
         },
-        semantic=True,
+        semantic=False,
         adapter="cpp-ue",
         include_extensions=(".h",),
     )
     service = environment.service()
-    monkeypatch.setattr(service.coderag, "text_search", lambda *args, **kwargs: [])
     try:
         result = service.search(
             "Where is the UE_LOG logging macro defined?",

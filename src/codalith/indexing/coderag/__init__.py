@@ -1,5 +1,5 @@
 """Public CodeRAG integration."""
 
-from codalith.indexing.coderag.backend import CodeRAGBackend, SemanticHit, TextHit
+from codalith.indexing.coderag.backend import CodeRAGBackend, SemanticHit
 
-__all__ = ["CodeRAGBackend", "SemanticHit", "TextHit"]
+__all__ = ["CodeRAGBackend", "SemanticHit"]

@@ -6,9 +6,7 @@ import hashlib
 import importlib
 import json
 import os
-import re
 import shutil
-import subprocess
 import tempfile
 from collections.abc import Mapping
 from contextlib import AbstractContextManager
@@ -57,13 +55,6 @@ class SemanticBuildInfo:
 
 
 @dataclass(frozen=True, slots=True)
-class TextHit:
-    path: str
-    line: int
-    text: str
-
-
-@dataclass(frozen=True, slots=True)
 class StoreProvenance:
     model: str
     dimension: int
@@ -106,53 +97,6 @@ class CodeRAGBackend:
             )
             for hit in hits
         ]
-
-    def text_search(
-        self,
-        corpus: Corpus,
-        generation: ActiveGeneration,
-        query: str,
-        *,
-        limit: int,
-    ) -> list[TextHit]:
-        with self._engine(corpus, generation) as engine:
-            try:
-                result = engine.search_files(
-                    re.escape(query),
-                    target="content",
-                    output_mode="content",
-                    limit=limit,
-                    ignore_case=True,
-                    max_file_bytes=self.policy.max_file_bytes,
-                    redact=True,
-                )
-            except Exception as exc:
-                raise RetrievalError(
-                    f"Text search failed for {corpus.corpus_id}: {type(exc).__name__}: {exc}"
-                ) from exc
-        if "error" in result:
-            raise RetrievalError(str(result["error"]))
-        rows = result.get("results", [])
-        if not isinstance(rows, list):
-            raise RetrievalError("CodeRAG text search returned invalid results")
-        hits: list[TextHit] = []
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            path = row.get("path")
-            line = row.get("line_number")
-            text = row.get("line")
-            if isinstance(path, str) and isinstance(line, int) and isinstance(text, str):
-                hits.append(TextHit(path.replace("\\", "/"), line, text))
-        if hits or shutil.which("rg") is None:
-            return hits
-        return _ripgrep_text_search(
-            corpus,
-            query,
-            limit=limit,
-            max_file_bytes=self.policy.max_file_bytes,
-            deny_globs=self.policy.deny_globs,
-        )
 
     def close(self) -> None:
         self._engines.close()
@@ -273,93 +217,6 @@ def _open_verified_engine(
             "because CodeRAG would clear the store"
         )
     return engine
-
-
-def _ripgrep_text_search(
-    corpus: Corpus,
-    query: str,
-    *,
-    limit: int,
-    max_file_bytes: int,
-    deny_globs: tuple[str, ...],
-) -> list[TextHit]:
-    command = [
-        "rg",
-        "--json",
-        "--line-number",
-        "--no-config",
-        "--no-ignore",
-        "--hidden",
-        "--ignore-case",
-        "--fixed-strings",
-        "--max-filesize",
-        str(max_file_bytes),
-        "--regexp",
-        query,
-    ]
-    for extension in corpus.include_extensions:
-        command.extend(("--glob", f"*{extension}"))
-    for pattern in dict.fromkeys([*corpus.exclude_globs, *deny_globs]):
-        command.extend(("--glob", f"!{pattern}"))
-    command.extend(("--", str(corpus.source_root)))
-
-    try:
-        process = subprocess.Popen(  # noqa: S603 - fixed executable and argv-only input
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-    except OSError as exc:
-        raise RetrievalError(f"Cannot start ripgrep text search: {exc}") from exc
-
-    hits: list[TextHit] = []
-    stderr = ""
-    try:
-        if process.stdout is None:
-            raise RetrievalError("ripgrep text search has no stdout stream")
-        for raw in process.stdout:
-            try:
-                event = json.loads(raw)
-            except json.JSONDecodeError:
-                continue
-            if event.get("type") != "match":
-                continue
-            data = event.get("data")
-            if not isinstance(data, dict):
-                continue
-            path_payload = data.get("path")
-            lines_payload = data.get("lines")
-            line_number = data.get("line_number")
-            if not isinstance(path_payload, dict) or not isinstance(lines_payload, dict):
-                continue
-            raw_path = path_payload.get("text")
-            raw_text = lines_payload.get("text")
-            if not isinstance(raw_path, str) or not isinstance(raw_text, str):
-                continue
-            if not isinstance(line_number, int):
-                continue
-            try:
-                relative = Path(raw_path).resolve().relative_to(corpus.source_root.resolve())
-            except (OSError, ValueError):
-                continue
-            hits.append(TextHit(relative.as_posix(), line_number, raw_text.rstrip("\r\n")))
-            if len(hits) >= limit:
-                process.terminate()
-                break
-        _, stderr = process.communicate(timeout=5)
-    except subprocess.TimeoutExpired as exc:
-        process.kill()
-        process.communicate()
-        raise RetrievalError("ripgrep text search did not terminate") from exc
-    finally:
-        if process.poll() is None:
-            process.kill()
-            process.wait()
-
-    if process.returncode not in {0, 1, -15}:
-        raise RetrievalError(stderr.strip() or "ripgrep text search failed")
-    return hits
 
 
 def prepare_semantic_index(
