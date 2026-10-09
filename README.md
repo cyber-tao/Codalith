@@ -8,12 +8,13 @@ The core is language-neutral. Python, C#, and C++/Unreal Engine have structural 
 
 ## What it guarantees
 
-- Every source result identifies a corpus revision and immutable index generation.
+- Every source result, read, and graph node identifies a corpus revision and immutable index generation, and one call never mixes generations.
 - `codalith://` citations can only read files present in that generation.
-- Source reads are bounded by a shared deny policy and report post-index changes.
-- A generation is published with one atomic pointer update only after its artifacts validate.
-- stdio and Streamable HTTP expose the same seven strict, read-only MCP tools.
-- The HTTP service is loopback-first, checks Host and Origin, and bounds streamed bodies.
+- The shared deny policy bounds reads and filters every tool output; reads report post-index changes.
+- A generation is published with one atomic pointer update only after its artifacts validate; a failed build changes nothing.
+- A semantic store is either built inside its generation from exactly the snapshot's files or adopted after content verification, and is never rewritten by Codalith.
+- stdio and Streamable HTTP expose the same seven strict, read-only MCP tools with stable error codes.
+- The HTTP service is loopback-first, checks Host and Origin on every route, and bounds streamed bodies.
 
 Codalith is not a hosted multi-tenant gateway. Authentication, RBAC, audit databases, rate-limit shells, Knowledge Cards, source priors, and the old PostgreSQL semantic store are intentionally absent.
 
@@ -22,6 +23,7 @@ Codalith is not a hosted multi-tenant gateway. Authentication, RBAC, audit datab
 - Python 3.11+
 - [uv](https://docs.astral.sh/uv/)
 - Git submodules
+- [Bun](https://bun.sh/) (optional, to build the operations dashboard locally)
 - Docker Compose (optional)
 
 ## Quick start
@@ -41,7 +43,7 @@ uv run codalith client-config --client codex --transport http
 uv run codalith client-config --client claude --transport stdio
 ```
 
-Docker performs the sample index step before starting the server:
+Docker performs the sample index step before starting the server, and its image includes the operations dashboard at `http://127.0.0.1:8765/dashboard/`:
 
 ```bash
 docker compose up --build mcp-http
@@ -51,7 +53,7 @@ docker compose up --build mcp-http
 
 | Tool | Purpose |
 | --- | --- |
-| `codalith_search` | Structural, semantic, or exact-text discovery |
+| `codalith_search` | Structural, semantic, or literal-text discovery |
 | `codalith_context` | Bounded context pack with verified source text |
 | `codalith_read` | Exact read of a canonical source URI |
 | `codalith_symbol` | Exact or fuzzy symbol resolution |
@@ -66,13 +68,15 @@ See [MCP API](docs/mcp-api.md) for schemas and error behavior.
 ```text
 configs/                 TOML corpus registry and source policy
 benchmarks/datasets/     independent sample, UE regression, and holdout sets
+dashboard/               React operations dashboard (built with Bun)
 external/CodeRAG/        pinned retrieval-engine submodule
 fixtures/sample_corpus/  deterministic local smoke corpus
 src/codalith/corpus/     registry, policy, URIs, generations, source reads
-src/codalith/languages/  structural adapter contracts and implementations
-src/codalith/indexing/   SQLite builder and CodeRAG integration
+src/codalith/languages/  adapter catalog, contracts, and implementations
+src/codalith/indexing/   SQLite builder, CodeRAG integration, literal text search
 src/codalith/query/      transport-independent query service
 src/codalith/mcp/        official SDK bindings and transports
+src/codalith/dashboard/  process-local telemetry and dashboard HTTP routes
 src/codalith/benchmarks/ real MCP benchmark runner
 src/codalith/cli/        single `codalith` command tree
 tests/                   unit, integration, security, and protocol tests
@@ -84,6 +88,10 @@ tests/                   unit, integration, security, and protocol tests
 uv run --frozen ruff check src tests
 uv run --frozen mypy src
 uv run --frozen pytest -q
+bun install --cwd dashboard --frozen-lockfile
+bun run --cwd dashboard typecheck
+bun run --cwd dashboard test
+bun run --cwd dashboard build
 docker compose config --quiet
 docker compose --profile ue config --quiet
 docker compose --profile test config --quiet
@@ -103,7 +111,7 @@ uv run codalith benchmark \
 - [Architecture and invariants](docs/architecture.md)
 - [Configuration](docs/configuration.md)
 - [MCP API](docs/mcp-api.md)
-- [Operations and UE setup](docs/operations.md)
+- [Operations, UE setup, and migration notes](docs/operations.md)
 - [Evaluation](docs/evaluation.md)
 
-This repository is in development. Index and configuration schemas may change without compatibility shims; rebuild generations after such changes.
+This repository is in development. Index and configuration schemas may change without compatibility shims; rebuild generations after such changes (see the migration notes in [Operations](docs/operations.md)).

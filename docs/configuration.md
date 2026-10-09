@@ -27,17 +27,17 @@ id = "all"
 corpora = ["sample"]
 ```
 
-`adapter` is `python`, `csharp`, `cpp-ue`, or `generic`. `embedding_provider` is `fake`, `fastembed`, or `openai`. `coderag_store` is optional; when absent, semantic data belongs to the generation. When present, `adopt` uses an external store and records a full fingerprint.
+`adapter` is one of the IDs in `codalith.languages.catalog`: `python`, `csharp`, `cpp-ue`, or `generic`. `embedding_provider` is `fake`, `fastembed`, or `openai`. `coderag_store` is used only by `--semantic adopt`; `--semantic build` always embeds into the new generation. An adopted store must record the same embedding model and dimension as the configured provider, and once adopted its absolute path is pinned in the generation manifest, so later edits to `coderag_store` affect only future builds.
 
 `include_extensions` uses suffix matching, so `.Build.cs` and `.Target.cs` are supported. An empty list means the adapter decides which files it supports.
 
-`exclude_globs` matches canonical corpus-relative paths case-insensitively. Use explicit root patterns such as `Templates/**` separately from recursive patterns such as `**/ThirdParty/**`; directory basenames are never implicitly excluded at every depth.
+`exclude_globs` matches canonical corpus-relative paths case-insensitively. A pattern containing `/` is anchored at the corpus root unless it starts with `**/`, so `Templates/**` excludes only the root `Templates` directory while `**/ThirdParty/**` excludes it at any depth. A pattern without `/` (such as `node_modules`) matches any single path segment at any depth.
 
 ## Source policy
 
 `configs/source-policy.toml` defines default/hard line budgets, maximum source bytes, and at least one deny glob.
 
-Patterns are checked case-insensitively at indexing and read time. `**/.env` matches both root and nested files. Traversal, absolute paths, empty segments, and dot segments are rejected before glob matching.
+Patterns follow the same matching rules and are checked case-insensitively at indexing, on every query output, and at read time. `**/.env` matches both root and nested files. Traversal, absolute paths, empty segments, and dot segments are rejected before glob matching. The deny globs and byte limit are part of each generation's source-selection hash: changing them invalidates existing generations until they are rebuilt, and denied paths are withheld from results in the meantime.
 
 ## Environment
 
@@ -47,7 +47,9 @@ Patterns are checked case-insensitively at indexing and read time. `**/.env` mat
 - `CODALITH_EMBEDDING_*`: endpoint and key required by OpenAI-compatible corpora.
 - `LANCE_INCLUDE_VECTOR_CENTROIDS=false`: avoids loading large IVF centroid statistics.
 - `CODALITH_UE_*_HOST_DIR`: host bind mounts for UE source, structural indexes, and CodeRAG store.
-- `CODALITH_UE_EMBEDDING_*`: provenance expected by the adopted/rebuilt UE store.
+- `CODALITH_UE_EMBEDDING_*`: provenance expected by the adopted UE store.
+
+Compose sets the in-container registry, source policy, and listen host itself. `CODALITH_REGISTRY` and `CODALITH_SOURCE_POLICY` select the TOML files for direct local commands, and `CODALITH_DASHBOARD_DIR` points the HTTP server at prebuilt dashboard assets.
 
 The application does not mutate `.env` or client configuration. Docker Compose loads `.env`; direct local commands require the relevant variables in the process environment.
 

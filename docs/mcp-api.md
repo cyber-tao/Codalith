@@ -2,25 +2,32 @@
 
 Both transports use the official Python MCP SDK and the same strict Pydantic schemas. Unknown input fields are errors. Tool annotations declare read-only, non-destructive, idempotent, closed-world behavior.
 
+Every tool resolves each target corpus to one generation for the whole call. Paths denied by the source policy are withheld from every output and counted in `warnings`.
+
 ## Tools
 
 ### `codalith_search`
 
-Input: `query`, optional `target`, `strategy` (`auto`, `semantic`, `text`, `symbol`), and `limit` (1–50).
+Input: `query`, optional `target`, `strategy`, and `limit` (1–50).
 
-Returns ranked hits with corpus/revision/generation, canonical source URI, path/range, symbol metadata, normalized score, contributing backends, snippet, degradation flag, and warnings.
+- `auto`: exact symbol lookup for identifier candidates, file lookup by name and path terms, and semantic hits, fused by rank.
+- `semantic`: semantic hits only; fails with `retrieval_failed` when the generation has no semantic plane.
+- `text`: case-insensitive literal match of the whole query in the generation's indexed files (up to three lines per file, files with an exact-case match first), plus exact symbol evidence for identifiers in the query. It does not need the semantic plane.
+- `symbol`: exact symbol lookup, falling back to substring matches.
+
+Returns ranked hits with corpus/revision/generation, canonical source URI, path/range, symbol metadata, normalized score, contributing backends, snippet, degradation flag, and warnings. A corpus that cannot serve part of the request makes the response `degraded` instead of failing it.
 
 ### `codalith_context`
 
 Input: `query`, optional `target`, `max_spans` (1–20), and `max_chars` (1,000–100,000).
 
-Returns non-overlapping source spans with current/indexed hashes, stale/truncation/decoding state, confidence, and warnings.
+Returns non-overlapping source spans with current/indexed hashes, stale/decoding state, confidence, and warnings. `truncated` is true when a span ends before its symbol, chunk, or file does, because of the hard line limit or the character budget.
 
 ### `codalith_read`
 
-Input: one canonical `codalith://<corpus>/source/<path>#Lx-Ly` URI.
+Input: one canonical `codalith://<corpus>/source/<path>#Lx-Ly` URI. Ranges always use both bounds; a single line is `#L5-L5`.
 
-The path must exist in the active structural generation. The response includes actual canonical range, total lines, text, both hashes, and stale state.
+The path must exist in the active structural generation. The response includes the `generation_id` it was verified against, the actual canonical range, total lines, text, both hashes, and stale state.
 
 ### `codalith_symbol`
 
@@ -28,7 +35,7 @@ Input: symbol `query`, optional `target`, `exact`, and `limit` (1–100). Return
 
 ### `codalith_graph`
 
-Input: canonical symbol `root_uri`, `direction`, `depth` (1–3), and edge `limit` (1–1,000). Returns nodes, evidence-backed edges, resolution state, and truncation.
+Input: canonical symbol `root_uri`, `direction`, `depth` (1–3), and edge `limit` (1–1,000). Returns nodes with their `generation_id`, evidence-backed edges, and truncation. Edge `resolution` is `resolved` (exact qualified match), `name_match` (the last name segment matches exactly one symbol in the corpus), `ambiguous`, or `unresolved`.
 
 ### `codalith_compare`
 
@@ -36,7 +43,7 @@ Input: `from_corpus`, `to_corpus`, `include_unchanged`, and `limit` (1–1,000).
 
 ### `codalith_status`
 
-Input: optional `target`. Returns per-corpus ready/degraded/missing/invalid state and manifest counts without loading embedding models or scanning source.
+Input: optional `target`. Returns per-corpus state without loading embedding models or scanning source: `ready` (structural and semantic planes valid), `degraded` (no semantic plane), `missing` (no published generation), or `invalid` (the active generation no longer matches its artifacts, store provenance, or configuration).
 
 ## Resources
 
