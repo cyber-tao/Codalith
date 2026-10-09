@@ -11,10 +11,11 @@ import re
 import sqlite3
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from codalith.corpus.globs import SOURCE_SELECTION_VERSION
 from codalith.corpus.registry import Corpus
@@ -28,7 +29,8 @@ GENERATION_STORE_DIR = "coderag"
 STRUCTURE_TABLES = ("files", "symbols", "references", "module_dependencies")
 _GENERATION_ID = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}$")
 _FileStamp = tuple[int, int, int]
-_REPLACE_TIMEOUT_SECONDS = 5.0
+_SHARING_RETRY_SECONDS = 5.0
+_T = TypeVar("_T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,7 +234,9 @@ class GenerationRepository:
     def _resolve(self, corpus: Corpus) -> ActiveGeneration:
         pointer_path = corpus.index_root / "current.json"
         try:
-            pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
+            pointer = json.loads(
+                _retry_sharing_violations(lambda: pointer_path.read_text(encoding="utf-8"))
+            )
             generation_id = pointer["generation_id"]
         except FileNotFoundError as exc:
             raise IndexMissingError(
@@ -355,7 +359,7 @@ class GenerationRepository:
                 handle.write(json.dumps({"generation_id": manifest.generation_id}, indent=2) + "\n")
                 handle.flush()
                 os.fsync(handle.fileno())
-            _replace_with_retry(temporary, pointer)
+            _retry_sharing_violations(lambda: os.replace(temporary, pointer))
         finally:
             temporary.unlink(missing_ok=True)
         fsync_directory(corpus.index_root)
@@ -385,15 +389,16 @@ def _file_stamp(path: Path) -> _FileStamp | None:
     return stat.st_ino, stat.st_mtime_ns, stat.st_size
 
 
-def _replace_with_retry(source: Path, destination: Path) -> None:
-    """Windows refuses to replace a file that a reader holds open, so wait out brief reads."""
+def _retry_sharing_violations(operation: Callable[[], _T]) -> _T:
+    """Windows rejects opening or replacing a file mid-replace or while another reader holds it."""
 
-    deadline = time.monotonic() + _REPLACE_TIMEOUT_SECONDS
+    if sys.platform != "win32":
+        return operation()
+    deadline = time.monotonic() + _SHARING_RETRY_SECONDS
     delay = 0.005
     while True:
         try:
-            os.replace(source, destination)
-            return
+            return operation()
         except PermissionError:
             if time.monotonic() >= deadline:
                 raise
