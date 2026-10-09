@@ -9,7 +9,7 @@ from urllib.parse import quote, unquote, urlsplit
 from codalith.errors import URIResolutionError
 
 _CORPUS_ID = re.compile(r"^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$")
-_LINE_FRAGMENT = re.compile(r"^L([1-9][0-9]*)(?:-L([1-9][0-9]*))?$")
+_LINE_FRAGMENT = re.compile(r"^L([1-9][0-9]*)-L([1-9][0-9]*)$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,9 +82,12 @@ def parse_uri(uri: str) -> CodalithURI:
     if parsed.fragment:
         match = _LINE_FRAGMENT.fullmatch(parsed.fragment)
         if kind != "source" or match is None:
-            raise URIResolutionError(f"Invalid source line fragment: {parsed.fragment}")
+            raise URIResolutionError(
+                f"Invalid source line fragment #{parsed.fragment}; use #L<start>-L<end>, "
+                "for example #L5-L5 for a single line"
+            )
         start = int(match.group(1))
-        end = int(match.group(2) or match.group(1))
+        end = int(match.group(2))
         if end < start:
             raise URIResolutionError("Source URI end line cannot precede start line")
     if kind == "status" and len(parts) == 1:

@@ -108,6 +108,9 @@ def test_canonical_uris_round_trip_and_reject_ambiguous_encodings() -> None:
     assert parse_uri(symbol_uri("sample", "abc:1")).value == "abc:1"
     with pytest.raises(URIResolutionError, match="not canonical"):
         parse_uri("codalith://sample/source/src%2Fcore.py#L1-L1")
+    assert parse_uri("codalith://sample/source/a.py#L5-L5").end_line == 5
+    with pytest.raises(URIResolutionError, match="#L5-L5 for a single line"):
+        parse_uri("codalith://sample/source/a.py#L5")
     with pytest.raises(URIResolutionError, match="cannot precede"):
         source_uri("sample", "x.py", start_line=2, end_line=1)
 
