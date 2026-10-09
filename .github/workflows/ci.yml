@@ -35,6 +35,22 @@ jobs:
       - run: uv run --frozen mypy src
       - run: uv run --frozen pytest -q
 
+  dashboard:
+    name: Dashboard
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run test
+      - run: bun run build
+
   container:
     name: Container build
     runs-on: ubuntu-latest

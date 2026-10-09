@@ -1,5 +1,12 @@
 FROM ghcr.io/astral-sh/uv:0.11.28 AS uv
 
+FROM oven/bun:1.4.2 AS dashboard
+WORKDIR /dashboard
+COPY dashboard/package.json dashboard/bun.lock ./
+RUN bun install --frozen-lockfile
+COPY dashboard ./
+RUN bun run build
+
 FROM python:3.12-slim-bookworm AS base
 
 ENV PATH="/opt/codalith/.venv/bin:$PATH" \
@@ -32,7 +39,8 @@ FROM python:3.12-slim-bookworm AS runtime
 
 ENV PATH="/opt/codalith/.venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    CODALITH_DASHBOARD_DIR=/opt/codalith/dashboard/dist
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ripgrep \
@@ -41,6 +49,7 @@ RUN apt-get update \
     && mkdir -p /app/data /var/lib/codalith \
     && chown -R codalith:codalith /app /var/lib/codalith
 COPY --from=runtime-build --chown=codalith:codalith /opt/codalith /opt/codalith
+COPY --from=dashboard --chown=codalith:codalith /dashboard/dist /opt/codalith/dashboard/dist
 WORKDIR /app
 RUN ln -s /opt/codalith/configs configs \
     && ln -s /opt/codalith/fixtures fixtures \

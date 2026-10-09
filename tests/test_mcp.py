@@ -14,9 +14,10 @@ import pytest
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamable_http_client
+from starlette.testclient import TestClient
 
 from codalith import errors
-from codalith.mcp.http import HTTPConfig, MCPHTTPServer
+from codalith.mcp.http import HTTPConfig, MCPHTTPServer, create_http_app
 from codalith.mcp.server import _error_payload
 from conftest import TestEnvironment
 
@@ -234,6 +235,30 @@ def test_http_security_applies_to_every_route(
                 headers={"Origin": base},
             )
             assert snapshot.status_code == 200
+
+
+def test_dashboard_assets_are_served_when_built(
+    semantic_environment: TestEnvironment,
+    tmp_path: Path,
+) -> None:
+    missing = create_http_app(
+        semantic_environment.service(),
+        HTTPConfig(),
+        dashboard_dir=tmp_path / "not-built",
+    )
+    with TestClient(missing, base_url="http://127.0.0.1:8765") as client:
+        response = client.get("/dashboard", follow_redirects=False)
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "dashboard_not_built"
+    assets = tmp_path / "dist"
+    assets.mkdir()
+    (assets / "index.html").write_text("<html>dashboard</html>", encoding="utf-8")
+    built = create_http_app(semantic_environment.service(), HTTPConfig(), dashboard_dir=assets)
+    with TestClient(built, base_url="http://127.0.0.1:8765") as client:
+        assert client.get("/dashboard", follow_redirects=False).status_code == 307
+        page = client.get("/dashboard/")
+        assert page.status_code == 200
+        assert "dashboard" in page.text
 
 
 def test_http_security_rejects_rebinding_and_oversized_streams(
