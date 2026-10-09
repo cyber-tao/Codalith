@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -55,3 +56,38 @@ class LanguageAdapter(Protocol):
     def supports(self, path: Path) -> bool: ...
 
     def extract(self, path: str, text: str) -> ExtractionResult: ...
+
+
+def dedupe_symbols(items: Iterable[SymbolObservation]) -> list[SymbolObservation]:
+    seen: set[tuple[str, str, str, int]] = set()
+    result: list[SymbolObservation] = []
+    for item in items:
+        key = (item.qualified_name, item.kind, item.path, item.start_line)
+        if key not in seen:
+            seen.add(key)
+            result.append(item)
+    return result
+
+
+def dedupe_references(items: Iterable[ReferenceObservation]) -> list[ReferenceObservation]:
+    seen: set[tuple[str | None, str, str, int]] = set()
+    result: list[ReferenceObservation] = []
+    for item in items:
+        key = (item.source_qualified_name, item.target_name, item.path, item.line)
+        if key not in seen:
+            seen.add(key)
+            result.append(item)
+    return result
+
+
+def dedupe_dependencies(
+    items: Iterable[ModuleDependencyObservation],
+) -> list[ModuleDependencyObservation]:
+    seen: set[tuple[str, str, str, str, int]] = set()
+    result: list[ModuleDependencyObservation] = []
+    for item in items:
+        key = (item.source_module, item.target_module, item.kind, item.path, item.line)
+        if key not in seen:
+            seen.add(key)
+            result.append(item)
+    return result

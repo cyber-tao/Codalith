@@ -14,17 +14,14 @@ from codalith.languages.base import (
     ModuleDependencyObservation,
     ReferenceObservation,
     SymbolObservation,
+    dedupe_dependencies,
+    dedupe_symbols,
 )
+from codalith.languages.catalog import ADAPTERS, language_for_path
 from codalith.languages.csharp import CSharpAdapter
 
-_CPP_SUFFIXES = {".h", ".hpp", ".inl", ".c", ".cc", ".cpp"}
-_GENERIC_SOURCE_LANGUAGES = {
-    ".ispc": "ispc",
-    ".m": "objective-c",
-    ".mm": "objective-cpp",
-    ".usf": "hlsl",
-    ".ush": "hlsl",
-}
+_CPP_SUFFIXES = frozenset({".h", ".hpp", ".inl", ".c", ".cc", ".cpp"})
+_UNPARSED_SUFFIXES = frozenset({".ispc", ".m", ".mm", ".usf", ".ush"})
 _TYPE_NODES = {
     "class_specifier": "class",
     "struct_specifier": "struct",
@@ -51,7 +48,7 @@ _QUOTED = re.compile(r'"([A-Za-z_][A-Za-z0-9_]*)"')
 
 class CppUEAdapter:
     adapter_id = "cpp-ue"
-    version = 6
+    version = ADAPTERS["cpp-ue"].version
 
     def __init__(self) -> None:
         self._parser = Parser(Language(tree_sitter_cpp.language()))
@@ -59,7 +56,7 @@ class CppUEAdapter:
 
     def supports(self, path: Path) -> bool:
         suffix = path.suffix.casefold()
-        return suffix == ".cs" or suffix in _CPP_SUFFIXES | _GENERIC_SOURCE_LANGUAGES.keys()
+        return suffix == ".cs" or suffix in _CPP_SUFFIXES or suffix in _UNPARSED_SUFFIXES
 
     def extract(self, path: str, text: str) -> ExtractionResult:
         normalized_path = path.casefold()
@@ -67,9 +64,8 @@ class CppUEAdapter:
             return _extract_build_file(path, text, self._csharp)
         if normalized_path.endswith(".cs"):
             return self._csharp.extract(path, text)
-        suffix = Path(path).suffix.lower()
-        if suffix in _GENERIC_SOURCE_LANGUAGES:
-            return ExtractionResult(language=_GENERIC_SOURCE_LANGUAGES[suffix])
+        if Path(path).suffix.lower() in _UNPARSED_SUFFIXES:
+            return ExtractionResult(language=language_for_path(path))
         source = _sanitized_source(text)
         tree = self._parser.parse(source)
         state = _CppState(path, text, source)
@@ -79,7 +75,7 @@ class CppUEAdapter:
             warnings = (f"{path}: tree-sitter reported parse errors; partial index retained",)
         return ExtractionResult(
             language="cpp",
-            symbols=tuple(_dedupe_symbols(state.symbols)),
+            symbols=tuple(dedupe_symbols(state.symbols)),
             references=tuple(state.references),
             warnings=warnings,
         )
@@ -361,7 +357,7 @@ def _extract_build_file(
         language="csharp",
         symbols=symbols,
         references=extracted.references,
-        module_dependencies=tuple(_dedupe_dependencies(dependencies)),
+        module_dependencies=tuple(dedupe_dependencies(dependencies)),
         warnings=extracted.warnings,
     )
 
@@ -530,27 +526,3 @@ def _mask_text(value: str) -> str:
 def _bounded_signature(value: str) -> str:
     normalized = _normalize(value)
     return normalized if len(normalized) <= 4_000 else normalized[:3_999] + "…"
-
-
-def _dedupe_symbols(items: list[SymbolObservation]) -> list[SymbolObservation]:
-    seen: set[tuple[str, str, str, int]] = set()
-    result: list[SymbolObservation] = []
-    for item in items:
-        key = (item.qualified_name, item.kind, item.path, item.start_line)
-        if key not in seen:
-            seen.add(key)
-            result.append(item)
-    return result
-
-
-def _dedupe_dependencies(
-    items: list[ModuleDependencyObservation],
-) -> list[ModuleDependencyObservation]:
-    seen: set[tuple[str, str, str, str, int]] = set()
-    result: list[ModuleDependencyObservation] = []
-    for item in items:
-        key = (item.source_module, item.target_module, item.kind, item.path, item.line)
-        if key not in seen:
-            seen.add(key)
-            result.append(item)
-    return result

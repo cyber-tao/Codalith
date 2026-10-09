@@ -40,7 +40,7 @@ from codalith.indexing.structure.models import (
 )
 from codalith.indexing.structure.store import StructureIndex
 from codalith.indexing.text_search import search_text
-from codalith.languages.catalog import RetrievalProfile, retrieval_profile
+from codalith.languages.catalog import RetrievalProfile, language_for_path, retrieval_profile
 from codalith.query.models import (
     CompareChange,
     CompareResponse,
@@ -1191,7 +1191,7 @@ def _from_symbol(
         path=symbol.path,
         start_line=start_line,
         end_line=end_line,
-        language=_language_from_path(symbol.path),
+        language=language_for_path(symbol.path),
         symbol=symbol.qualified_name,
         symbol_id=symbol.symbol_id,
         kind=symbol.kind,
@@ -1514,25 +1514,6 @@ def _fit_end_line(text: str, *, start_line: int, character_budget: int) -> int:
 def _bounded_snippet(value: str) -> str:
     normalized = value.strip()
     return normalized if len(normalized) <= 2000 else normalized[:1999] + "…"
-
-
-def _language_from_path(path: str) -> str:
-    lower = path.lower()
-    if lower.endswith((".h", ".hpp", ".inl", ".c", ".cc", ".cpp")):
-        return "cpp"
-    if lower.endswith((".py", ".pyi")):
-        return "python"
-    if lower.endswith(".cs"):
-        return "csharp"
-    if lower.endswith(".ispc"):
-        return "ispc"
-    if lower.endswith(".m"):
-        return "objective-c"
-    if lower.endswith(".mm"):
-        return "objective-cpp"
-    if lower.endswith((".usf", ".ush")):
-        return "hlsl"
-    return "text"
 
 
 def _unique(values: list[str]) -> list[str]:

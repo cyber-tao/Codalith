@@ -11,11 +11,12 @@ from codalith.languages.base import (
     ReferenceObservation,
     SymbolObservation,
 )
+from codalith.languages.catalog import ADAPTERS
 
 
 class PythonAdapter:
     adapter_id = "python"
-    version = 2
+    version = ADAPTERS["python"].version
 
     def supports(self, path: Path) -> bool:
         return path.suffix.lower() in {".py", ".pyi"}

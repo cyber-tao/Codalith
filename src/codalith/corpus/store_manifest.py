@@ -20,10 +20,12 @@ from codalith.corpus.globs import SOURCE_SELECTION_VERSION
 from codalith.corpus.registry import Corpus
 from codalith.corpus.source_policy import SourcePolicy
 from codalith.errors import IndexBuildError, IndexInvalidError, IndexMissingError
+from codalith.languages.catalog import ADAPTERS
 
 MANIFEST_SCHEMA_VERSION = 3
 STRUCTURE_SCHEMA_VERSION = 2
 GENERATION_STORE_DIR = "coderag"
+STRUCTURE_TABLES = ("files", "symbols", "references", "module_dependencies")
 _GENERATION_ID = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}$")
 _FileStamp = tuple[int, int, int]
 _REPLACE_TIMEOUT_SECONDS = 5.0
@@ -254,9 +256,7 @@ class GenerationRepository:
                 f"Index revision {manifest.source_revision!r} does not match "
                 f"configured revision {corpus.revision!r}"
             )
-        from codalith.languages import create_adapter
-
-        adapter = create_adapter(corpus.adapter)
+        adapter = ADAPTERS[corpus.adapter]
         if manifest.adapter != adapter.adapter_id or manifest.adapter_version != adapter.version:
             raise IndexInvalidError(
                 f"Index adapter {manifest.adapter}@{manifest.adapter_version} does not match "
@@ -332,20 +332,7 @@ class GenerationRepository:
                     raise IndexInvalidError(
                         f"Structure index integrity check failed: {integrity}"
                     )
-                counts: dict[str, int] = {}
-                for table in (
-                    "files",
-                    "symbols",
-                    "references",
-                    "module_dependencies",
-                ):
-                    quoted = '"references"' if table == "references" else table
-                    row = connection.execute(f"SELECT count(*) FROM {quoted}").fetchone()
-                    if row is None:
-                        raise IndexInvalidError(
-                            f"Cannot count structure index table: {table}"
-                        )
-                    counts[table] = int(row[0])
+                counts = count_structure_rows(connection)
             finally:
                 connection.close()
         except sqlite3.Error as exc:
@@ -372,6 +359,14 @@ class GenerationRepository:
         finally:
             temporary.unlink(missing_ok=True)
         fsync_directory(corpus.index_root)
+
+
+def count_structure_rows(connection: sqlite3.Connection) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for table in STRUCTURE_TABLES:
+        row = connection.execute(f'SELECT count(*) FROM "{table}"').fetchone()
+        counts[table] = int(row[0]) if row is not None else 0
+    return counts
 
 
 @functools.cache

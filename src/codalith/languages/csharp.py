@@ -12,7 +12,11 @@ from codalith.languages.base import (
     ModuleDependencyObservation,
     ReferenceObservation,
     SymbolObservation,
+    dedupe_dependencies,
+    dedupe_references,
+    dedupe_symbols,
 )
+from codalith.languages.catalog import ADAPTERS
 
 _TYPE_NODES = {
     "class_declaration": "class",
@@ -39,7 +43,7 @@ _MEMBER_NODES = {
 
 class CSharpAdapter:
     adapter_id = "csharp"
-    version = 1
+    version = ADAPTERS["csharp"].version
 
     def __init__(self) -> None:
         self._parser = Parser(Language(tree_sitter_c_sharp.language()))
@@ -59,9 +63,9 @@ class CSharpAdapter:
             )
         return ExtractionResult(
             language="csharp",
-            symbols=tuple(_dedupe_symbols(state.symbols)),
-            references=tuple(_dedupe_references(state.references)),
-            module_dependencies=tuple(_dedupe_dependencies(state.dependencies)),
+            symbols=tuple(dedupe_symbols(state.symbols)),
+            references=tuple(dedupe_references(state.references)),
+            module_dependencies=tuple(dedupe_dependencies(state.dependencies)),
             warnings=warnings,
         )
 
@@ -286,38 +290,3 @@ def _using_target(value: str) -> str | None:
 
 def _text(node: Node, source: bytes) -> str:
     return source[node.start_byte : node.end_byte].decode("utf-8", errors="replace")
-
-
-def _dedupe_symbols(items: list[SymbolObservation]) -> list[SymbolObservation]:
-    seen: set[tuple[str, str, str, int]] = set()
-    result: list[SymbolObservation] = []
-    for item in items:
-        key = (item.qualified_name, item.kind, item.path, item.start_line)
-        if key not in seen:
-            seen.add(key)
-            result.append(item)
-    return result
-
-
-def _dedupe_references(items: list[ReferenceObservation]) -> list[ReferenceObservation]:
-    seen: set[tuple[str | None, str, str, int]] = set()
-    result: list[ReferenceObservation] = []
-    for item in items:
-        key = (item.source_qualified_name, item.target_name, item.path, item.line)
-        if key not in seen:
-            seen.add(key)
-            result.append(item)
-    return result
-
-
-def _dedupe_dependencies(
-    items: list[ModuleDependencyObservation],
-) -> list[ModuleDependencyObservation]:
-    seen: set[tuple[str, str, str, str, int]] = set()
-    result: list[ModuleDependencyObservation] = []
-    for item in items:
-        key = (item.source_module, item.target_module, item.kind, item.path, item.line)
-        if key not in seen:
-            seen.add(key)
-            result.append(item)
-    return result

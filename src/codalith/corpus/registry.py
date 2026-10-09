@@ -10,10 +10,10 @@ from typing import Any
 from codalith.config import load_toml, resolve_config_path
 from codalith.corpus.globs import matches_path
 from codalith.errors import ConfigurationError, CorpusNotFoundError
+from codalith.languages.catalog import ADAPTERS
 
 REGISTRY_SCHEMA_VERSION = 2
 _SAFE_ID = re.compile(r"^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$")
-_ADAPTERS = frozenset({"python", "csharp", "cpp-ue", "generic"})
 _PROVIDERS = frozenset({"fake", "fastembed", "openai"})
 _TOP_LEVEL_FIELDS = frozenset({"schema_version", "default_target", "corpora", "workspaces"})
 _CORPUS_FIELDS = frozenset(
@@ -163,9 +163,9 @@ def _parse_corpus(path: Path, raw: dict[str, Any], index: int) -> Corpus:
     _reject_unknown(raw, _CORPUS_FIELDS, f"corpora[{index}]", path)
     corpus_id = _safe_id(_required_string(raw, "id", path), "corpus id")
     adapter = _required_string(raw, "adapter", path)
-    if adapter not in _ADAPTERS:
+    if adapter not in ADAPTERS:
         raise ConfigurationError(
-            f"Corpus {corpus_id} adapter must be one of {', '.join(sorted(_ADAPTERS))}"
+            f"Corpus {corpus_id} adapter must be one of {', '.join(sorted(ADAPTERS))}"
         )
     provider = str(raw.get("embedding_provider", "fastembed")).strip()
     if provider not in _PROVIDERS:

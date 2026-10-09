@@ -5,11 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from codalith.languages.base import ExtractionResult
+from codalith.languages.catalog import ADAPTERS
 
 
 class GenericAdapter:
     adapter_id = "generic"
-    version = 1
+    version = ADAPTERS["generic"].version
 
     def supports(self, path: Path) -> bool:
         return True

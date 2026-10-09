@@ -206,18 +206,6 @@ class StructureIndex:
             with self._lock:
                 cursor.close()
 
-    def integrity_check(self) -> str:
-        row = self._one("PRAGMA integrity_check", ())
-        return str(row[0]) if row is not None else "missing"
-
-    def counts(self) -> dict[str, int]:
-        result: dict[str, int] = {}
-        for table in ("files", "symbols", "references", "module_dependencies"):
-            quoted = '"references"' if table == "references" else table
-            row = self._one(f"SELECT count(*) FROM {quoted}", ())
-            result[table] = int(row[0]) if row is not None else 0
-        return result
-
     def _one(self, sql: str, parameters: tuple[object, ...]) -> sqlite3.Row | None:
         with self._lock:
             return cast(sqlite3.Row | None, self._connection.execute(sql, parameters).fetchone())

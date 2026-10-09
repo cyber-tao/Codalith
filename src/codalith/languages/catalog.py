@@ -1,8 +1,9 @@
-"""Dependency-free retrieval conventions contributed by language adapters."""
+"""Dependency-free adapter metadata shared by configuration, indexing, and queries."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,8 +31,47 @@ UNREAL_PROFILE = RetrievalProfile(
     private_dirs=("Private",),
 )
 
-_PROFILES = {"cpp-ue": UNREAL_PROFILE}
+
+@dataclass(frozen=True, slots=True)
+class AdapterSpec:
+    """Raising ``version`` invalidates every generation built by the adapter."""
+
+    adapter_id: str
+    version: int
+    profile: RetrievalProfile = NEUTRAL_PROFILE
+
+
+ADAPTERS = {
+    spec.adapter_id: spec
+    for spec in (
+        AdapterSpec("python", 2),
+        AdapterSpec("csharp", 1),
+        AdapterSpec("cpp-ue", 6, UNREAL_PROFILE),
+        AdapterSpec("generic", 1),
+    )
+}
+
+_LANGUAGES_BY_SUFFIX = {
+    ".py": "python",
+    ".pyi": "python",
+    ".cs": "csharp",
+    ".c": "cpp",
+    ".cc": "cpp",
+    ".cpp": "cpp",
+    ".h": "cpp",
+    ".hpp": "cpp",
+    ".inl": "cpp",
+    ".ispc": "ispc",
+    ".m": "objective-c",
+    ".mm": "objective-cpp",
+    ".usf": "hlsl",
+    ".ush": "hlsl",
+}
 
 
 def retrieval_profile(adapter_id: str) -> RetrievalProfile:
-    return _PROFILES.get(adapter_id, NEUTRAL_PROFILE)
+    return ADAPTERS[adapter_id].profile
+
+
+def language_for_path(path: str) -> str:
+    return _LANGUAGES_BY_SUFFIX.get(PurePosixPath(path).suffix.lower(), "text")

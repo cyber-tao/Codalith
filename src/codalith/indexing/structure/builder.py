@@ -23,6 +23,7 @@ from codalith.corpus.store_manifest import (
     Artifact,
     GenerationRepository,
     IndexManifest,
+    count_structure_rows,
     fsync_directory,
     installed_coderag_version,
     new_generation_id,
@@ -38,6 +39,7 @@ from codalith.indexing.coderag.backend import (
 from codalith.indexing.structure.schema import INDEX_SQL, SCHEMA_SQL
 from codalith.languages import create_adapter
 from codalith.languages.base import ExtractionResult, ReferenceObservation, SymbolObservation
+from codalith.languages.catalog import ADAPTERS, language_for_path
 
 _MAX_REPORTED_WARNINGS = 200
 
@@ -189,7 +191,7 @@ class StructureBuilder:
                 coderag_extra_files=semantic_info.extra_files if semantic_info else None,
                 source_selection_hash=source_selection_hash(corpus, self.policy),
                 adapter=corpus.adapter,
-                adapter_version=create_adapter(corpus.adapter).version,
+                adapter_version=ADAPTERS[corpus.adapter].version,
                 structure_schema_version=STRUCTURE_SCHEMA_VERSION,
                 files=counts["files"],
                 symbols=counts["symbols"],
@@ -264,7 +266,7 @@ class StructureBuilder:
                             f"{relative}: structural extraction failed with "
                             f"{type(exc).__name__}: {exc}"
                         )
-                        extraction = ExtractionResult(language=_language_hint(source_path))
+                        extraction = ExtractionResult(language=language_for_path(relative))
                     warnings.extend(extraction.warnings)
                     module = next(
                         (symbol.module for symbol in extraction.symbols if symbol.module),
@@ -382,10 +384,7 @@ class StructureBuilder:
             result = connection.execute("PRAGMA integrity_check").fetchone()
             if result is None or result[0] != "ok":
                 raise IndexBuildError(f"SQLite integrity check failed: {result}")
-            counts = {
-                table: _table_count(connection, table)
-                for table in ("files", "symbols", "references", "module_dependencies")
-            }
+            counts = count_structure_rows(connection)
             connection.execute("VACUUM")
             return counts
         finally:
@@ -449,12 +448,6 @@ def _is_link_like(path: Path) -> bool:
         return True
     is_junction = getattr(path, "is_junction", None)
     return bool(is_junction is not None and is_junction())
-
-
-def _table_count(connection: sqlite3.Connection, table: str) -> int:
-    quoted = '"references"' if table == "references" else table
-    row = connection.execute(f"SELECT count(*) FROM {quoted}").fetchone()
-    return int(row[0]) if row is not None else 0
 
 
 def _indexed_files(database: Path) -> dict[str, str]:
@@ -646,21 +639,3 @@ def re_sub_templates(value: str) -> str:
 def _report(progress: Callable[[str], None] | None, message: str) -> None:
     if progress is not None:
         progress(message)
-
-
-def _language_hint(path: Path) -> str:
-    suffix = path.suffix.lower()
-    return {
-        ".c": "cpp",
-        ".cc": "cpp",
-        ".cpp": "cpp",
-        ".cs": "csharp",
-        ".h": "cpp",
-        ".hpp": "cpp",
-        ".inl": "cpp",
-        ".ispc": "ispc",
-        ".m": "objective-c",
-        ".mm": "objective-cpp",
-        ".usf": "hlsl",
-        ".ush": "hlsl",
-    }.get(suffix, "text")
