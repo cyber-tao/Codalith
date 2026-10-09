@@ -164,6 +164,37 @@ def test_stdio_transport_does_not_load_the_dashboard() -> None:
     assert completed.returncode == 0, completed.stderr
 
 
+def test_http_security_applies_to_every_route(
+    semantic_environment: TestEnvironment,
+) -> None:
+    routes = (
+        "/healthz",
+        "/readyz",
+        "/api/dashboard/snapshot?range=1h&target=sample",
+        "/dashboard",
+        "/dashboard/index.html",
+        "/mcp",
+    )
+    with running_http_server(semantic_environment) as endpoint:
+        base = endpoint.removesuffix("/mcp")
+        with httpx.Client(timeout=5, trust_env=False) as client:
+            for route in routes:
+                rebinding = client.get(base + route, headers={"Host": "evil.example"})
+                assert rebinding.status_code == 421, route
+                cross_origin = client.get(
+                    base + route,
+                    headers={"Origin": "https://evil.example"},
+                )
+                assert cross_origin.status_code == 403, route
+            assert client.get(base + "/healthz").status_code == 200
+            snapshot = client.get(
+                base + "/api/dashboard/snapshot",
+                params={"range": "1h", "target": "sample"},
+                headers={"Origin": base},
+            )
+            assert snapshot.status_code == 200
+
+
 def test_http_security_rejects_rebinding_and_oversized_streams(
     semantic_environment: TestEnvironment,
 ) -> None:

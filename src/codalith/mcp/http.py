@@ -13,10 +13,13 @@ from pathlib import Path
 
 import uvicorn
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
-from mcp.server.transport_security import TransportSecuritySettings
+from mcp.server.transport_security import (
+    TransportSecurityMiddleware,
+    TransportSecuritySettings,
+)
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
-from starlette.requests import Request
+from starlette.requests import HTTPConnection, Request
 from starlette.responses import JSONResponse, RedirectResponse
 from starlette.routing import BaseRoute, Mount, Route
 from starlette.staticfiles import StaticFiles
@@ -59,6 +62,24 @@ class HTTPConfig:
             raise ValueError("max_request_bytes must be positive")
         if any(not value.strip() for value in (*self.allowed_origins, *self.allowed_hosts)):
             raise ValueError("Allowed Origin and Host values cannot be blank")
+
+
+class HostOriginGuardMiddleware:
+    """Apply the MCP DNS-rebinding Host/Origin checks to every HTTP route."""
+
+    def __init__(self, app: ASGIApp, *, settings: TransportSecuritySettings) -> None:
+        self.app = app
+        self.security = TransportSecurityMiddleware(settings)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        rejection = await self.security.validate_request(HTTPConnection(scope))
+        if rejection is not None:
+            await rejection(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
 
 
 class RequestBodyLimitMiddleware:
@@ -159,15 +180,16 @@ def create_http_app(
 ) -> Starlette:
     config.validate()
     telemetry_store = telemetry or TelemetryStore()
+    security = TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=_allowed_hosts(config),
+        allowed_origins=_allowed_origins(config),
+    )
     manager = StreamableHTTPSessionManager(
         create_sdk_server(service, telemetry_store),
         json_response=True,
         stateless=False,
-        security_settings=TransportSecuritySettings(
-            enable_dns_rebinding_protection=True,
-            allowed_hosts=_allowed_hosts(config),
-            allowed_origins=_allowed_origins(config),
-        ),
+        security_settings=security,
         session_idle_timeout=1800,
     )
     endpoint = SessionManagerASGI(manager)
@@ -244,6 +266,7 @@ def create_http_app(
         routes=routes,
         lifespan=lifespan,
         middleware=[
+            Middleware(HostOriginGuardMiddleware, settings=security),
             Middleware(RequestLogMiddleware, enabled=config.access_log),
             Middleware(RequestBodyLimitMiddleware, max_bytes=config.max_request_bytes),
         ],
