@@ -23,6 +23,7 @@ from codalith.corpus.store_manifest import (
     Artifact,
     GenerationRepository,
     IndexManifest,
+    fsync_directory,
     installed_coderag_version,
     new_generation_id,
     sha256_file,
@@ -202,7 +203,9 @@ class StructureBuilder:
                 json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n",
                 encoding="utf-8",
             )
+            _fsync_tree(staging)
             os.replace(staging, final)
+            fsync_directory(generations_root)
             self.generations.publish(corpus, final, manifest)
         except BaseException:
             if staging.exists():
@@ -428,6 +431,17 @@ def _source_files(
                 continue
             if supports(path):
                 yield path
+
+
+def _fsync_tree(root: Path) -> None:
+    for directory, _, filenames in os.walk(root):
+        for filename in filenames:
+            descriptor = os.open(Path(directory, filename), os.O_RDWR)
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+        fsync_directory(Path(directory))
 
 
 def _is_link_like(path: Path) -> bool:

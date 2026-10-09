@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import importlib.metadata
 import json
 import os
 import re
 import sqlite3
+import sys
+import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -22,6 +25,8 @@ MANIFEST_SCHEMA_VERSION = 3
 STRUCTURE_SCHEMA_VERSION = 1
 GENERATION_STORE_DIR = "coderag"
 _GENERATION_ID = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}$")
+_FileStamp = tuple[int, int, int]
+_REPLACE_TIMEOUT_SECONDS = 5.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,8 +205,29 @@ class ActiveGeneration:
 class GenerationRepository:
     def __init__(self, policy: SourcePolicy) -> None:
         self.policy = policy
+        self._resolved: dict[Corpus, tuple[_FileStamp, _FileStamp, ActiveGeneration]] = {}
 
     def active(self, corpus: Corpus, *, verify_artifacts: bool = False) -> ActiveGeneration:
+        pointer_stamp = _file_stamp(corpus.index_root / "current.json")
+        cached = self._resolved.get(corpus)
+        if (
+            cached is not None
+            and pointer_stamp is not None
+            and cached[0] == pointer_stamp
+            and cached[1] == _file_stamp(cached[2].manifest_path)
+        ):
+            generation = cached[2]
+        else:
+            generation = self._resolve(corpus)
+            manifest_stamp = _file_stamp(generation.manifest_path)
+            if pointer_stamp is not None and manifest_stamp is not None:
+                self._resolved[corpus] = (pointer_stamp, manifest_stamp, generation)
+        self._check_artifacts(corpus, generation)
+        if verify_artifacts:
+            self.verify(generation)
+        return generation
+
+    def _resolve(self, corpus: Corpus) -> ActiveGeneration:
         pointer_path = corpus.index_root / "current.json"
         try:
             pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
@@ -250,7 +276,7 @@ class GenerationRepository:
                     f"Semantic index was built with CodeRAG {manifest.coderag_version}; "
                     f"installed CodeRAG is {installed}"
                 )
-        generation = ActiveGeneration(
+        return ActiveGeneration(
             root=root,
             manifest_path=manifest_path,
             structure_path=root / "structure.sqlite",
@@ -261,10 +287,12 @@ class GenerationRepository:
             ),
             manifest=manifest,
         )
+
+    def _check_artifacts(self, corpus: Corpus, generation: ActiveGeneration) -> None:
         if not generation.structure_path.is_file():
             raise IndexUnavailableError(f"Missing structure index: {generation.structure_path}")
-        for artifact in manifest.artifacts:
-            artifact_path = root / artifact.path
+        for artifact in generation.manifest.artifacts:
+            artifact_path = generation.root / artifact.path
             try:
                 size = artifact_path.stat().st_size
             except OSError as exc:
@@ -275,13 +303,10 @@ class GenerationRepository:
                 or size != artifact.size_bytes
             ):
                 raise IndexUnavailableError(f"Index artifact size mismatch: {artifact_path}")
-        if manifest.semantic_available and not generation.coderag_path.is_dir():
+        if generation.manifest.semantic_available and not generation.coderag_path.is_dir():
             raise IndexUnavailableError(
                 f"Missing CodeRAG store for {corpus.corpus_id}: {generation.coderag_path}"
             )
-        if verify_artifacts:
-            self.verify(generation)
-        return generation
 
     def verify(self, generation: ActiveGeneration) -> None:
         for artifact in generation.manifest.artifacts:
@@ -333,19 +358,58 @@ class GenerationRepository:
             raise IndexBuildError("Generation directory and manifest id disagree")
         corpus.index_root.mkdir(parents=True, exist_ok=True)
         pointer = corpus.index_root / "current.json"
-        temporary = corpus.index_root / ".current.json.tmp"
-        temporary.write_text(
-            json.dumps({"generation_id": manifest.generation_id}, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        os.replace(temporary, pointer)
+        temporary = corpus.index_root / f".current.json.{manifest.generation_id}.tmp"
+        try:
+            with temporary.open("w", encoding="utf-8") as handle:
+                handle.write(json.dumps({"generation_id": manifest.generation_id}, indent=2) + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            _replace_with_retry(temporary, pointer)
+        finally:
+            temporary.unlink(missing_ok=True)
+        fsync_directory(corpus.index_root)
 
 
+@functools.cache
 def installed_coderag_version() -> str:
     try:
         return importlib.metadata.version("coderag")
     except importlib.metadata.PackageNotFoundError:
         return "unavailable"
+
+
+def _file_stamp(path: Path) -> _FileStamp | None:
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return stat.st_ino, stat.st_mtime_ns, stat.st_size
+
+
+def _replace_with_retry(source: Path, destination: Path) -> None:
+    """Windows refuses to replace a file that a reader holds open, so wait out brief reads."""
+
+    deadline = time.monotonic() + _REPLACE_TIMEOUT_SECONDS
+    delay = 0.005
+    while True:
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 0.1)
+
+
+def fsync_directory(path: Path) -> None:
+    if sys.platform == "win32":
+        return
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def new_generation_id(seed: bytes) -> str:

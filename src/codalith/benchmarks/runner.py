@@ -132,7 +132,11 @@ async def _validate_citations(session: ClientSession, hits: list[object]) -> boo
         if not isinstance(raw, dict) or not isinstance(raw.get("uri"), str):
             return False
         payload = await _call(session, "codalith_read", {"uri": raw["uri"]})
-        if payload.get("uri") != raw["uri"] or payload.get("stale"):
+        if (
+            payload.get("uri") != raw["uri"]
+            or payload.get("generation_id") != raw.get("generation_id")
+            or payload.get("stale")
+        ):
             return False
         if not isinstance(payload.get("sha256"), str):
             return False

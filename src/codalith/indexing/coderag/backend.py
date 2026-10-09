@@ -10,8 +10,8 @@ import re
 import shutil
 import subprocess
 import tempfile
-import threading
 from collections.abc import Mapping
+from contextlib import AbstractContextManager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -22,6 +22,7 @@ from codalith.corpus.registry import Corpus
 from codalith.corpus.source_policy import SourcePolicy
 from codalith.corpus.store_manifest import ActiveGeneration
 from codalith.errors import CodalithError, IndexBuildError, IndexUnavailableError, RetrievalError
+from codalith.indexing.leases import GenerationLeases
 
 _STORE_PROVENANCE_FILE = "meta.json"
 _CODERAG_BINARY_SNIFF_BYTES = 8192
@@ -74,8 +75,7 @@ class StoreProvenance:
 class CodeRAGBackend:
     def __init__(self, policy: SourcePolicy) -> None:
         self.policy = policy
-        self._engines: dict[tuple[str, str], CodeRAG] = {}
-        self._lock = threading.RLock()
+        self._engines: GenerationLeases[CodeRAG] = GenerationLeases(_close_engine)
 
     def search(
         self,
@@ -85,13 +85,13 @@ class CodeRAGBackend:
         *,
         limit: int,
     ) -> list[SemanticHit]:
-        engine = self._engine(corpus, generation)
-        try:
-            hits = engine.search(query, top_k=limit)
-        except Exception as exc:
-            raise RetrievalError(
-                f"CodeRAG search failed for {corpus.corpus_id}: {type(exc).__name__}: {exc}"
-            ) from exc
+        with self._engine(corpus, generation) as engine:
+            try:
+                hits = engine.search(query, top_k=limit)
+            except Exception as exc:
+                raise RetrievalError(
+                    f"CodeRAG search failed for {corpus.corpus_id}: {type(exc).__name__}: {exc}"
+                ) from exc
         return [
             SemanticHit(
                 path=hit.path.replace("\\", "/"),
@@ -115,21 +115,21 @@ class CodeRAGBackend:
         *,
         limit: int,
     ) -> list[TextHit]:
-        engine = self._engine(corpus, generation)
-        try:
-            result = engine.search_files(
-                re.escape(query),
-                target="content",
-                output_mode="content",
-                limit=limit,
-                ignore_case=True,
-                max_file_bytes=self.policy.max_file_bytes,
-                redact=True,
-            )
-        except Exception as exc:
-            raise RetrievalError(
-                f"Text search failed for {corpus.corpus_id}: {type(exc).__name__}: {exc}"
-            ) from exc
+        with self._engine(corpus, generation) as engine:
+            try:
+                result = engine.search_files(
+                    re.escape(query),
+                    target="content",
+                    output_mode="content",
+                    limit=limit,
+                    ignore_case=True,
+                    max_file_bytes=self.policy.max_file_bytes,
+                    redact=True,
+                )
+            except Exception as exc:
+                raise RetrievalError(
+                    f"Text search failed for {corpus.corpus_id}: {type(exc).__name__}: {exc}"
+                ) from exc
         if "error" in result:
             raise RetrievalError(str(result["error"]))
         rows = result.get("results", [])
@@ -155,43 +155,45 @@ class CodeRAGBackend:
         )
 
     def close(self) -> None:
-        with self._lock:
-            engines = list(self._engines.values())
-            self._engines.clear()
-        for engine in engines:
-            engine.close()
+        self._engines.close()
 
-    def _engine(self, corpus: Corpus, generation: ActiveGeneration) -> CodeRAG:
+    def _engine(
+        self,
+        corpus: Corpus,
+        generation: ActiveGeneration,
+    ) -> AbstractContextManager[CodeRAG]:
         manifest = generation.manifest
         if not manifest.semantic_available:
             raise RetrievalError(
                 f"Semantic index is unavailable for {corpus.corpus_id} generation "
                 f"{manifest.generation_id}"
             )
-        key = (corpus.corpus_id, manifest.generation_id)
-        with self._lock:
-            engine = self._engines.get(key)
-            if engine is None:
-                obsolete = [item for item in self._engines if item[0] == corpus.corpus_id]
-                for old_key in obsolete:
-                    self._engines.pop(old_key).close()
-                try:
-                    expected = generation_store_provenance(generation)
-                except IndexUnavailableError as exc:
-                    raise RetrievalError(str(exc)) from exc
-                engine = _open_verified_engine(
-                    coderag_config(
-                        corpus,
-                        generation.coderag_path,
-                        self.policy,
-                        provider=manifest.embedding_provider,
-                        model=manifest.embedding_model,
-                    ),
-                    error=RetrievalError,
-                    expected=expected,
-                )
-                self._engines[key] = engine
-            return engine
+        return self._engines.lease(
+            corpus.corpus_id,
+            manifest.generation_id,
+            lambda: self._open_engine(corpus, generation),
+        )
+
+    def _open_engine(self, corpus: Corpus, generation: ActiveGeneration) -> CodeRAG:
+        try:
+            expected = generation_store_provenance(generation)
+        except IndexUnavailableError as exc:
+            raise RetrievalError(str(exc)) from exc
+        return _open_verified_engine(
+            coderag_config(
+                corpus,
+                generation.coderag_path,
+                self.policy,
+                provider=generation.manifest.embedding_provider,
+                model=generation.manifest.embedding_model,
+            ),
+            error=RetrievalError,
+            expected=expected,
+        )
+
+
+def _close_engine(engine: CodeRAG) -> None:
+    engine.close()
 
 
 def read_store_provenance(store_dir: Path) -> StoreProvenance:

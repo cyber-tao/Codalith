@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import shutil
+import sqlite3
+import threading
 from dataclasses import replace
 from pathlib import Path
 
@@ -10,10 +12,11 @@ import pytest
 from codalith.corpus.registry import CorpusRegistry
 from codalith.corpus.source_policy import SourcePolicy
 from codalith.corpus.store_manifest import GenerationRepository
+from codalith.corpus.uris import source_uri
 from codalith.errors import RetrievalError, SourcePolicyError
 from codalith.indexing.coderag.backend import store_fingerprint
 from codalith.indexing.structure.builder import StructureBuilder
-from codalith.query.service import QueryService, _semantic_pool
+from codalith.query.service import QueryService, _Request, _semantic_pool
 from conftest import EnvironmentFactory, TestEnvironment, build_environment
 
 
@@ -118,7 +121,7 @@ def test_source_reads_detect_changes_after_indexing(
         cache.write_text(cache.read_text(encoding="utf-8") + "# changed\n", encoding="utf-8")
         assert service.read(hit.uri).stale
         with pytest.raises(SourcePolicyError, match="denies path"):
-            service.sources.read("sample", ".env")
+            service.read(source_uri("sample", ".env"))
     finally:
         service.close()
 
@@ -519,16 +522,63 @@ def test_source_reads_normalize_crlf_without_leaking_carriage_returns(
     StructureBuilder(environment.policy).build(environment.corpus)
     service = environment.service()
     try:
-        result = service.sources.read(
-            "sample",
-            "src/core/cache.py",
-            start_line=1,
-            end_line=2,
-        )
+        result = service.read(source_uri("sample", "src/core/cache.py", start_line=1, end_line=2))
         assert result.text == "first\nsecond"
         assert not result.stale
     finally:
         service.close()
+
+
+def test_requests_keep_their_generation_while_a_new_one_is_published(
+    environment_factory: EnvironmentFactory,
+) -> None:
+    environment = environment_factory(semantic=False)
+    service = environment.service()
+    try:
+        with _Request(service) as request:
+            snapshot = request.snapshot(environment.corpus)
+            StructureBuilder(environment.policy).build(environment.corpus)
+            newer = service.search("CachedValue", target="sample", strategy="symbol")
+            assert newer.hits[0].generation_id != snapshot.generation_id
+            assert snapshot.index.lookup_symbols("CachedValue")
+        with pytest.raises(sqlite3.ProgrammingError):
+            snapshot.index.lookup_symbols("CachedValue")
+        read = service.read(newer.hits[0].uri)
+        assert read.generation_id == newer.hits[0].generation_id
+    finally:
+        service.close()
+
+
+def test_concurrent_queries_survive_generation_publishes(
+    environment_factory: EnvironmentFactory,
+) -> None:
+    environment = environment_factory(semantic=False)
+    service = environment.service()
+    errors: list[BaseException] = []
+    stop = threading.Event()
+
+    def query_until_stopped() -> None:
+        while not stop.is_set():
+            try:
+                result = service.context("Where is CachedValue created?", target="sample")
+                assert result.sources
+                assert len({source.generation_id for source in result.sources}) == 1
+            except BaseException as exc:
+                errors.append(exc)
+                return
+
+    workers = [threading.Thread(target=query_until_stopped) for _ in range(4)]
+    for worker in workers:
+        worker.start()
+    try:
+        for _ in range(3):
+            StructureBuilder(environment.policy).build(environment.corpus)
+    finally:
+        stop.set()
+        for worker in workers:
+            worker.join(timeout=30)
+        service.close()
+    assert not errors, errors
 
 
 def test_status_is_side_effect_free_and_reports_semantic_readiness(

@@ -58,6 +58,7 @@ class ContextResponse(StrictModel):
 class ReadResponse(StrictModel):
     corpus_id: str
     revision: str
+    generation_id: str
     uri: str
     path: str
     start_line: int
@@ -100,6 +101,7 @@ class SymbolResponse(StrictModel):
 class GraphNode(StrictModel):
     corpus_id: str
     revision: str
+    generation_id: str
     symbol_id: str
     uri: str
     qualified_name: str

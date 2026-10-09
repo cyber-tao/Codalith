@@ -5,15 +5,15 @@ from __future__ import annotations
 import json
 import math
 import re
-import threading
 from collections import deque
 from collections.abc import Callable, Iterator
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from typing import Literal, cast
 
 from codalith.corpus.registry import Corpus, CorpusRegistry
 from codalith.corpus.source_policy import SourcePolicy
-from codalith.corpus.source_reader import FileCatalog, SourceReader
+from codalith.corpus.source_reader import SourceReader
 from codalith.corpus.store_manifest import (
     ActiveGeneration,
     GenerationRepository,
@@ -25,9 +25,11 @@ from codalith.errors import (
     RetrievalError,
     SourcePolicyError,
     SourceReadError,
+    URIResolutionError,
 )
 from codalith.indexing.coderag import CodeRAGBackend
 from codalith.indexing.coderag.backend import generation_store_provenance
+from codalith.indexing.leases import GenerationLeases
 from codalith.indexing.structure.models import (
     FileRecord,
     ModuleDependencyRecord,
@@ -226,27 +228,62 @@ class _SearchResult:
     hits: list[tuple[_Candidate, SearchHit]]
 
 
+@dataclass(frozen=True, slots=True)
+class _Snapshot:
+    corpus: Corpus
+    generation: ActiveGeneration
+    index: StructureIndex
+
+    @property
+    def generation_id(self) -> str:
+        return self.generation.manifest.generation_id
+
+    def get_file(self, path: str) -> FileRecord | None:
+        return self.index.get_file(path)
+
+
+class _Request:
+    """Resolve each corpus once per request and hold its generation resources."""
+
+    def __init__(self, service: QueryService) -> None:
+        self._service = service
+        self._resources = ExitStack()
+        self._snapshots: dict[str, _Snapshot] = {}
+
+    def __enter__(self) -> _Request:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self._resources.close()
+
+    def snapshot(self, corpus: Corpus) -> _Snapshot:
+        snapshot = self._snapshots.get(corpus.corpus_id)
+        if snapshot is None:
+            generation = self._service.generations.active(corpus)
+            index = self._resources.enter_context(
+                self._service.indices.lease(
+                    corpus.corpus_id,
+                    generation.manifest.generation_id,
+                    lambda: StructureIndex(generation.structure_path),
+                )
+            )
+            snapshot = _Snapshot(corpus, generation, index)
+            self._snapshots[corpus.corpus_id] = snapshot
+        return snapshot
+
+
 class QueryService:
     def __init__(self, registry: CorpusRegistry, policy: SourcePolicy) -> None:
         self.registry = registry
         self.policy = policy
         self.generations = GenerationRepository(policy)
         self.coderag = CodeRAGBackend(policy)
-        self._indices: dict[tuple[str, str], StructureIndex] = {}
-        self._lock = threading.RLock()
-        self.sources = SourceReader(
-            registry,
-            policy,
-            cast(Callable[[Corpus], FileCatalog], self._catalog_for),
-        )
+        self.indices: GenerationLeases[StructureIndex] = GenerationLeases(StructureIndex.close)
+        self.sources = SourceReader(policy)
 
     def close(self) -> None:
         self.coderag.close()
-        with self._lock:
-            indices = list(self._indices.values())
-            self._indices.clear()
-        for index in indices:
-            index.close()
+        self.indices.close()
 
     def search(
         self,
@@ -256,7 +293,8 @@ class QueryService:
         strategy: SearchStrategy = "auto",
         limit: int = 10,
     ) -> SearchResponse:
-        result = self._search(query, target=target, strategy=strategy, limit=limit)
+        with _Request(self) as request:
+            result = self._search(request, query, target=target, strategy=strategy, limit=limit)
         return SearchResponse(
             query=result.query,
             target=result.target,
@@ -268,6 +306,7 @@ class QueryService:
 
     def _search(
         self,
+        request: _Request,
         query: str,
         *,
         target: str | None,
@@ -286,13 +325,14 @@ class QueryService:
         active_count = 0
         for corpus in resolution.corpora:
             try:
-                generation = self.generations.active(corpus)
-                index = self._index(corpus, generation)
-                active_count += 1
+                snapshot = request.snapshot(corpus)
             except IndexUnavailableError as exc:
                 warnings.append(str(exc))
                 degraded = True
                 continue
+            active_count += 1
+            generation = snapshot.generation
+            index = snapshot.index
             if strategy in {"auto", "symbol"}:
                 terms = _identifier_candidates(normalized_query)
                 if not terms and _has_code_context(normalized_query):
@@ -485,7 +525,26 @@ class QueryService:
             raise ValueError("max_spans must be between 1 and 20")
         if not 1_000 <= max_chars <= 100_000:
             raise ValueError("max_chars must be between 1000 and 100000")
+        with _Request(self) as request:
+            return self._context(
+                request,
+                query,
+                target=target,
+                max_spans=max_spans,
+                max_chars=max_chars,
+            )
+
+    def _context(
+        self,
+        request: _Request,
+        query: str,
+        *,
+        target: str | None,
+        max_spans: int,
+        max_chars: int,
+    ) -> ContextResponse:
         result = self._search(
+            request,
             query,
             target=target,
             strategy="auto",
@@ -508,7 +567,8 @@ class QueryService:
                 continue
             try:
                 source_slice = self.sources.read(
-                    candidate.corpus.corpus_id,
+                    candidate.corpus,
+                    request.snapshot(candidate.corpus),
                     candidate.path,
                     start_line=candidate.start_line,
                     end_line=candidate.end_line,
@@ -564,7 +624,19 @@ class QueryService:
         )
 
     def read(self, uri: str) -> ReadResponse:
-        return ReadResponse.model_validate(self.sources.read_uri(uri).to_dict())
+        parsed = parse_uri(uri)
+        if parsed.kind != "source":
+            raise URIResolutionError(f"Not a source URI: {uri}")
+        corpus = self.registry.get_corpus(parsed.corpus_id)
+        with _Request(self) as request:
+            source_slice = self.sources.read(
+                corpus,
+                request.snapshot(corpus),
+                parsed.value,
+                start_line=parsed.start_line or 1,
+                end_line=parsed.end_line,
+            )
+        return ReadResponse.model_validate(source_slice.to_dict())
 
     def symbol(
         self,
@@ -582,19 +654,23 @@ class QueryService:
         warnings: list[str] = []
         active_count = 0
         withheld = 0
-        for corpus in resolution.corpora:
-            try:
-                generation = self.generations.active(corpus)
-                index = self._index(corpus, generation)
-                active_count += 1
-            except IndexUnavailableError as exc:
-                warnings.append(str(exc))
-                continue
-            for record in index.lookup_symbols(normalized_query, exact=exact, limit=limit):
-                if self.policy.is_denied(record.path):
-                    withheld += 1
+        with _Request(self) as request:
+            for corpus in resolution.corpora:
+                try:
+                    snapshot = request.snapshot(corpus)
+                except IndexUnavailableError as exc:
+                    warnings.append(str(exc))
                     continue
-                definitions.append(_definition(corpus, generation, record))
+                active_count += 1
+                for record in snapshot.index.lookup_symbols(
+                    normalized_query,
+                    exact=exact,
+                    limit=limit,
+                ):
+                    if self.policy.is_denied(record.path):
+                        withheld += 1
+                        continue
+                    definitions.append(_definition(corpus, snapshot.generation, record))
         if active_count == 0:
             raise IndexUnavailableError("No corpus in the target has an active index generation")
         if withheld:
@@ -625,11 +701,32 @@ class QueryService:
         if not 1 <= limit <= 1000:
             raise ValueError("limit must be between 1 and 1000")
         corpus = self.registry.get_corpus(parsed.corpus_id)
-        generation = self.generations.active(corpus)
-        index = self._index(corpus, generation)
-        root = index.get_symbol(parsed.value)
+        with _Request(self) as request:
+            return self._graph(
+                request.snapshot(corpus),
+                parsed.value,
+                direction=direction,
+                depth=depth,
+                limit=limit,
+            )
+
+    def _graph(
+        self,
+        snapshot: _Snapshot,
+        root_id: str,
+        *,
+        direction: GraphDirection,
+        depth: int,
+        limit: int,
+    ) -> GraphResponse:
+        corpus = snapshot.corpus
+        generation_id = snapshot.generation_id
+        index = snapshot.index
+        root = index.get_symbol(root_id)
         if root is None:
-            raise IndexUnavailableError(f"Unknown symbol in active generation: {root_uri}")
+            raise IndexUnavailableError(
+                f"Unknown symbol in active generation: {symbol_uri(corpus.corpus_id, root_id)}"
+            )
         if self.policy.is_denied(root.path):
             raise SourcePolicyError(f"Source policy denies path: {root.path}")
         denied_paths: dict[str, bool] = {}
@@ -642,7 +739,9 @@ class QueryService:
                     return True
             return False
 
-        nodes: dict[str, GraphNode] = {root.symbol_id: _graph_node(corpus, root)}
+        nodes: dict[str, GraphNode] = {
+            root.symbol_id: _graph_node(corpus, generation_id, root)
+        }
         edges: list[GraphEdge] = []
         seen_edges: set[tuple[str, int]] = set()
         queue: deque[tuple[str, int]] = deque([(root.symbol_id, 0)])
@@ -691,7 +790,10 @@ class QueryService:
                     for adjacent in (source, target_symbol):
                         if adjacent is None:
                             continue
-                        nodes.setdefault(adjacent.symbol_id, _graph_node(corpus, adjacent))
+                        nodes.setdefault(
+                            adjacent.symbol_id,
+                            _graph_node(corpus, generation_id, adjacent),
+                        )
                         if adjacent.symbol_id not in seen_symbols:
                             seen_symbols.add(adjacent.symbol_id)
                             queue.append((adjacent.symbol_id, level + 1))
@@ -736,7 +838,10 @@ class QueryService:
                     for adjacent in (source, target_symbol):
                         if adjacent is None:
                             continue
-                        nodes.setdefault(adjacent.symbol_id, _graph_node(corpus, adjacent))
+                        nodes.setdefault(
+                            adjacent.symbol_id,
+                            _graph_node(corpus, generation_id, adjacent),
+                        )
                         if adjacent.symbol_id not in seen_symbols:
                             seen_symbols.add(adjacent.symbol_id)
                             queue.append((adjacent.symbol_id, level + 1))
@@ -759,13 +864,14 @@ class QueryService:
         if parsed.kind != "symbol":
             raise ValueError("URI must identify a symbol")
         corpus = self.registry.get_corpus(parsed.corpus_id)
-        generation = self.generations.active(corpus)
-        symbol = self._index(corpus, generation).get_symbol(parsed.value)
+        with _Request(self) as request:
+            snapshot = request.snapshot(corpus)
+            symbol = snapshot.index.get_symbol(parsed.value)
         if symbol is None:
             raise IndexUnavailableError(f"Unknown symbol in active generation: {uri}")
         if self.policy.is_denied(symbol.path):
             raise SourcePolicyError(f"Source policy denies path: {symbol.path}")
-        return _definition(corpus, generation, symbol)
+        return _definition(corpus, snapshot.generation, symbol)
 
     def compare(
         self,
@@ -781,28 +887,27 @@ class QueryService:
             raise ValueError("limit must be between 1 and 1000")
         old_corpus = self.registry.get_corpus(from_corpus)
         new_corpus = self.registry.get_corpus(to_corpus)
-        old_generation = self.generations.active(old_corpus)
-        new_generation = self.generations.active(new_corpus)
-        old_index = self._index(old_corpus, old_generation)
-        new_index = self._index(new_corpus, new_generation)
         changes: list[CompareChange] = []
         truncated = False
-        for key, old, new in _merged_symbol_groups(old_index, new_index):
-            change = _compare_group(
-                key,
-                old,
-                new,
-                old_corpus,
-                old_generation,
-                new_corpus,
-                new_generation,
-            )
-            if change.status == "unchanged" and not include_unchanged:
-                continue
-            if len(changes) >= limit:
-                truncated = True
-                break
-            changes.append(change)
+        with _Request(self) as request:
+            old_snapshot = request.snapshot(old_corpus)
+            new_snapshot = request.snapshot(new_corpus)
+            for key, old, new in _merged_symbol_groups(old_snapshot.index, new_snapshot.index):
+                change = _compare_group(
+                    key,
+                    old,
+                    new,
+                    old_corpus,
+                    old_snapshot.generation,
+                    new_corpus,
+                    new_snapshot.generation,
+                )
+                if change.status == "unchanged" and not include_unchanged:
+                    continue
+                if len(changes) >= limit:
+                    truncated = True
+                    break
+                changes.append(change)
         return CompareResponse(
             from_corpus=from_corpus,
             to_corpus=to_corpus,
@@ -858,22 +963,6 @@ class QueryService:
             ready=all(row.state == "ready" for row in rows),
             corpora=rows,
         )
-
-    def _catalog_for(self, corpus: Corpus) -> StructureIndex:
-        generation = self.generations.active(corpus)
-        return self._index(corpus, generation)
-
-    def _index(self, corpus: Corpus, generation: ActiveGeneration) -> StructureIndex:
-        key = (corpus.corpus_id, generation.manifest.generation_id)
-        with self._lock:
-            index = self._indices.get(key)
-            if index is None:
-                obsolete = [item for item in self._indices if item[0] == corpus.corpus_id]
-                for old_key in obsolete:
-                    self._indices.pop(old_key).close()
-                index = StructureIndex(generation.structure_path)
-                self._indices[key] = index
-            return index
 
 
 def _semantic_pool(limit: int, manifest: IndexManifest) -> int:
@@ -1294,10 +1383,11 @@ def _definition(
     )
 
 
-def _graph_node(corpus: Corpus, symbol: SymbolRecord) -> GraphNode:
+def _graph_node(corpus: Corpus, generation_id: str, symbol: SymbolRecord) -> GraphNode:
     return GraphNode(
         corpus_id=corpus.corpus_id,
         revision=corpus.revision,
+        generation_id=generation_id,
         symbol_id=symbol.symbol_id,
         uri=symbol_uri(corpus.corpus_id, symbol.symbol_id),
         qualified_name=symbol.qualified_name,

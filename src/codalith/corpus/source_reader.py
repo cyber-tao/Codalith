@@ -1,26 +1,33 @@
-"""Bounded source reads tied to an active index generation."""
+"""Bounded source reads tied to one index generation."""
 
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
-from codalith.corpus.registry import Corpus, CorpusRegistry
+from codalith.corpus.registry import Corpus
 from codalith.corpus.source_policy import SourcePolicy
-from codalith.corpus.uris import parse_uri, source_uri
-from codalith.errors import SourceReadError, URIResolutionError
+from codalith.corpus.uris import source_uri
+from codalith.errors import SourceReadError
 
 
 class IndexedFile(Protocol):
-    path: str
-    sha256: str
-    size_bytes: int
+    @property
+    def path(self) -> str: ...
+
+    @property
+    def sha256(self) -> str: ...
+
+    @property
+    def size_bytes(self) -> int: ...
 
 
 class FileCatalog(Protocol):
+    @property
+    def generation_id(self) -> str: ...
+
     def get_file(self, path: str) -> IndexedFile | None: ...
 
 
@@ -28,6 +35,7 @@ class FileCatalog(Protocol):
 class SourceSlice:
     corpus_id: str
     revision: str
+    generation_id: str
     uri: str
     path: str
     start_line: int
@@ -67,43 +75,26 @@ class SourceSlice:
 
 
 class SourceReader:
-    def __init__(
-        self,
-        registry: CorpusRegistry,
-        policy: SourcePolicy,
-        catalog_factory: Callable[[Corpus], FileCatalog],
-    ) -> None:
-        self.registry = registry
+    def __init__(self, policy: SourcePolicy) -> None:
         self.policy = policy
-        self.catalog_factory = catalog_factory
-
-    def read_uri(self, uri: str) -> SourceSlice:
-        parsed = parse_uri(uri)
-        if parsed.kind != "source":
-            raise URIResolutionError(f"Not a source URI: {uri}")
-        return self.read(
-            parsed.corpus_id,
-            parsed.value,
-            start_line=parsed.start_line or 1,
-            end_line=parsed.end_line,
-        )
 
     def read(
         self,
-        corpus_id: str,
+        corpus: Corpus,
+        catalog: FileCatalog,
         path: str,
         *,
         start_line: int = 1,
         end_line: int | None = None,
     ) -> SourceSlice:
-        corpus = self.registry.get_corpus(corpus_id)
         canonical = self.policy.normalize_path(path)
         explicit_end = end_line is not None
         start, requested_end = self.policy.validate_range(start_line, end_line)
-        catalog = self.catalog_factory(corpus)
         indexed = catalog.get_file(canonical)
         if indexed is None:
-            raise SourceReadError(f"Path is not present in the active index: {canonical}")
+            raise SourceReadError(
+                f"Path is not present in generation {catalog.generation_id}: {canonical}"
+            )
         source_path = _safe_source_path(corpus.source_root, canonical)
         try:
             size = source_path.stat().st_size
@@ -117,10 +108,12 @@ class SourceReader:
         selected: list[str] = []
         replacements = 0
         total_lines = 0
+        last_line = b""
         try:
             with source_path.open("rb") as handle:
                 for line_number, raw_line in enumerate(handle, start=1):
                     total_lines = line_number
+                    last_line = raw_line
                     digest.update(raw_line)
                     if start <= line_number <= requested_end:
                         decoded = raw_line.decode("utf-8", errors="replace")
@@ -130,12 +123,10 @@ class SourceReader:
                             if decoded.endswith("\r"):
                                 decoded = decoded[:-1]
                         selected.append(decoded)
-                if size == 0:
-                    total_lines = 1
-                elif _ends_with_newline(source_path):
-                    total_lines += 1
         except OSError as exc:
             raise SourceReadError(f"Cannot read source file {canonical}: {exc}") from exc
+        if total_lines == 0 or last_line.endswith(b"\n"):
+            total_lines += 1
         if start > total_lines:
             raise SourceReadError(
                 f"start_line {start} exceeds {total_lines} lines in {canonical}"
@@ -145,6 +136,7 @@ class SourceReader:
         return SourceSlice(
             corpus_id=corpus.corpus_id,
             revision=corpus.revision,
+            generation_id=catalog.generation_id,
             uri=source_uri(
                 corpus.corpus_id,
                 canonical,
@@ -155,7 +147,7 @@ class SourceReader:
             start_line=start,
             end_line=actual_end,
             total_lines=total_lines,
-            text="".join(selected) if len(selected) == 1 else "\n".join(selected),
+            text="\n".join(selected),
             sha256=current_hash,
             indexed_sha256=indexed.sha256,
             stale=current_hash != indexed.sha256 or size != indexed.size_bytes,
@@ -172,11 +164,3 @@ def _safe_source_path(root: Path, relative: str) -> Path:
     if not candidate.is_file():
         raise SourceReadError(f"Source file does not exist: {relative}")
     return candidate
-
-
-def _ends_with_newline(path: Path) -> bool:
-    if path.stat().st_size == 0:
-        return False
-    with path.open("rb") as handle:
-        handle.seek(-1, 2)
-        return handle.read(1) == b"\n"
