@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import cast
 
@@ -18,6 +18,10 @@ from codalith.indexing.structure.models import (
 )
 from codalith.languages.catalog import NEUTRAL_PROFILE, RetrievalProfile
 
+_TRIGRAM_LENGTH = 3
+_ID_BATCH = 500
+_FETCH_BATCH = 1_000
+
 
 class StructureIndex:
     def __init__(self, path: Path, profile: RetrievalProfile = NEUTRAL_PROFILE) -> None:
@@ -28,6 +32,7 @@ class StructureIndex:
         self._connection.row_factory = sqlite3.Row
         self._lock = threading.RLock()
         self._declaration_order = _declaration_path_order(profile)
+        self._symbol_order = symbol_rank_order(profile)
 
     def close(self) -> None:
         with self._lock:
@@ -97,6 +102,24 @@ class StructureIndex:
         row = self._one("SELECT * FROM symbols WHERE symbol_id = ?", (symbol_id,))
         return _symbol(row) if row is not None else None
 
+    def get_symbols(self, symbol_ids: Sequence[str]) -> list[SymbolRecord]:
+        """Return symbols in the requested order; every ID must exist in this snapshot."""
+
+        records: dict[str, SymbolRecord] = {}
+        for start in range(0, len(symbol_ids), _ID_BATCH):
+            batch = tuple(symbol_ids[start : start + _ID_BATCH])
+            placeholders = ", ".join("?" for _ in batch)
+            for row in self._all(
+                f"SELECT * FROM symbols WHERE symbol_id IN ({placeholders})",
+                batch,
+            ):
+                record = _symbol(row)
+                records[record.symbol_id] = record
+        missing = next((item for item in symbol_ids if item not in records), None)
+        if missing is not None:
+            raise IndexInvalidError(f"Structure index has no symbol {missing}")
+        return [records[symbol_id] for symbol_id in symbol_ids]
+
     def lookup_symbols(
         self,
         query: str,
@@ -104,31 +127,89 @@ class StructureIndex:
         exact: bool = True,
         limit: int = 20,
     ) -> list[SymbolRecord]:
-        if exact:
-            rows = self._all(
-                "SELECT * FROM symbols "
-                "WHERE name = ? COLLATE NOCASE OR qualified_name = ? COLLATE NOCASE "
-                "ORDER BY CASE WHEN qualified_name = ? THEN 0 WHEN name = ? THEN 1 "
-                "WHEN qualified_name = ? COLLATE NOCASE THEN 2 ELSE 3 END, "
-                f"{_definition_kind_order()}, "
-                f"{self._declaration_order}"
-                "length(qualified_name), path, start_line LIMIT ?",
-                (query, query, query, query, query, limit),
-            )
-        else:
-            pattern = f"%{_escape_like(query)}%"
-            rows = self._all(
-                "SELECT * FROM symbols "
-                "WHERE name LIKE ? ESCAPE '\\' COLLATE NOCASE "
-                "OR qualified_name LIKE ? ESCAPE '\\' COLLATE NOCASE "
-                "ORDER BY CASE WHEN name = ? COLLATE NOCASE THEN 0 "
-                "WHEN name LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 1 ELSE 2 END, "
-                f"{_definition_kind_order()}, "
-                f"{self._declaration_order}"
-                "length(qualified_name), path, start_line LIMIT ?",
-                (pattern, pattern, query, f"{_escape_like(query)}%", limit),
-            )
+        if not exact:
+            return self._match_symbols(query, limit=limit)
+        rows = self._all(
+            "SELECT * FROM symbols "
+            "WHERE name = ? COLLATE NOCASE OR qualified_name = ? COLLATE NOCASE "
+            "ORDER BY CASE WHEN qualified_name = ? THEN 0 WHEN name = ? THEN 1 "
+            "WHEN qualified_name = ? COLLATE NOCASE THEN 2 ELSE 3 END, "
+            f"{self._symbol_order} LIMIT ?",
+            (query, query, query, query, query, limit),
+        )
         return [_symbol(row) for row in rows]
+
+    def _match_symbols(self, query: str, *, limit: int) -> list[SymbolRecord]:
+        """Rank exact names, then name prefixes, then substrings of either name.
+
+        ``symbol_search`` rowids follow ``symbol_rank_order``, so matches are read in rank
+        order and the lookup stops at ``limit`` instead of sorting every match.
+        """
+
+        rows = self._all(
+            "SELECT * FROM symbols WHERE name = ? COLLATE NOCASE "
+            f"ORDER BY {self._symbol_order} LIMIT ?",
+            (query, limit),
+        )
+        found = [_symbol(row) for row in rows]
+        needed = limit - len(found)
+        if needed > 0:
+            exact = {record.symbol_id for record in found}
+            ranked = (
+                self._search_ranked(query, needed, exact)
+                if len(query) >= _TRIGRAM_LENGTH
+                else self._scan_ranked(query, needed, exact)
+            )
+            found.extend(self.get_symbols(ranked))
+        return found
+
+    def _search_ranked(self, query: str, needed: int, exclude: set[str]) -> list[str]:
+        phrase = '"' + query.replace('"', '""') + '"'
+        ranked: list[str] = []
+        for expression in (f"name : ^{phrase}", phrase):
+            for row in self._all(
+                "SELECT symbol_id FROM symbol_search WHERE symbol_search MATCH ? "
+                "ORDER BY rowid LIMIT ?",
+                (expression, needed + len(exclude)),
+            ):
+                symbol_id = str(row[0])
+                if symbol_id not in exclude and symbol_id not in ranked:
+                    ranked.append(symbol_id)
+            if len(ranked) >= needed:
+                break
+        return ranked[:needed]
+
+    def _scan_ranked(self, query: str, needed: int, exclude: set[str]) -> list[str]:
+        # Trigrams never match fewer than three characters, so read the search table once in
+        # rank order and keep name prefixes ahead of other substring matches.
+        pattern = _escape_like(query)
+        prefixed: list[str] = []
+        contained: list[str] = []
+        with self._lock:
+            cursor = self._connection.execute(
+                "SELECT symbol_id, name LIKE ? ESCAPE '\\' FROM symbol_search "
+                "WHERE name LIKE ? ESCAPE '\\' OR qualified_name LIKE ? ESCAPE '\\' "
+                "ORDER BY rowid",
+                (f"{pattern}%", f"%{pattern}%", f"%{pattern}%"),
+            )
+        try:
+            while len(prefixed) < needed:
+                with self._lock:
+                    rows = cursor.fetchmany(_FETCH_BATCH)
+                if not rows:
+                    break
+                for row in rows:
+                    symbol_id = str(row[0])
+                    if symbol_id in exclude:
+                        continue
+                    if row[1]:
+                        prefixed.append(symbol_id)
+                    elif len(contained) < needed:
+                        contained.append(symbol_id)
+        finally:
+            with self._lock:
+                cursor.close()
+        return (prefixed + contained)[:needed]
 
     def lookup_module(self, name: str) -> list[SymbolRecord]:
         rows = self._all(
@@ -190,7 +271,7 @@ class StructureIndex:
         try:
             while True:
                 with self._lock:
-                    rows = cursor.fetchmany(1_000)
+                    rows = cursor.fetchmany(_FETCH_BATCH)
                 if not rows:
                     break
                 for row in rows:
@@ -224,6 +305,18 @@ def _symbol(row: sqlite3.Row) -> SymbolRecord:
         metadata = {"invalid_metadata": True}
     raw["metadata"] = metadata if isinstance(metadata, dict) else {}
     return SymbolRecord(**raw)
+
+
+def symbol_rank_order(profile: RetrievalProfile) -> str:
+    """ORDER BY terms ranking definitions, then declarations, then shorter names.
+
+    The builder stores this order as ``symbol_search`` rowids, so queries must use it unchanged.
+    """
+
+    return (
+        f"{_definition_kind_order()}, {_declaration_path_order(profile)}"
+        "length(qualified_name), path, start_line, symbol_id"
+    )
 
 
 def _escape_like(value: str) -> str:

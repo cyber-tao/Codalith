@@ -57,6 +57,17 @@ CREATE TABLE module_dependencies (
 
 """
 
+SYMBOL_SEARCH_SQL = """
+-- rowid is the symbol's position in store.symbol_rank_order(); lookups read rowid order.
+CREATE VIRTUAL TABLE symbol_search USING fts5(
+    symbol_id UNINDEXED,
+    name,
+    qualified_name,
+    tokenize = 'trigram',
+    columnsize = 0
+);
+"""
+
 INDEX_SQL = """
 CREATE INDEX symbols_name_idx ON symbols(name COLLATE NOCASE);
 CREATE INDEX symbols_qualified_idx ON symbols(qualified_name COLLATE NOCASE);

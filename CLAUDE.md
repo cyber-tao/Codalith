@@ -46,7 +46,7 @@ language adapter -> immutable SQLite structure.sqlite
 - `codalith_status` 不加载 embedding model、不扫描源码、不触发建库。
 - MCP schema `extra=forbid`；所有公开工具只读、幂等、closed-world；错误码由 `codalith.errors` 显式声明。
 - HTTP 默认 loopback publish，Host/Origin 白名单（覆盖所有路由）和完整流式 body 上限不可绕过。
-- 新 adapter 或 adapter 语义变更必须提升 `catalog` 中的 `version`，旧 generation 自动失效。
+- 新 adapter、adapter 语义或其 `RetrievalProfile` 变更必须提升 `catalog` 中的 `version`，旧 generation 自动失效（profile 决定 `symbol_search` 中固化的符号排序）。
 - 检索代码不得编码评测问句、关键词或期望答案路径；语言/引擎约定只能经 adapter 的 `RetrievalProfile` 进入查询层。
 
 ## 常用命令

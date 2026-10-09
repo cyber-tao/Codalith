@@ -33,6 +33,8 @@ The path must exist in the active structural generation. The response includes t
 
 Input: symbol `query`, optional `target`, `exact`, and `limit` (1–100). Returns definitions and canonical symbol/source URIs.
 
+`exact` matches the name or qualified name case-insensitively. With `exact=false`, results list exact names first, then names starting with the query, then names or qualified names containing it; within each group, definitions, then declarations, then shorter qualified names come first. The query is literal: `%`, `_`, and quotes have no special meaning.
+
 ### `codalith_graph`
 
 Input: canonical symbol `root_uri`, `direction`, `depth` (1–3), and edge `limit` (1–1,000). Returns nodes with their `generation_id`, evidence-backed edges, and truncation. Edge `resolution` is `resolved` (exact qualified match), `name_match` (the last name segment matches exactly one symbol in the corpus), `ambiguous`, or `unresolved`.

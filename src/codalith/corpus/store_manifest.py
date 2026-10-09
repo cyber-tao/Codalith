@@ -24,7 +24,7 @@ from codalith.errors import IndexBuildError, IndexInvalidError, IndexMissingErro
 from codalith.languages.catalog import ADAPTERS
 
 MANIFEST_SCHEMA_VERSION = 3
-STRUCTURE_SCHEMA_VERSION = 2
+STRUCTURE_SCHEMA_VERSION = 3
 GENERATION_STORE_DIR = "coderag"
 STRUCTURE_TABLES = ("files", "symbols", "references", "module_dependencies")
 _GENERATION_ID = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}$")

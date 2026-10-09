@@ -38,10 +38,16 @@ from codalith.indexing.coderag.backend import (
     prepare_semantic_index,
     write_semantic_metadata,
 )
-from codalith.indexing.structure.schema import INDEX_SQL, SCHEMA_SQL
+from codalith.indexing.structure.schema import INDEX_SQL, SCHEMA_SQL, SYMBOL_SEARCH_SQL
+from codalith.indexing.structure.store import symbol_rank_order
 from codalith.languages import create_adapter
 from codalith.languages.base import ExtractionResult, ReferenceObservation, SymbolObservation
-from codalith.languages.catalog import ADAPTERS, language_for_path
+from codalith.languages.catalog import (
+    ADAPTERS,
+    RetrievalProfile,
+    language_for_path,
+    retrieval_profile,
+)
 
 _MAX_REPORTED_WARNINGS = 200
 
@@ -247,13 +253,14 @@ class StructureBuilder:
     ) -> dict[str, int]:
         adapter = create_adapter(corpus.adapter)
         connection = sqlite3.connect(database)
-        connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute("PRAGMA journal_mode = OFF")
-        connection.execute("PRAGMA synchronous = OFF")
-        connection.execute("PRAGMA temp_store = FILE")
-        connection.executescript(SCHEMA_SQL)
-        _create_resolution_tables(connection)
         try:
+            connection.execute("PRAGMA foreign_keys = ON")
+            connection.execute("PRAGMA journal_mode = OFF")
+            connection.execute("PRAGMA synchronous = OFF")
+            connection.execute("PRAGMA temp_store = FILE")
+            connection.executescript(SCHEMA_SQL)
+            _create_symbol_search(connection)
+            _create_resolution_tables(connection)
             with connection:
                 connection.execute(
                     "INSERT INTO metadata(key, value) VALUES (?, ?)",
@@ -393,6 +400,7 @@ class StructureBuilder:
                     )
                 _resolve_pending(connection)
                 connection.executescript(INDEX_SQL)
+                _populate_symbol_search(connection, retrieval_profile(corpus.adapter))
             result = connection.execute("PRAGMA integrity_check").fetchone()
             if result is None or result[0] != "ok":
                 raise IndexBuildError(f"SQLite integrity check failed: {result}")
@@ -546,6 +554,25 @@ def _symbol_id(corpus_id: str, symbol: SymbolObservation) -> str:
         )
     )
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:24]
+
+
+def _create_symbol_search(connection: sqlite3.Connection) -> None:
+    try:
+        connection.executescript(SYMBOL_SEARCH_SQL)
+    except sqlite3.OperationalError as exc:
+        raise IndexBuildError(
+            f"SQLite {sqlite3.sqlite_version} cannot create the symbol search index; "
+            "it requires FTS5 with the trigram tokenizer (SQLite 3.34 or newer)"
+        ) from exc
+
+
+def _populate_symbol_search(connection: sqlite3.Connection, profile: RetrievalProfile) -> None:
+    connection.execute(
+        "INSERT INTO symbol_search(rowid, symbol_id, name, qualified_name) "
+        f"SELECT row_number() OVER (ORDER BY {symbol_rank_order(profile)}), "
+        "symbol_id, name, qualified_name FROM symbols"
+    )
+    connection.execute("INSERT INTO symbol_search(symbol_search) VALUES ('optimize')")
 
 
 def _create_resolution_tables(connection: sqlite3.Connection) -> None:

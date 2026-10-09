@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import shutil
+import sqlite3
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
@@ -17,6 +19,7 @@ from codalith.indexing.coderag.backend import (
     store_fingerprint,
 )
 from codalith.indexing.structure.builder import StructureBuilder, build_lock
+from codalith.indexing.structure.schema import SYMBOL_SEARCH_SQL
 from codalith.indexing.structure.store import StructureIndex
 from codalith.indexing.text_search import search_text
 from conftest import EnvironmentFactory, TestEnvironment, build_environment
@@ -115,6 +118,109 @@ def test_resolved_reference_edges_are_stored(
         )
     finally:
         index.close()
+
+
+_WIDGETS = (
+    "class FancyWidget:\n    pass\n\n\n"
+    "def make_widget():\n    pass\n\n\n"
+    "def widget_factory():\n    pass\n\n\n"
+    "def widgetXfactory():\n    pass\n\n\n"
+    "class Widget:\n    pass\n\n\n"
+    "def widget():\n    pass\n"
+)
+
+
+class _RecordingConnection:
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self.connection = connection
+        self.statements: list[tuple[str, tuple[object, ...]]] = []
+
+    def execute(self, sql: str, parameters: tuple[object, ...] = ()) -> sqlite3.Cursor:
+        self.statements.append((sql, tuple(parameters)))
+        return self.connection.execute(sql, parameters)
+
+
+def _widget_index(tmp_path: Path) -> StructureIndex:
+    environment = build_environment(tmp_path, files={"pkg/shapes.py": _WIDGETS}, semantic=False)
+    return StructureIndex(GenerationRepository(environment.policy).active(environment.corpus).structure_path)
+
+
+def _query_plans(index: StructureIndex, run: Callable[[], object]) -> list[list[str]]:
+    connection = index._connection
+    recorder = _RecordingConnection(connection)
+    index._connection = recorder  # type: ignore[assignment]
+    try:
+        run()
+    finally:
+        index._connection = connection
+    return [
+        [str(row[3]) for row in connection.execute(f"EXPLAIN QUERY PLAN {sql}", parameters)]
+        for sql, parameters in recorder.statements
+    ]
+
+
+@pytest.mark.parametrize("query", ["widget", "Wi"])
+def test_fuzzy_symbol_lookup_ranks_names_then_prefixes_then_substrings(
+    tmp_path: Path,
+    query: str,
+) -> None:
+    index = _widget_index(tmp_path)
+    try:
+        ranked = [record.name for record in index.lookup_symbols(query, exact=False)]
+        limited = [record.name for record in index.lookup_symbols(query, exact=False, limit=3)]
+    finally:
+        index.close()
+    assert ranked == [
+        "Widget",
+        "widget",
+        "widget_factory",
+        "widgetXfactory",
+        "FancyWidget",
+        "make_widget",
+    ]
+    assert limited == ranked[:3]
+
+
+def test_fuzzy_symbol_lookup_treats_wildcards_and_quotes_literally(tmp_path: Path) -> None:
+    index = _widget_index(tmp_path)
+    try:
+        for query in ("t_f", "_f"):
+            assert [item.name for item in index.lookup_symbols(query, exact=False)] == [
+                "widget_factory"
+            ]
+        for query in ("t%f", "%", 'get"X', '"'):
+            assert index.lookup_symbols(query, exact=False) == []
+    finally:
+        index.close()
+
+
+@pytest.mark.parametrize("query", ["widget", "Wi"])
+def test_fuzzy_symbol_lookup_never_scans_or_sorts_all_symbols(
+    tmp_path: Path,
+    query: str,
+) -> None:
+    index = _widget_index(tmp_path)
+    try:
+        plans = _query_plans(index, lambda: index.lookup_symbols(query, exact=False))
+    finally:
+        index.close()
+    search_plans = [plan for plan in plans if any("symbol_search" in step for step in plan)]
+    assert search_plans
+    assert all("USE TEMP B-TREE FOR ORDER BY" not in plan for plan in search_plans)
+    assert not any(step.startswith("SCAN symbols") for plan in plans for step in plan)
+
+
+def test_build_fails_clearly_without_sqlite_trigram_support(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "codalith.indexing.structure.builder.SYMBOL_SEARCH_SQL",
+        SYMBOL_SEARCH_SQL.replace("'trigram'", "'missing_tokenizer'"),
+    )
+    with pytest.raises(IndexBuildError, match="trigram tokenizer"):
+        build_environment(tmp_path, semantic=False)
+    assert not any((tmp_path / "index" / "generations").iterdir())
 
 
 def test_new_generation_drops_deleted_source_without_stale_rows(

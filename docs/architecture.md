@@ -43,6 +43,7 @@ The manifest (schema 3) binds source revision and fingerprint, adapter ID and ve
 
 - `files`: path, language, SHA-256, byte size, line count, module.
 - `symbols`: ID derived from path, qualified name, kind, signature, and start line, so it is unique within a generation but changes when a symbol moves; qualified/name/kind/signature, range, parent, metadata.
+- `symbol_search`: an FTS5 trigram index over symbol names and qualified names. Its rowids are each symbol's rank (definitions, then the profile's declaration paths, then shorter qualified names), so fuzzy lookups read exact-name, prefix, and substring matches in rank order and stop at the limit instead of sorting every match. Queries shorter than three characters scan it in the same order.
 - `references`: source/target IDs when resolvable, raw target, resolution state, evidence line.
 - `module_dependencies`: adapter-derived module edges: Python imports, C# `using` namespaces, and typed `.Build.cs` dependencies. C++ `#include` directives are not module edges because their first path segment names a header directory, not a module.
 
@@ -57,7 +58,7 @@ Adapters implement `supports(path)` and `extract(path, text)` without filesystem
 - C++/UE uses public tree-sitter APIs, byte-preserving masking for reflection/export macros, UE metadata extraction, and typed `.Build.cs` dependencies; embedded C# files use the C# adapter.
 - Generic indexes file provenance only.
 
-Changing extraction semantics requires a version increment in the catalog.
+Changing extraction semantics or a retrieval profile requires a version increment in the catalog; profiles also fix the symbol ranking stored in `symbol_search`.
 
 ## Retrieval and context
 
