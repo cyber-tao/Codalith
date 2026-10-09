@@ -15,7 +15,12 @@ from codalith.corpus.source_policy import SourcePolicy
 from codalith.corpus.source_reader import FileCatalog, SourceReader
 from codalith.corpus.store_manifest import ActiveGeneration, GenerationRepository
 from codalith.corpus.uris import parse_uri, source_uri, symbol_uri
-from codalith.errors import IndexUnavailableError, RetrievalError, SourceReadError
+from codalith.errors import (
+    IndexUnavailableError,
+    RetrievalError,
+    SourcePolicyError,
+    SourceReadError,
+)
 from codalith.indexing.coderag import CodeRAGBackend
 from codalith.indexing.coderag.backend import generation_store_provenance
 from codalith.indexing.structure.models import (
@@ -210,7 +215,7 @@ class QueryService:
     def __init__(self, registry: CorpusRegistry, policy: SourcePolicy) -> None:
         self.registry = registry
         self.policy = policy
-        self.generations = GenerationRepository()
+        self.generations = GenerationRepository(policy)
         self.coderag = CodeRAGBackend(policy)
         self._indices: dict[tuple[str, str], StructureIndex] = {}
         self._lock = threading.RLock()
@@ -425,7 +430,9 @@ class QueryService:
             candidates.values(),
             key=lambda item: (-item.score, item.corpus.corpus_id, item.path, item.start_line),
         )
-        selected = _diversified(ranked, limit=limit)
+        selected, withheld = _diversified(ranked, limit=limit, denied=self.policy.is_denied)
+        if withheld:
+            warnings.append(_withheld_warning(withheld, "hit"))
         maximum = selected[0].score if selected else 1.0
         hits = [_public_hit(item, item.score / maximum) for item in selected]
         return SearchResponse(
@@ -545,6 +552,7 @@ class QueryService:
         definitions: list[SymbolDefinition] = []
         warnings: list[str] = []
         active_count = 0
+        withheld = 0
         for corpus in resolution.corpora:
             try:
                 generation = self.generations.active(corpus)
@@ -553,16 +561,15 @@ class QueryService:
             except IndexUnavailableError as exc:
                 warnings.append(str(exc))
                 continue
-            definitions.extend(
-                _definition(corpus, generation, record)
-                for record in index.lookup_symbols(
-                    normalized_query,
-                    exact=exact,
-                    limit=limit,
-                )
-            )
+            for record in index.lookup_symbols(normalized_query, exact=exact, limit=limit):
+                if self.policy.is_denied(record.path):
+                    withheld += 1
+                    continue
+                definitions.append(_definition(corpus, generation, record))
         if active_count == 0:
             raise IndexUnavailableError("No corpus in the target has an active index generation")
+        if withheld:
+            warnings.append(_withheld_warning(withheld, "definition"))
         return SymbolResponse(
             query=normalized_query,
             target=resolution.target_id,
@@ -594,6 +601,18 @@ class QueryService:
         root = index.get_symbol(parsed.value)
         if root is None:
             raise IndexUnavailableError(f"Unknown symbol in active generation: {root_uri}")
+        if self.policy.is_denied(root.path):
+            raise SourcePolicyError(f"Source policy denies path: {root.path}")
+        denied_paths: dict[str, bool] = {}
+
+        def withheld_path(*paths: str) -> bool:
+            for path in paths:
+                if path not in denied_paths:
+                    denied_paths[path] = self.policy.is_denied(path)
+                if denied_paths[path]:
+                    return True
+            return False
+
         nodes: dict[str, GraphNode] = {root.symbol_id: _graph_node(corpus, root)}
         edges: list[GraphEdge] = []
         seen_edges: set[tuple[str, int]] = set()
@@ -601,6 +620,7 @@ class QueryService:
         seen_symbols = {root.symbol_id}
         module_cache: dict[str, tuple[SymbolRecord | None, str]] = {}
         truncated = False
+        withheld = 0
         while queue:
             symbol_id, level = queue.popleft()
             if level >= depth:
@@ -632,6 +652,12 @@ class QueryService:
                         if reference.target_symbol_id
                         else None
                     )
+                    if withheld_path(
+                        reference.path,
+                        *(item.path for item in (source, target_symbol) if item is not None),
+                    ):
+                        withheld += 1
+                        continue
                     edges.append(_graph_edge(corpus, reference, source, target_symbol))
                     for adjacent in (source, target_symbol):
                         if adjacent is None:
@@ -663,6 +689,12 @@ class QueryService:
                         direction=edge_direction,
                         cache=module_cache,
                     )
+                    if withheld_path(
+                        dependency.path,
+                        *(item.path for item in (source, target_symbol) if item is not None),
+                    ):
+                        withheld += 1
+                        continue
                     edges.append(
                         _module_graph_edge(
                             corpus,
@@ -690,7 +722,7 @@ class QueryService:
             nodes=list(nodes.values()),
             edges=edges,
             truncated=truncated,
-            warnings=[],
+            warnings=[_withheld_warning(withheld, "edge")] if withheld else [],
         )
 
     def resolve_symbol_uri(self, uri: str) -> SymbolDefinition:
@@ -702,6 +734,8 @@ class QueryService:
         symbol = self._index(corpus, generation).get_symbol(parsed.value)
         if symbol is None:
             raise IndexUnavailableError(f"Unknown symbol in active generation: {uri}")
+        if self.policy.is_denied(symbol.path):
+            raise SourcePolicyError(f"Source policy denies path: {symbol.path}")
         return _definition(corpus, generation, symbol)
 
     def compare(
@@ -1061,10 +1095,22 @@ def _ue_type_stem(value: str) -> str | None:
     return None
 
 
-def _diversified(candidates: list[_Candidate], *, limit: int) -> list[_Candidate]:
+def _diversified(
+    candidates: list[_Candidate],
+    *,
+    limit: int,
+    denied: Callable[[str], bool],
+) -> tuple[list[_Candidate], int]:
     selected: list[_Candidate] = []
     path_counts: dict[tuple[str, str], int] = {}
+    denied_paths: dict[str, bool] = {}
+    withheld = 0
     for candidate in candidates:
+        if candidate.path not in denied_paths:
+            denied_paths[candidate.path] = denied(candidate.path)
+        if denied_paths[candidate.path]:
+            withheld += 1
+            continue
         key = (candidate.corpus.corpus_id, candidate.path)
         if path_counts.get(key, 0) >= 3:
             continue
@@ -1072,7 +1118,11 @@ def _diversified(candidates: list[_Candidate], *, limit: int) -> list[_Candidate
         path_counts[key] = path_counts.get(key, 0) + 1
         if len(selected) == limit:
             break
-    return selected
+    return selected, withheld
+
+
+def _withheld_warning(count: int, noun: str) -> str:
+    return f"Source policy withheld {count} {noun}(s)"
 
 
 def _from_symbol(

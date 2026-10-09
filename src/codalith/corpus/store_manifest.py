@@ -15,9 +15,10 @@ from typing import Any
 
 from codalith.corpus.globs import SOURCE_SELECTION_VERSION
 from codalith.corpus.registry import Corpus
+from codalith.corpus.source_policy import SourcePolicy
 from codalith.errors import IndexBuildError, IndexUnavailableError
 
-MANIFEST_SCHEMA_VERSION = 1
+MANIFEST_SCHEMA_VERSION = 2
 STRUCTURE_SCHEMA_VERSION = 1
 _GENERATION_ID = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}$")
 
@@ -42,7 +43,7 @@ class IndexManifest:
     embedding_model: str
     embedding_dimension: int | None
     coderag_store_fingerprint: str | None
-    chunk_policy_hash: str
+    source_selection_hash: str
     adapter: str
     adapter_version: int
     structure_schema_version: int
@@ -61,6 +62,11 @@ class IndexManifest:
             raise IndexUnavailableError(f"Cannot read index manifest {path}: {exc}") from exc
         if not isinstance(raw, dict):
             raise IndexUnavailableError(f"Index manifest {path} must be an object")
+        if raw.get("schema_version") != MANIFEST_SCHEMA_VERSION:
+            raise IndexUnavailableError(
+                f"Unsupported index manifest schema {raw.get('schema_version')!r} in {path}; "
+                "rebuild the generation"
+            )
         payload = dict(raw)
         try:
             raw_artifacts = payload.pop("artifacts")
@@ -163,6 +169,9 @@ class ActiveGeneration:
 
 
 class GenerationRepository:
+    def __init__(self, policy: SourcePolicy) -> None:
+        self.policy = policy
+
     def active(self, corpus: Corpus, *, verify_artifacts: bool = False) -> ActiveGeneration:
         pointer_path = corpus.index_root / "current.json"
         try:
@@ -194,8 +203,11 @@ class GenerationRepository:
                 f"Index adapter {manifest.adapter}@{manifest.adapter_version} does not match "
                 f"configured adapter {adapter.adapter_id}@{adapter.version}"
             )
-        if manifest.chunk_policy_hash != chunk_policy_hash(corpus):
-            raise IndexUnavailableError("Index source selection does not match corpus configuration")
+        if manifest.source_selection_hash != source_selection_hash(corpus, self.policy):
+            raise IndexUnavailableError(
+                "Index source selection does not match the corpus configuration and "
+                "source policy; rebuild the generation"
+            )
         if manifest.embedding_provider != corpus.embedding_provider:
             raise IndexUnavailableError(
                 "Index embedding provider does not match corpus configuration"
@@ -316,12 +328,14 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def chunk_policy_hash(corpus: Corpus) -> str:
+def source_selection_hash(corpus: Corpus, policy: SourcePolicy) -> str:
     payload = json.dumps(
         {
             "adapter": corpus.adapter,
             "extensions": corpus.include_extensions,
             "exclude_globs": corpus.exclude_globs,
+            "deny_globs": policy.deny_globs,
+            "max_file_bytes": policy.max_file_bytes,
             "selection_semantics": SOURCE_SELECTION_VERSION,
         },
         sort_keys=True,

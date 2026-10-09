@@ -22,10 +22,10 @@ from codalith.corpus.store_manifest import (
     Artifact,
     GenerationRepository,
     IndexManifest,
-    chunk_policy_hash,
     installed_coderag_version,
     new_generation_id,
     sha256_file,
+    source_selection_hash,
 )
 from codalith.errors import IndexBuildError
 from codalith.indexing.coderag.backend import (
@@ -86,7 +86,7 @@ class _WarningCollector:
 class StructureBuilder:
     def __init__(self, policy: SourcePolicy) -> None:
         self.policy = policy
-        self.generations = GenerationRepository()
+        self.generations = GenerationRepository(policy)
 
     def build(
         self,
@@ -181,7 +181,7 @@ class StructureBuilder:
                 coderag_store_fingerprint=(
                     semantic_info.store_fingerprint if semantic_info else None
                 ),
-                chunk_policy_hash=chunk_policy_hash(corpus),
+                source_selection_hash=source_selection_hash(corpus, self.policy),
                 adapter=corpus.adapter,
                 adapter_version=create_adapter(corpus.adapter).version,
                 structure_schema_version=STRUCTURE_SCHEMA_VERSION,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -118,6 +119,56 @@ def test_source_reads_detect_changes_after_indexing(
         assert service.read(hit.uri).stale
         with pytest.raises(SourcePolicyError, match="denies path"):
             service.sources.read("sample", ".env")
+    finally:
+        service.close()
+
+
+def test_source_policy_changes_invalidate_the_generation(
+    environment_factory: EnvironmentFactory,
+) -> None:
+    environment = environment_factory(semantic=False)
+    stricter = replace(
+        environment.policy,
+        deny_globs=(*environment.policy.deny_globs, "**/events.py"),
+    )
+    service = QueryService(environment.registry, stricter)
+    try:
+        status = service.status(target="sample")
+        assert status.corpora[0].state == "invalid"
+        assert "source policy" in (status.corpora[0].message or "")
+    finally:
+        service.close()
+
+
+def test_query_outputs_withhold_paths_denied_by_the_source_policy(
+    environment_factory: EnvironmentFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    environment = environment_factory(
+        semantic=True,
+        files={
+            "src/core/cache.py": "def cache_value(value):\n    return SecretConfig()\n",
+            "src/core/secret_config.py": (
+                "class SecretConfig:\n    TOKEN_VALUE = 'top-secret-token-123'\n"
+            ),
+        },
+    )
+    original = SourcePolicy.is_denied
+    monkeypatch.setattr(
+        SourcePolicy,
+        "is_denied",
+        lambda self, path: path.endswith("secret_config.py") or original(self, path),
+    )
+    service = environment.service()
+    try:
+        search = service.search("SecretConfig TOKEN_VALUE", target="sample")
+        assert not any(hit.path.endswith("secret_config.py") for hit in search.hits)
+        assert any("withheld" in warning for warning in search.warnings)
+        assert not service.symbol("SecretConfig", target="sample").definitions
+        caller = service.symbol("cache_value", target="sample").definitions[0]
+        graph = service.graph(caller.uri, direction="outgoing")
+        assert not any(edge.target_name == "SecretConfig" for edge in graph.edges)
+        assert graph.warnings
     finally:
         service.close()
 
@@ -450,7 +501,7 @@ def test_status_rejects_a_generation_with_a_missing_semantic_store(
     environment_factory: EnvironmentFactory,
 ) -> None:
     environment = environment_factory(semantic=True)
-    generation = GenerationRepository().active(environment.corpus)
+    generation = GenerationRepository(environment.policy).active(environment.corpus)
     shutil.rmtree(generation.coderag_path)
     service = environment.service()
     try:
@@ -466,7 +517,7 @@ def test_semantic_queries_refuse_a_store_with_drifted_provenance(
     environment_factory: EnvironmentFactory,
 ) -> None:
     environment = environment_factory(semantic=True)
-    generation = GenerationRepository().active(environment.corpus)
+    generation = GenerationRepository(environment.policy).active(environment.corpus)
     meta_path = generation.coderag_path / "meta.json"
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     meta["embed_model"] = "drifted-model"
@@ -495,7 +546,7 @@ def test_auto_search_reports_missing_semantic_plane_without_creating_a_store(
         assert result.hits
         assert result.degraded
         assert any("Semantic index is unavailable" in item for item in result.warnings)
-        assert not GenerationRepository().active(environment.corpus).coderag_path.exists()
+        assert not GenerationRepository(environment.policy).active(environment.corpus).coderag_path.exists()
     finally:
         service.close()
 

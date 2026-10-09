@@ -25,7 +25,7 @@ from conftest import EnvironmentFactory, TestEnvironment, build_environment
 def test_generation_contains_only_policy_selected_files(
     semantic_environment: TestEnvironment,
 ) -> None:
-    generation = GenerationRepository().active(
+    generation = GenerationRepository(semantic_environment.policy).active(
         semantic_environment.corpus,
         verify_artifacts=True,
     )
@@ -48,7 +48,7 @@ def test_generation_contains_only_policy_selected_files(
 def test_semantic_index_cannot_leak_files_outside_the_generation(
     semantic_environment: TestEnvironment,
 ) -> None:
-    generation = GenerationRepository().active(semantic_environment.corpus)
+    generation = GenerationRepository(semantic_environment.policy).active(semantic_environment.corpus)
     backend = CodeRAGBackend(semantic_environment.policy)
     try:
         hits = backend.search(
@@ -89,7 +89,7 @@ def test_ripgrep_text_search_treats_natural_language_as_literal(
 def test_resolved_reference_edges_are_stored(
     semantic_environment: TestEnvironment,
 ) -> None:
-    generation = GenerationRepository().active(semantic_environment.corpus)
+    generation = GenerationRepository(semantic_environment.policy).active(semantic_environment.corpus)
     index = StructureIndex(generation.structure_path)
     try:
         function = index.lookup_symbols("cache_value")[0]
@@ -108,10 +108,10 @@ def test_new_generation_drops_deleted_source_without_stale_rows(
     environment_factory: EnvironmentFactory,
 ) -> None:
     environment = environment_factory(semantic=False)
-    first = GenerationRepository().active(environment.corpus)
+    first = GenerationRepository(environment.policy).active(environment.corpus)
     (environment.source_root / "src/core/events.py").unlink()
     report = StructureBuilder(environment.policy).build(environment.corpus)
-    second = GenerationRepository().active(environment.corpus)
+    second = GenerationRepository(environment.policy).active(environment.corpus)
     assert second.manifest.generation_id == report.generation_id
     assert second.manifest.generation_id != first.manifest.generation_id
     index = StructureIndex(second.structure_path)
@@ -150,7 +150,7 @@ def test_adopt_refuses_a_store_built_with_another_embedding_model(
     environment_factory: EnvironmentFactory,
 ) -> None:
     environment = environment_factory(semantic=True)
-    store = GenerationRepository().active(environment.corpus).coderag_path
+    store = GenerationRepository(environment.policy).active(environment.corpus).coderag_path
     before = store_fingerprint(store)
     adopted = replace(
         environment.corpus,
@@ -169,12 +169,12 @@ def test_semantic_generation_is_invalid_after_a_coderag_upgrade(
     environment_factory: EnvironmentFactory,
 ) -> None:
     environment = environment_factory(semantic=True)
-    generation = GenerationRepository().active(environment.corpus)
+    generation = GenerationRepository(environment.policy).active(environment.corpus)
     payload = json.loads(generation.manifest_path.read_text(encoding="utf-8"))
     payload["coderag_version"] = "0.0.0-previous"
     generation.manifest_path.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(IndexUnavailableError, match="built with CodeRAG 0.0.0-previous"):
-        GenerationRepository().active(environment.corpus)
+        GenerationRepository(environment.policy).active(environment.corpus)
 
 
 def test_store_fingerprint_detects_same_size_corruption(tmp_path: Path) -> None:
@@ -192,7 +192,7 @@ def test_deep_generation_verification_rejects_manifest_count_drift(
     environment_factory: EnvironmentFactory,
 ) -> None:
     environment = environment_factory(semantic=False)
-    generation = GenerationRepository().active(environment.corpus)
+    generation = GenerationRepository(environment.policy).active(environment.corpus)
     payload = json.loads(generation.manifest_path.read_text(encoding="utf-8"))
     payload["files"] += 1
     generation.manifest_path.write_text(
@@ -200,7 +200,7 @@ def test_deep_generation_verification_rejects_manifest_count_drift(
         encoding="utf-8",
     )
     with pytest.raises(IndexUnavailableError, match="does not match"):
-        GenerationRepository().active(environment.corpus, verify_artifacts=True)
+        GenerationRepository(environment.policy).active(environment.corpus, verify_artifacts=True)
 
 
 def test_index_builder_does_not_follow_source_links(
@@ -216,7 +216,7 @@ def test_index_builder_does_not_follow_source_links(
     except OSError as exc:
         pytest.skip(f"symbolic links are unavailable: {exc}")
     StructureBuilder(environment.policy).build(environment.corpus)
-    generation = GenerationRepository().active(environment.corpus)
+    generation = GenerationRepository(environment.policy).active(environment.corpus)
     index = StructureIndex(generation.structure_path)
     try:
         assert index.get_file("linked.py") is None

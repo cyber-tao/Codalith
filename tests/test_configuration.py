@@ -116,7 +116,9 @@ def test_manifest_validation_rejects_unsafe_artifacts_and_naive_time(
     semantic_environment: object,
 ) -> None:
     environment = semantic_environment
-    generation = GenerationRepository().active(environment.corpus)  # type: ignore[attr-defined]
+    generation = GenerationRepository(environment.policy).active(  # type: ignore[attr-defined]
+        environment.corpus  # type: ignore[attr-defined]
+    )
     manifest = generation.manifest
     with pytest.raises(IndexUnavailableError, match="Unsafe artifact path"):
         replace(
@@ -131,10 +133,17 @@ def test_manifest_loader_rejects_boolean_counts(
     semantic_environment: object,
     tmp_path: Path,
 ) -> None:
-    generation = GenerationRepository().active(semantic_environment.corpus)  # type: ignore[attr-defined]
+    generation = GenerationRepository(semantic_environment.policy).active(  # type: ignore[attr-defined]
+        semantic_environment.corpus  # type: ignore[attr-defined]
+    )
     payload = generation.manifest.to_dict()
     payload["files"] = True
     path = tmp_path / "manifest.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(IndexUnavailableError, match="counts"):
+        type(generation.manifest).load(path)
+    payload["files"] = 1
+    payload["schema_version"] = 1
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(IndexUnavailableError, match="Unsupported index manifest schema 1"):
         type(generation.manifest).load(path)

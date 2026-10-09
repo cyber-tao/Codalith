@@ -5,7 +5,7 @@ from __future__ import annotations
 from fnmatch import fnmatchcase
 from pathlib import PurePosixPath
 
-SOURCE_SELECTION_VERSION = 2
+SOURCE_SELECTION_VERSION = 3
 
 
 def matches_path(path: str, pattern: str) -> bool:

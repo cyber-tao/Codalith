@@ -132,7 +132,7 @@ def _doctor(
         if args.deep:
             target = registry.resolve(args.target)
             checks: list[dict[str, object]] = []
-            repository = GenerationRepository()
+            repository = GenerationRepository(policy)
             for corpus in target.corpora:
                 try:
                     generation = repository.active(corpus, verify_artifacts=True)
