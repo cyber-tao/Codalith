@@ -22,7 +22,7 @@ from codalith.corpus.source_policy import SourcePolicy
 from codalith.errors import IndexBuildError, IndexInvalidError, IndexMissingError
 
 MANIFEST_SCHEMA_VERSION = 3
-STRUCTURE_SCHEMA_VERSION = 1
+STRUCTURE_SCHEMA_VERSION = 2
 GENERATION_STORE_DIR = "coderag"
 _GENERATION_ID = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}$")
 _FileStamp = tuple[int, int, int]

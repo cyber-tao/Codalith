@@ -36,9 +36,9 @@ The manifest binds source revision/fingerprint, adapter ID/version, source-selec
 - `files`: path, language, SHA-256, byte size, line count, module.
 - `symbols`: stable content-derived ID, qualified/name/kind/signature, range, parent, metadata.
 - `references`: source/target IDs when uniquely resolvable, raw target, resolution state, evidence line.
-- `module_dependencies`: adapter-derived import/include/build edges.
+- `module_dependencies`: adapter-derived module edges: Python imports, C# `using` namespaces, and typed `.Build.cs` dependencies. C++ `#include` directives are not module edges because their first path segment names a header directory, not a module.
 
-Resolution is deliberately conservative. Multiple candidates remain `ambiguous`; missing candidates remain `unresolved`. Graph responses retain that state instead of inventing an edge.
+Resolution is deliberately conservative. A reference is `resolved` only when its qualified target matches exactly one symbol; a target whose last name segment matches exactly one symbol anywhere in the corpus is `name_match`, because receiver types and imports are not analyzed. Multiple candidates remain `ambiguous`; missing candidates remain `unresolved`. Graph responses carry that state unchanged.
 
 ## Language adapters
 
@@ -46,7 +46,7 @@ Adapters implement `supports(path)` and `extract(path, text)` without filesystem
 
 - Python uses the standard-library AST.
 - C# uses public tree-sitter APIs for types, callables, members, calls, namespaces, and using edges.
-- C++/UE uses public tree-sitter APIs, byte-preserving masking for reflection/export macros, UE metadata extraction, include edges, and typed `.Build.cs` dependencies; embedded C# files use the C# adapter.
+- C++/UE uses public tree-sitter APIs, byte-preserving masking for reflection/export macros, UE metadata extraction, and typed `.Build.cs` dependencies; embedded C# files use the C# adapter.
 - Generic indexes file provenance only.
 
 Changing extraction semantics requires an adapter version increment.

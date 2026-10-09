@@ -37,7 +37,9 @@ CREATE TABLE "references" (
     source_symbol_id TEXT REFERENCES symbols(symbol_id) ON DELETE CASCADE,
     target_name TEXT NOT NULL,
     target_symbol_id TEXT REFERENCES symbols(symbol_id),
-    resolution TEXT NOT NULL CHECK(resolution IN ('resolved', 'ambiguous', 'unresolved')),
+    resolution TEXT NOT NULL CHECK(
+        resolution IN ('resolved', 'name_match', 'ambiguous', 'unresolved')
+    ),
     kind TEXT NOT NULL,
     path TEXT NOT NULL REFERENCES files(path) ON DELETE CASCADE,
     line INTEGER NOT NULL CHECK(line >= 1)

@@ -51,7 +51,7 @@ _QUOTED = re.compile(r'"([A-Za-z_][A-Za-z0-9_]*)"')
 
 class CppUEAdapter:
     adapter_id = "cpp-ue"
-    version = 5
+    version = 6
 
     def __init__(self) -> None:
         self._parser = Parser(Language(tree_sitter_cpp.language()))
@@ -81,7 +81,6 @@ class CppUEAdapter:
             language="cpp",
             symbols=tuple(_dedupe_symbols(state.symbols)),
             references=tuple(state.references),
-            module_dependencies=tuple(_dedupe_dependencies(state.dependencies)),
             warnings=warnings,
         )
 
@@ -94,7 +93,6 @@ class _CppState:
         self.module = _module_from_path(path)
         self.symbols: list[SymbolObservation] = []
         self.references: list[ReferenceObservation] = []
-        self.dependencies: list[ModuleDependencyObservation] = []
 
     def walk(
         self,
@@ -224,18 +222,6 @@ class _CppState:
                             node.start_point[0] + 1,
                         )
                     )
-        if node_type == "preproc_include" and self.module:
-            dependency_target = _include_target(_text(node, self.source))
-            if dependency_target and dependency_target != self.module:
-                self.dependencies.append(
-                    ModuleDependencyObservation(
-                        self.module,
-                        dependency_target,
-                        "include",
-                        self.path,
-                        node.start_point[0] + 1,
-                    )
-                )
         return [
             (child, namespaces, types, current_symbol)
             for child in node.named_children
@@ -441,14 +427,6 @@ def _module_from_path(path: str) -> str | None:
             if index + 1 < len(parts):
                 return parts[index + 1]
     return None
-
-
-def _include_target(text: str) -> str | None:
-    match = re.search(r"[<\"]([^>\"]+)[>\"]", text)
-    if not match:
-        return None
-    path = match.group(1)
-    return path.split("/", 1)[0] if "/" in path else None
 
 
 def _text(node: Node, source: bytes) -> str:

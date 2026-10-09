@@ -115,6 +115,26 @@ def test_symbol_graph_has_resolved_source_evidence(
         service.close()
 
 
+def test_unique_name_only_matches_are_not_reported_as_resolved(tmp_path: Path) -> None:
+    environment = build_environment(
+        tmp_path,
+        files={
+            "src/cache.py": "class Cache:\n    def get(self, key):\n        return key\n",
+            "src/user.py": "def lookup(options):\n    return options.get('name')\n",
+        },
+        semantic=False,
+    )
+    service = environment.service()
+    try:
+        lookup = service.symbol("lookup", target="sample").definitions[0]
+        edges = service.graph(lookup.uri, direction="outgoing").edges
+        assert [(edge.target_name, edge.resolution) for edge in edges] == [
+            ("options.get", "name_match")
+        ]
+    finally:
+        service.close()
+
+
 def test_symbol_graph_exposes_module_dependencies(tmp_path: Path) -> None:
     environment = build_environment(
         tmp_path,

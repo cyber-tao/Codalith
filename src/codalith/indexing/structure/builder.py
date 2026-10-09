@@ -603,7 +603,7 @@ def _resolve_pending(connection: sqlite3.Connection) -> None:
             CASE
                 WHEN qualified.candidate_count = 1 THEN 'resolved'
                 WHEN qualified.candidate_count > 1 THEN 'ambiguous'
-                WHEN named.candidate_count = 1 THEN 'resolved'
+                WHEN named.candidate_count = 1 THEN 'name_match'
                 WHEN named.candidate_count > 1 THEN 'ambiguous'
                 ELSE 'unresolved'
             END,

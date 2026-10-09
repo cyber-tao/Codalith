@@ -114,7 +114,7 @@ class GraphEdge(StrictModel):
     target_uri: str | None
     target_name: str
     kind: str
-    resolution: Literal["resolved", "ambiguous", "unresolved"]
+    resolution: Literal["resolved", "name_match", "ambiguous", "unresolved"]
     evidence_uri: str
 
 

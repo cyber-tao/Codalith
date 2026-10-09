@@ -72,10 +72,7 @@ public:
     assert symbols["AHero::Jump"].metadata["ue_macro"] == "UFUNCTION"
     assert symbols["AHero::Tick"].kind == "method"
     assert any(item.target_name == "Jump" for item in result.references)
-    assert any(
-        item.source_module == "Engine" and item.target_module == "Gameplay"
-        for item in result.module_dependencies
-    )
+    assert not result.module_dependencies
 
 
 def test_cpp_ue_adapter_extracts_build_cs_dependencies() -> None:
