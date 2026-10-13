@@ -8,9 +8,12 @@ One LanceDB database at ``store_dir`` with two tables:
   ``start_line``, ``end_line``, ``text``, ``vector``); BM25 runs over ``text`` and vector
   ANN over ``vector``.
 
+``meta.json`` records the embedding model and dimension the vectors were built with. A store
+is created empty and written once; an existing store is only ever opened for reading.
+
 The integer ``chunks.id`` is the fusion/hydrate key. Writes are buffered and flushed in
 batches because LanceDB is columnar and many tiny appends create severe fragment/version
-bloat. Reads query committed data only.
+bloat.
 """
 
 from __future__ import annotations
@@ -22,12 +25,14 @@ import re
 import threading
 import time
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
-
-import numpy as np
+from typing import TYPE_CHECKING, Any
 
 from codalith.semantic.types import Chunk, IndexStats
+
+if TYPE_CHECKING:
+    import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +57,42 @@ _HYDRATE_COLS = [
 _FTS_TOKEN = re.compile(r"[A-Za-z0-9_]+")
 
 
+class SemanticStoreError(Exception):
+    """A store is missing, unreadable, read-only, or built with another embedding model."""
+
+
+@dataclass(frozen=True, slots=True)
+class StoreProvenance:
+    model: str
+    dimension: int
+
+    def describe(self) -> str:
+        return f"{self.model} ({self.dimension} dimensions)"
+
+
+def read_provenance(store_dir: Path) -> StoreProvenance:
+    """Read the embedding provenance a store records, without opening LanceDB."""
+
+    path = store_dir / _META_FILE
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise SemanticStoreError(
+            f"Semantic store has no readable provenance {path}: {exc}"
+        ) from exc
+    model = raw.get("embed_model") if isinstance(raw, dict) else None
+    dimension = raw.get("embed_dim") if isinstance(raw, dict) else None
+    if (
+        not isinstance(model, str)
+        or not model
+        or not isinstance(dimension, int)
+        or isinstance(dimension, bool)
+        or dimension <= 0
+    ):
+        raise SemanticStoreError(f"Semantic store provenance is invalid: {path}")
+    return StoreProvenance(model, dimension)
+
+
 def _fts_query(query: str) -> str:
     """Reduce an arbitrary query to space-separated tokens (defuses FTS operators)."""
     return " ".join(_FTS_TOKEN.findall(query))
@@ -60,19 +101,49 @@ def _fts_query(query: str) -> str:
 class LanceStore:
     """LanceDB-backed chunk + file store with vector ANN and BM25 search."""
 
-    def __init__(self, store_dir: Path, dim: int) -> None:
+    def __init__(self, store_dir: Path, provenance: StoreProvenance) -> None:
+        """Use :meth:`create` or :meth:`open`, which check the directory and provenance."""
+
         import lancedb
 
-        self.dim = dim
-        self._dir = Path(store_dir)
-        self._dir.mkdir(parents=True, exist_ok=True)
-        self._db = lancedb.connect(str(self._dir))
+        self.provenance = provenance
+        self._db = lancedb.connect(str(store_dir))
         self._lock = threading.RLock()
         self._chunks_buf: list[dict[str, Any]] = []
         self._files_buf: list[dict[str, Any]] = []
         self._next_id = 0
-        if _CHUNKS in self._db.table_names():
-            self._next_id = self._max_id() + 1
+
+    @classmethod
+    def create(cls, store_dir: Path, provenance: StoreProvenance) -> LanceStore:
+        """Create an empty store; ``store_dir`` must not exist yet."""
+
+        try:
+            store_dir.mkdir(parents=True)
+        except FileExistsError as exc:
+            raise SemanticStoreError(f"Semantic store already exists: {store_dir}") from exc
+        (store_dir / _META_FILE).write_text(
+            json.dumps(
+                {
+                    "embed_model": provenance.model,
+                    "embed_dim": provenance.dimension,
+                    "schema_version": _SCHEMA_VERSION,
+                }
+            ),
+            encoding="utf-8",
+        )
+        return cls(store_dir, provenance)
+
+    @classmethod
+    def open(cls, store_dir: Path, provenance: StoreProvenance) -> LanceStore:
+        """Open an existing store for reading. Nothing is written to it."""
+
+        recorded = read_provenance(store_dir)
+        if recorded != provenance:
+            raise SemanticStoreError(
+                f"Semantic store {store_dir} was built with {recorded.describe()}; "
+                f"refusing to open it with {provenance.describe()}"
+            )
+        return cls(store_dir, provenance)
 
     # --- schema ---
 
@@ -89,7 +160,7 @@ class LanceStore:
                 ("start_line", pa.int32()),
                 ("end_line", pa.int32()),
                 ("text", pa.string()),
-                ("vector", pa.list_(pa.float32(), self.dim)),
+                ("vector", pa.list_(pa.float32(), self.provenance.dimension)),
             ]
         )
 
@@ -116,59 +187,6 @@ class LanceStore:
         if _FILES not in self._db.table_names():
             return self._db.create_table(_FILES, schema=self._files_schema())
         return self._db.open_table(_FILES)
-
-    def _max_id(self) -> int:
-        tbl = self._db.open_table(_CHUNKS)
-        n = tbl.count_rows()
-        if n == 0:
-            return -1
-        rows = tbl.search().select(["id"]).limit(n).to_list()
-        return max((int(r["id"]) for r in rows), default=-1)
-
-    # --- provenance / lifecycle ---
-
-    def bootstrap(self, embed_dim: int, embed_model: str) -> bool:
-        """Record the embedding model/dim; clear the store if they changed.
-
-        Returns True when a rebuild is required (model/dim changed).
-        """
-        meta_path = self._dir / _META_FILE
-        prev: dict[str, Any] = {}
-        if meta_path.exists():
-            try:
-                prev = json.loads(meta_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):  # pragma: no cover - corrupt meta
-                prev = {}
-        changed = bool(prev) and (
-            int(prev.get("embed_dim", -1)) != embed_dim
-            or prev.get("embed_model") != embed_model
-        )
-        if changed:
-            logger.warning(
-                "Embedding model changed (%s/%s -> %s/%s); clearing index.",
-                prev.get("embed_model"),
-                prev.get("embed_dim"),
-                embed_model,
-                embed_dim,
-            )
-            with self._lock:
-                for name in (_CHUNKS, _FILES):
-                    if name in self._db.table_names():
-                        self._db.drop_table(name)
-                self._chunks_buf.clear()
-                self._files_buf.clear()
-                self._next_id = 0
-        meta_path.write_text(
-            json.dumps(
-                {
-                    "embed_model": embed_model,
-                    "embed_dim": embed_dim,
-                    "schema_version": _SCHEMA_VERSION,
-                }
-            ),
-            encoding="utf-8",
-        )
-        return changed
 
     def close(self) -> None:
         with self._lock:
@@ -200,6 +218,8 @@ class LanceStore:
         vectors: np.ndarray | None,
     ) -> int:
         """Buffer one file's rows. Returns the number of chunks added."""
+        import numpy as np
+
         with self._lock:
             added = 0
             if chunks and vectors is not None:
@@ -285,25 +305,27 @@ class LanceStore:
                 "LanceDB vector index build failed (brute-force fallback)."
             )
 
-    # --- file metadata ---
+    # --- reads ---
 
-    def all_file_metas(self) -> dict[str, dict[str, Any]]:
-        """Every file's metadata, in one scan."""
+    def file_hashes(self) -> dict[str, str]:
+        """Content SHA-256 of every indexed file, keyed by POSIX relative path."""
         self.flush()
         if _FILES not in self._db.table_names():
             return {}
         tbl = self._db.open_table(_FILES)
         rows = (
             tbl.search()
-            .select(["path", "content_hash", "mtime", "size"])
+            .select(["path", "content_hash"])
             .limit(max(1, tbl.count_rows()))
             .to_list()
         )
-        return {r["path"]: r for r in rows}
-
-    # --- retrieval ---
+        return {
+            str(r["path"]).replace("\\", "/"): str(r["content_hash"] or "") for r in rows
+        }
 
     def vector_search(self, qvec: np.ndarray, k: int) -> list[tuple[int, float]]:
+        import numpy as np
+
         if _CHUNKS not in self._db.table_names():
             return []
         q = np.asarray(qvec, dtype="float32").reshape(-1)
@@ -347,8 +369,6 @@ class LanceStore:
             .to_list()
         )
         return {int(r["id"]): r for r in rows}
-
-    # --- stats ---
 
     def stats(self) -> IndexStats:
         self.flush()

@@ -36,9 +36,11 @@ The manifest (schema 3) binds source revision and fingerprint, adapter ID and ve
 
 ## Semantic plane
 
-- **Build** materializes the snapshot's files into a temporary view and indexes all of them as text; every snapshot file must be stored with the same SHA-256 unless it has no indexable text (empty or binary).
-- **Adopt** never writes the external store. It refuses a store whose recorded embedding model or dimension differs from the configured provider (opening it would otherwise clear the store), rejects any shared file whose content hash differs from the snapshot, records how many snapshot files the store covers and how many extra files it holds, and pins the store's absolute path in the manifest.
+- **Build** materializes the snapshot's files into a temporary view and indexes all of them as text into a store that must not exist yet; every snapshot file must be stored with the same SHA-256 unless it has no indexable text (empty or binary).
+- **Adopt** never writes the external store. The engine opens existing stores read-only and refuses one whose recorded embedding model or dimension differs from the configured provider; adopt also rejects any shared file whose content hash differs from the snapshot, records how many snapshot files the store covers and how many extra files it holds, and pins the store's absolute path in the manifest.
 - **Queries** open a store only after checking its recorded provenance against the manifest, configure the embedding provider from the manifest rather than live configuration, discard hits outside the snapshot, and over-fetch in proportion to an adopted store's extra files.
+
+`codalith.semantic.ENGINE_VERSION` is recorded in every semantic generation; raising it, which chunking, embedding-input, or store-layout changes require, invalidates them.
 
 ## Structural schema
 

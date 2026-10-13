@@ -7,11 +7,12 @@ embedding dimension is a property of the provider and its model, never a hard-co
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Protocol, runtime_checkable
-
-import numpy as np
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from codalith.semantic.config import Config
+
+if TYPE_CHECKING:
+    import numpy as np
 
 
 @runtime_checkable

@@ -15,20 +15,25 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import numpy as np
-
 from codalith.semantic.chunking import chunk_file
 from codalith.semantic.chunking.languages import detect_language
 from codalith.semantic.config import Config
-from codalith.semantic.embeddings import EmbeddingProvider
 from codalith.semantic.types import Chunk, IndexStats
 
 if TYPE_CHECKING:
+    import numpy as np
+
+    from codalith.semantic.embeddings import EmbeddingProvider
     from codalith.semantic.store import LanceStore
 
 logger = logging.getLogger(__name__)
 
 _BINARY_SNIFF_BYTES = 8192
+
+
+def has_indexable_text(data: bytes) -> bool:
+    """Whether the indexer stores ``data``: blank and binary (NUL in the head) content is skipped."""
+    return bool(data.strip()) and b"\x00" not in data[:_BINARY_SNIFF_BYTES]
 
 
 @dataclass(slots=True)
@@ -81,9 +86,7 @@ class Indexer:
         except OSError as exc:
             logger.warning("Cannot read %s: %s", path, exc)
             return None
-        if len(data) > self.config.max_file_bytes or not data.strip():
-            return None
-        if b"\x00" in data[:_BINARY_SNIFF_BYTES]:
+        if len(data) > self.config.max_file_bytes or not has_indexable_text(data):
             return None
         return _Work(
             rel,

@@ -11,7 +11,6 @@ from collections.abc import Mapping
 from contextlib import AbstractContextManager
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
 
 from codalith.corpus.registry import Corpus
 from codalith.corpus.source_policy import SourcePolicy
@@ -26,9 +25,8 @@ from codalith.errors import (
 from codalith.indexing.leases import GenerationLeases
 from codalith.semantic.config import Config
 from codalith.semantic.engine import SemanticEngine
-
-_STORE_PROVENANCE_FILE = "meta.json"
-_CODERAG_BINARY_SNIFF_BYTES = 8192
+from codalith.semantic.indexer import has_indexable_text
+from codalith.semantic.store import SemanticStoreError, StoreProvenance, read_provenance
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,15 +57,6 @@ class SemanticBuildInfo:
         return asdict(self)
 
 
-@dataclass(frozen=True, slots=True)
-class StoreProvenance:
-    model: str
-    dimension: int
-
-    def describe(self) -> str:
-        return f"{self.model} ({self.dimension} dimensions)"
-
-
 class CodeRAGBackend:
     def __init__(self, policy: SourcePolicy) -> None:
         self.policy = policy
@@ -83,7 +72,7 @@ class CodeRAGBackend:
     ) -> list[SemanticHit]:
         with self._engine(corpus, generation) as engine:
             try:
-                hits = engine.search(query, top_k=limit)
+                hits = engine.search(query, limit)
             except Exception as exc:
                 raise RetrievalError(
                     f"CodeRAG search failed for {corpus.corpus_id}: {type(exc).__name__}: {exc}"
@@ -125,10 +114,10 @@ class CodeRAGBackend:
 
     def _open_engine(self, corpus: Corpus, generation: ActiveGeneration) -> SemanticEngine:
         try:
-            expected = generation_store_provenance(generation)
+            generation_store_provenance(generation)
         except IndexUnavailableError as exc:
             raise RetrievalError(str(exc)) from exc
-        return _open_verified_engine(
+        return _open_engine(
             coderag_config(
                 corpus,
                 generation.coderag_path,
@@ -137,35 +126,11 @@ class CodeRAGBackend:
                 model=generation.manifest.embedding_model,
             ),
             error=RetrievalError,
-            expected=expected,
         )
 
 
 def _close_engine(engine: SemanticEngine) -> None:
     engine.close()
-
-
-def read_store_provenance(store_dir: Path) -> StoreProvenance:
-    """Read the embedding provenance CodeRAG compares before it clears a store."""
-
-    path = store_dir / _STORE_PROVENANCE_FILE
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise IndexInvalidError(
-            f"CodeRAG store has no readable provenance {path}: {exc}"
-        ) from exc
-    model = raw.get("embed_model") if isinstance(raw, dict) else None
-    dimension = raw.get("embed_dim") if isinstance(raw, dict) else None
-    if (
-        not isinstance(model, str)
-        or not model
-        or not isinstance(dimension, int)
-        or isinstance(dimension, bool)
-        or dimension <= 0
-    ):
-        raise IndexInvalidError(f"CodeRAG store provenance is invalid: {path}")
-    return StoreProvenance(model, dimension)
 
 
 def generation_store_provenance(generation: ActiveGeneration) -> StoreProvenance:
@@ -177,7 +142,10 @@ def generation_store_provenance(generation: ActiveGeneration) -> StoreProvenance
             f"Generation {manifest.generation_id} has no semantic embedding dimension"
         )
     expected = StoreProvenance(manifest.embedding_model, manifest.embedding_dimension)
-    recorded = read_store_provenance(generation.coderag_path)
+    try:
+        recorded = read_provenance(generation.coderag_path)
+    except SemanticStoreError as exc:
+        raise IndexInvalidError(str(exc)) from exc
     if recorded != expected:
         raise IndexInvalidError(
             f"CodeRAG store {generation.coderag_path} records {recorded.describe()} but "
@@ -186,42 +154,27 @@ def generation_store_provenance(generation: ActiveGeneration) -> StoreProvenance
     return expected
 
 
-def _open_verified_engine(
-    config: Config,
-    *,
-    error: type[CodalithError],
-    expected: StoreProvenance | None = None,
-) -> SemanticEngine:
-    """Open an existing store only when bootstrap cannot clear it."""
-
-    store_dir = Path(config.store_dir)
+def _create_engine(config: Config) -> SemanticEngine:
     try:
-        recorded = read_store_provenance(store_dir)
-    except IndexUnavailableError as exc:
-        raise error(str(exc)) from exc
-    if expected is not None and recorded != expected:
-        raise error(
-            f"CodeRAG store {store_dir} records {recorded.describe()} but "
-            f"{expected.describe()} was expected"
-        )
-    engine = SemanticEngine(config)
-    try:
-        provider = engine.provider
-        configured = StoreProvenance(str(provider.model_id), int(provider.dim))
+        return SemanticEngine.create(config)
     except Exception as exc:
-        engine.close()
-        raise error(
-            f"Cannot initialize embedding provider {config.provider!r}: "
-            f"{type(exc).__name__}: {exc}"
+        raise IndexBuildError(
+            f"Cannot create semantic store {config.store_dir}: {type(exc).__name__}: {exc}"
         ) from exc
-    if configured != recorded:
-        engine.close()
+
+
+def _open_engine(config: Config, *, error: type[CodalithError]) -> SemanticEngine:
+    """Open an existing store read-only; the engine refuses another embedding model."""
+
+    try:
+        return SemanticEngine.open(config)
+    except SemanticStoreError as exc:
+        raise error(str(exc)) from exc
+    except Exception as exc:
         raise error(
-            f"CodeRAG store {store_dir} was built with {recorded.describe()} but the "
-            f"configured provider is {configured.describe()}; refusing to open it "
-            "because CodeRAG would clear the store"
-        )
-    return engine
+            f"Cannot open semantic store {config.store_dir} with provider "
+            f"{config.provider!r}: {type(exc).__name__}: {exc}"
+        ) from exc
 
 
 def prepare_semantic_index(
@@ -242,6 +195,7 @@ def prepare_semantic_index(
         raise IndexBuildError("Cannot prepare a semantic index without indexed source files")
     if mode == "build" and store_dir.exists():
         raise IndexBuildError(f"Semantic build target already exists: {store_dir}")
+    config = coderag_config(corpus, store_dir, policy)
     source_view: tempfile.TemporaryDirectory[str] | None = None
     try:
         if mode == "build":
@@ -251,17 +205,15 @@ def prepare_semantic_index(
             )
             view_root = Path(source_view.name)
             _materialize_source_view(corpus.source_root, view_root, tuple(indexed_files))
-            engine = SemanticEngine(coderag_config(corpus, store_dir, policy))
+            engine = _create_engine(config)
         else:
-            engine = _open_verified_engine(
-                coderag_config(corpus, store_dir, policy),
-                error=IndexBuildError,
-            )
+            engine = _open_engine(config, error=IndexBuildError)
         try:
             if mode == "build":
                 engine.index(view_root)
-            status = engine.status()
-            stored = _stored_file_hashes(engine)
+            provenance = engine.provenance
+            stats = engine.stats()
+            stored = engine.file_hashes()
         except Exception as exc:
             raise IndexBuildError(
                 f"Cannot {mode} CodeRAG store for {corpus.corpus_id}: "
@@ -272,9 +224,7 @@ def prepare_semantic_index(
     finally:
         if source_view is not None:
             source_view.cleanup()
-    total_files = _status_int(status, "total_files")
-    total_chunks = _status_int(status, "total_chunks")
-    if total_files <= 0 or total_chunks <= 0:
+    if stats.total_files <= 0 or stats.total_chunks <= 0:
         raise IndexBuildError("CodeRAG store is empty")
     if mode == "build":
         covered_files = _verify_built_store(corpus.source_root, stored, indexed_files)
@@ -282,11 +232,11 @@ def prepare_semantic_index(
     else:
         covered_files, extra_files = _verify_adopted_store(stored, indexed_files)
     return SemanticBuildInfo(
-        provider=str(status.get("provider", corpus.embedding_provider)),
-        model=str(status.get("model", corpus.embedding_model)),
-        dimension=_status_int(status, "embedding_dim"),
-        total_files=total_files,
-        total_chunks=total_chunks,
+        provider=config.provider,
+        model=provenance.model,
+        dimension=provenance.dimension,
+        total_files=stats.total_files,
+        total_chunks=stats.total_chunks,
         covered_files=covered_files,
         extra_files=extra_files,
         store_fingerprint=store_fingerprint(store_dir),
@@ -304,22 +254,20 @@ def preflight_semantic_index(
     _validate_semantic_request(corpus, mode=mode, store_dir=corpus.coderag_store)
     if mode != "adopt" or corpus.coderag_store is None:
         return
-    engine = _open_verified_engine(
+    engine = _open_engine(
         coderag_config(corpus, corpus.coderag_store, policy),
         error=IndexBuildError,
     )
     try:
-        status = engine.status()
+        stats = engine.stats()
     except Exception as exc:
         raise IndexBuildError(
             f"Cannot preflight CodeRAG store for {corpus.corpus_id}: {type(exc).__name__}: {exc}"
         ) from exc
     finally:
         engine.close()
-    if _status_int(status, "total_files") <= 0 or _status_int(status, "total_chunks") <= 0:
+    if stats.total_files <= 0 or stats.total_chunks <= 0:
         raise IndexBuildError("CodeRAG store is empty")
-    if _status_int(status, "embedding_dim") <= 0:
-        raise IndexBuildError("CodeRAG store has no embedding dimension")
 
 
 def _validate_semantic_request(
@@ -335,14 +283,6 @@ def _validate_semantic_request(
             raise IndexBuildError("Semantic adopt mode requires corpus.coderag_store")
         if not store_dir.is_dir():
             raise IndexBuildError(f"CodeRAG store does not exist: {store_dir}")
-
-
-def _stored_file_hashes(engine: SemanticEngine) -> dict[str, str]:
-    metas = engine.store.all_file_metas()
-    return {
-        str(path).replace("\\", "/"): str(meta.get("content_hash") or "")
-        for path, meta in metas.items()
-    }
 
 
 def _verify_built_store(
@@ -394,7 +334,7 @@ def _has_indexable_text(path: Path) -> bool:
         data = path.read_bytes()
     except OSError as exc:
         raise IndexBuildError(f"Indexed source file disappeared: {path}") from exc
-    return bool(data.strip()) and b"\x00" not in data[:_CODERAG_BINARY_SNIFF_BYTES]
+    return has_indexable_text(data)
 
 
 def coderag_config(
@@ -438,13 +378,6 @@ def store_fingerprint(store_dir: Path) -> str:
 
 def write_semantic_metadata(path: Path, info: SemanticBuildInfo) -> None:
     path.write_text(json.dumps(info.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-
-def _status_int(status: dict[str, Any], key: str) -> int:
-    value = status.get(key)
-    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
-        raise IndexBuildError(f"CodeRAG status field {key!r} is invalid")
-    return value
 
 
 def _materialize_source_view(

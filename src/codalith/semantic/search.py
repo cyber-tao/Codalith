@@ -8,10 +8,10 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from codalith.semantic.config import Config
-from codalith.semantic.embeddings import EmbeddingProvider
 from codalith.semantic.types import SearchHit
 
 if TYPE_CHECKING:
+    from codalith.semantic.embeddings import EmbeddingProvider
     from codalith.semantic.store import LanceStore
 
 
