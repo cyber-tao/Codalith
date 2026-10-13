@@ -51,7 +51,6 @@ where = ["src"]
 include = ["codalith*"]
 
 [tool.pytest.ini_options]
-addopts = "-q"
 pythonpath = ["src"]
 testpaths = ["tests"]
 norecursedirs = [".venv", "build", "dist"]
