@@ -8,7 +8,7 @@ Benchmarks always use an actual MCP Streamable HTTP session. They do not call `Q
 - `ue-regression.jsonl`: migrated 80-case historical UE suite (78 `auto`, 2 `symbol`).
 - `ue-holdout.jsonl`: 40 independently selected UE questions and the primary quality signal.
 - `ue-literal.jsonl`: an exact logging token and an absent literal, evaluated separately.
-- `ue-semantic.jsonl`: 13 English/Chinese questions without symbol or file names, using the semantic strategy across audio, animation, physics, HTTP, sockets, navigation, camera, and rendering.
+- `ue-semantic.jsonl`: 13 English/Chinese questions without symbol or file names, using the semantic strategy across audio, animation, physics, HTTP, sockets, navigation, camera, and rendering. It evaluates file retrieval and citations only.
 
 Each JSONL row is strict and contains `id`, `query`, optional `target`, `strategy`, expected files/symbols, negative flag, language, and category. Legacy or unknown fields are rejected.
 
@@ -21,7 +21,7 @@ Four regression symbol labels were corrected against source declarations before 
 ## Metrics and default gates
 
 - file recall@5 ≥ 0.85
-- symbol recall@5 ≥ 0.80
+- symbol recall@5 ≥ 0.80 when symbol ground truth exists
 - MRR ≥ 0.65
 - nDCG@10 ≥ 0.75
 - citation validity = 1.00
@@ -30,7 +30,9 @@ Four regression symbol labels were corrected against source declarations before 
 - p95 latency ≤ 2,000 ms
 - errors = 0
 
-Ranked paths are deduplicated before scoring; symbols are ranked as distinct `(path, symbol)` pairs. Symbol matches are case-sensitive, allow a qualified-name suffix, and must belong to an expected file when expected files are specified. Failed queries contribute zero to every applicable quality metric. Every top-five citation is round-tripped through `codalith_read` and must match its URI, corpus, revision, generation, path, and line range, with matching current/indexed SHA-256 hashes and no stale flag; run benchmarks against a stable generation. Latency measures the search call and excludes successful citation verification; separately measure cold-start and repeated warm runs when comparing deployment performance.
+Ranked paths are deduplicated before scoring; symbols are ranked as distinct `(path, symbol)` pairs. Symbol matches are case-sensitive, allow a qualified-name suffix, and must belong to an expected file when expected files are specified. Failed queries contribute zero to every applicable quality metric. Metrics without corresponding ground truth are `null` (N/A) and do not apply a quality gate. This applies to file-only, symbol-only, and negative-only datasets; an incomplete report, an unscored positive row, or a missing aggregate whose rows contain applicable scores remains an error. Citation, degraded, latency, and error gates always apply.
+
+The entire search response, including every returned hit, must satisfy the public response schema before scoring. Every top-five citation is round-tripped through `codalith_read` and must match its URI, corpus, revision, generation, path, and line range, with matching current/indexed SHA-256 hashes and no stale flag; run benchmarks against a stable generation. Latency measures the search call and schema validation, excluding successful citation verification; separately measure cold-start and repeated warm runs when comparing deployment performance.
 
 ## Commands
 
@@ -56,6 +58,6 @@ uv run codalith benchmark \
 
 Run regression and holdout separately. Do not edit holdout labels in response to retrieval failures; diagnose adapter/index/query behavior first, then add genuinely new cases without replacing failed ones.
 
-Run `ue-literal.jsonl` and `ue-semantic.jsonl` separately with the same command pattern and distinct output paths. The semantic diagnostic domains were excluded from model-selection probes. A small diagnostic set does not replace the holdout set or establish a general model-quality ranking. Save the source commit, generation manifest, model identity/dimension, dataset hashes, and cold/warm run conditions alongside local reports.
+Run `ue-literal.jsonl` and `ue-semantic.jsonl` separately with the same command pattern and distinct output paths. The semantic diagnostic domains were excluded from model-selection probes. C++ semantic chunking currently uses line windows with no symbol metadata, and `strategy=semantic` does not run structural symbol retrieval. Therefore these diagnostic cases retain their source-grounded file labels and have no symbol ground truth; symbol recall is N/A. This dataset design follows the pipeline contract before any UE retrieval run. A small diagnostic set does not replace the holdout set or establish a general model-quality ranking. Save the source commit, generation manifest, model identity/dimension, dataset hashes, and cold/warm run conditions alongside local reports.
 
 Retrieval code must never encode evaluation questions, keywords, or expected answer paths. Language and engine conventions reach the query layer only through an adapter's `RetrievalProfile` (`codalith.languages.catalog`), and every ranking change must be justified by behavior on unseen questions. Treat the regression set as a guard and the holdout set as the quality signal.

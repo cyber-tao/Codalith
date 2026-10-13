@@ -15,7 +15,7 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
 from codalith.benchmarks.models import BenchmarkCase, BenchmarkReport, BenchmarkRow
-from codalith.query.models import ReadResponse, SearchHit
+from codalith.query.models import ReadResponse, SearchHit, SearchResponse
 
 
 def load_dataset(path: str | Path) -> list[BenchmarkCase]:
@@ -86,10 +86,9 @@ async def _run_mcp_benchmark(
                             "limit": 10,
                         },
                     )
+                    payload = SearchResponse.model_validate(payload).model_dump(mode="python")
                     latency = (time.perf_counter() - started) * 1000
-                    hits = payload.get("hits", [])
-                    if not isinstance(hits, list):
-                        raise RuntimeError("codalith_search returned invalid hits")
+                    hits = payload["hits"]
                     citation_valid = await _validate_citations(session, hits[:5])
                     rows.append(_score_case(case, payload, hits, latency, citation_valid))
                 except Exception as exc:
@@ -234,15 +233,30 @@ def acceptance_failures(
     max_p95_ms: float = 2_000,
 ) -> list[str]:
     failures: list[str] = []
-    checks = (
-        ("file_recall@5", report.file_recall_at_5, min_file_recall),
-        ("symbol_recall@5", report.symbol_recall_at_5, min_symbol_recall),
-        ("MRR", report.mrr, min_mrr),
-        ("nDCG@10", report.ndcg_at_10, min_ndcg),
+    metric_fields = (
+        "file_recall_at_5", "symbol_recall_at_5", "reciprocal_rank", "ndcg_at_10"
     )
-    for label, value, minimum in checks:
+    applicability_known = (
+        report.count > 0
+        and len(report.rows) == report.count
+        and all(
+            row.negative_passed is not None
+            or any(getattr(row, field) is not None for field in metric_fields)
+            for row in report.rows
+        )
+    )
+    checks = (
+        ("file_recall@5", "file_recall_at_5", report.file_recall_at_5, min_file_recall),
+        ("symbol_recall@5", "symbol_recall_at_5", report.symbol_recall_at_5, min_symbol_recall),
+        ("MRR", "reciprocal_rank", report.mrr, min_mrr),
+        ("nDCG@10", "ndcg_at_10", report.ndcg_at_10, min_ndcg),
+    )
+    for label, field, value, minimum in checks:
         if value is None:
-            failures.append(f"{label} is unavailable")
+            if not applicability_known or any(
+                getattr(row, field) is not None for row in report.rows
+            ):
+                failures.append(f"{label} is unavailable")
         elif value < minimum:
             failures.append(f"{label} {value:.3f} < {minimum:.3f}")
     if report.citation_valid_rate != 1.0:

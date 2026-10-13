@@ -201,7 +201,7 @@ def prepare_semantic_index(
         if mode == "build":
             source_view = tempfile.TemporaryDirectory(
                 prefix=".codalith-source-",
-                dir=corpus.index_root,
+                dir=_filesystem_path(corpus.index_root),
             )
             view_root = Path(source_view.name)
             _materialize_source_view(corpus.source_root, view_root, tuple(indexed_files))
@@ -388,24 +388,36 @@ def _materialize_source_view(
 ) -> None:
     """Create a temporary link tree containing exactly one structural generation."""
 
-    resolved_root = source_root.resolve()
+    resolved_root = _filesystem_path(source_root).resolve()
     for relative in indexed_paths:
         source = (resolved_root / relative).resolve()
         if resolved_root not in source.parents:
             raise IndexBuildError(f"Indexed path escapes source root: {relative}")
-        if not source.is_file():
+        source_path = _filesystem_path(source)
+        if not source_path.is_file():
             raise IndexBuildError(f"Indexed source file disappeared: {relative}")
-        destination = view_root / relative
+        destination = _filesystem_path(view_root / relative)
         destination.parent.mkdir(parents=True, exist_ok=True)
         try:
-            os.link(source, destination)
+            os.link(source_path, destination)
         except OSError:
             try:
-                destination.symlink_to(source)
+                destination.symlink_to(source_path)
             except OSError:
                 try:
-                    shutil.copy2(source, destination)
+                    shutil.copy2(source_path, destination)
                 except OSError as exc:
                     raise IndexBuildError(
                         f"Cannot materialize source for semantic indexing: {relative}"
                     ) from exc
+
+
+def _filesystem_path(path: Path) -> Path:
+    if os.name != "nt":
+        return path
+    absolute = os.path.abspath(path)
+    if absolute.startswith("\\\\?\\"):
+        return Path(absolute)
+    if absolute.startswith("\\\\"):
+        return Path("\\\\?\\UNC\\" + absolute[2:])
+    return Path("\\\\?\\" + absolute)

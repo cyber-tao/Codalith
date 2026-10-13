@@ -57,12 +57,53 @@ def test_repository_datasets_have_valid_ground_truth_schema(name: str) -> None:
     assert runner.load_dataset(path)
 
 
-def test_semantic_diagnostics_do_not_supply_expected_identifiers_in_questions() -> None:
+def test_semantic_diagnostics_evaluate_file_retrieval_only() -> None:
     path = Path(__file__).parents[1] / "benchmarks" / "datasets" / "ue-semantic.jsonl"
     for case in runner.load_dataset(path):
         assert case.strategy == "semantic"
-        assert not any(symbol in case.query for symbol in case.expected_symbols)
+        assert case.expected_files
+        assert not case.expected_symbols
         assert not any(Path(file).name in case.query for file in case.expected_files)
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        BenchmarkCase(id="file-only", query="actor", expected_files=["Actor.h"]),
+        BenchmarkCase(id="symbol-only", query="actor", expected_symbols=["AActor"]),
+        BenchmarkCase(id="negative-only", query="missing", negative=True),
+    ],
+)
+def test_acceptance_skips_only_inapplicable_quality_metrics(case: BenchmarkCase) -> None:
+    hits = [] if case.negative else [{"path": "Actor.h", "symbol": "AActor"}]
+    row = runner._score_case(case, {}, hits, 1.0, True)
+    report = runner._aggregate("applicability", "http://unused/mcp", [row])
+    assert runner.acceptance_failures(report) == []
+    if not case.expected_files:
+        assert report.file_recall_at_5 is report.mrr is report.ndcg_at_10 is None
+    if not case.expected_symbols:
+        assert report.symbol_recall_at_5 is None
+
+
+def test_missing_applicable_aggregate_metric_is_not_treated_as_na() -> None:
+    case = BenchmarkCase(id="symbol", query="actor", expected_symbols=["AActor"])
+    row = runner._score_case(case, {}, [{"path": "Actor.h", "symbol": "AActor"}], 1.0, True)
+    report = runner._aggregate("missing", "http://unused/mcp", [row])
+    malformed = report.model_copy(update={"symbol_recall_at_5": None})
+    assert runner.acceptance_failures(malformed) == ["symbol_recall@5 is unavailable"]
+
+
+def test_positive_row_with_no_quality_scores_is_not_treated_as_na() -> None:
+    case = BenchmarkCase(id="file", query="actor", expected_files=["Actor.h"])
+    row = runner._score_case(case, {}, [{"path": "Actor.h"}], 1.0, True)
+    unscored = row.model_copy(update={
+        "file_recall_at_5": None, "reciprocal_rank": None, "ndcg_at_10": None,
+    })
+    report = runner._aggregate("unscored", "http://unused/mcp", [unscored])
+    assert runner.acceptance_failures(report) == [
+        "file_recall@5 is unavailable", "symbol_recall@5 is unavailable",
+        "MRR is unavailable", "nDCG@10 is unavailable",
+    ]
 
 
 def _citation() -> tuple[dict[str, Any], dict[str, Any]]:
@@ -140,8 +181,9 @@ def test_citation_validation_requires_complete_read_response(
     assert not anyio.run(runner._validate_citations, None, [hit])
 
 
-def test_failed_query_contributes_zero_to_applicable_quality_metrics(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("failure", ["exception", "missing-degraded", "invalid-sixth-hit"])
+def test_failed_or_malformed_query_contributes_zero_to_applicable_quality_metrics(
+    monkeypatch: pytest.MonkeyPatch, failure: str,
 ) -> None:
     @asynccontextmanager
     async def fake_transport(*args: object) -> Any:
@@ -161,7 +203,18 @@ def test_failed_query_contributes_zero_to_applicable_quality_metrics(
             pass
 
     async def fake_call(*args: object) -> dict[str, Any]:
-        raise RuntimeError("query failed")
+        if failure == "exception":
+            raise RuntimeError("query failed")
+        hit, _ = _citation()
+        payload: dict[str, Any] = {
+            "query": "AActor", "target": "ue-5.7.4", "strategy": "auto",
+            "degraded": False, "warnings": [], "hits": [hit] * 5,
+        }
+        if failure == "missing-degraded":
+            payload.pop("degraded")
+        else:
+            payload["hits"].append({"path": "Actor.h"})
+        return payload
 
     monkeypatch.setattr(runner, "streamable_http_client", fake_transport)
     monkeypatch.setattr(runner, "ClientSession", FakeSession)
