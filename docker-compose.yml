@@ -64,13 +64,13 @@ services:
       CODALITH_UE_SOURCE_REVISION: ${CODALITH_UE_SOURCE_REVISION:-5.7.4}
       CODALITH_UE_SOURCE_ROOT: /srv/ue/5.7.4
       CODALITH_UE_INDEX_ROOT: /var/lib/codalith/indexes/ue-5.7.4
-      CODALITH_UE_CODERAG_STORE_DIR: /var/lib/codalith/coderag/ue-5.7.4
+      CODALITH_UE_SEMANTIC_STORE_DIR: /var/lib/codalith/semantic/ue-5.7.4
       CODALITH_UE_EMBEDDING_PROVIDER: ${CODALITH_UE_EMBEDDING_PROVIDER:-openai}
       CODALITH_UE_EMBEDDING_MODEL: ${CODALITH_UE_EMBEDDING_MODEL:-text-embedding-3-small}
     volumes: &ue-volumes
       - ${CODALITH_UE_SOURCE_HOST_DIR:-./.local/ue-5.7.4}:/srv/ue/5.7.4:ro
       - ${CODALITH_UE_INDEX_HOST_DIR:-./.local/indexes/ue-5.7.4}:/var/lib/codalith/indexes/ue-5.7.4
-      - ${CODALITH_UE_CODERAG_HOST_DIR:-./.local/coderag/ue-5.7.4}:/var/lib/codalith/coderag/ue-5.7.4
+      - ${CODALITH_UE_SEMANTIC_HOST_DIR:-./.local/semantic/ue-5.7.4}:/var/lib/codalith/semantic/ue-5.7.4
     command: ["index", "build", "--corpus", "ue-5.7.4", "--semantic", "adopt"]
     restart: "no"
 

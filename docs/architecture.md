@@ -26,13 +26,13 @@ Version comparison is expressed as two corpora. There is no implicit overlay or 
     <timestamp>-<digest>/
       manifest.json
       structure.sqlite
-      coderag-meta.json       # when semantic retrieval is available
-      coderag/                # semantic build only; adopted stores stay external
+      semantic-meta.json      # when semantic retrieval is available
+      semantic/               # semantic build only; adopted stores stay external
 ```
 
 A build holds an OS-level lock on the index root, writes a hidden staging directory, validates SQLite integrity, prepares the semantic plane, re-hashes every indexed source file, fsyncs the generation, renames staging to its final generation ID, and atomically replaces `current.json` through an fsynced temporary file. A failed build leaves the active generation and its store untouched. Old generations are never mutated or silently deleted.
 
-The manifest (schema 3) binds source revision and fingerprint, adapter ID and version, a source-selection hash covering the corpus extensions and excludes plus the source policy's deny globs and byte limit, structure schema, semantic engine version, embedding provider, model and dimension, the semantic store location, fingerprint and coverage, counts, and local artifact hashes. Configuration, policy, adapter, or semantic engine version drift invalidates the active generation, which must then be rebuilt.
+The manifest (schema 4) binds source revision and fingerprint, adapter ID and version, a source-selection hash covering the corpus extensions and excludes plus the source policy's deny globs and byte limit, structure schema, semantic engine version, embedding provider, model and dimension, the semantic store location, fingerprint and coverage, counts, and local artifact hashes. Configuration, policy, adapter, or semantic engine version drift invalidates the active generation, which must then be rebuilt.
 
 ## Semantic plane
 

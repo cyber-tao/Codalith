@@ -77,12 +77,11 @@ def test_registry_uses_explicit_path_globs_and_rejects_legacy_fields(
     assert corpus.excludes("Engine/Source/thirdparty/Library.h")
     assert not corpus.excludes("Engine/Source/Runtime/Core/Public/Templates/Function.h")
 
-    path.write_text(
-        path.read_text(encoding="utf-8") + 'ignore_dirs = ["Templates"]\n',
-        encoding="utf-8",
-    )
-    with pytest.raises(ConfigurationError, match="unknown fields: ignore_dirs"):
-        CorpusRegistry.from_file(path)
+    original = path.read_text(encoding="utf-8")
+    for legacy in ('ignore_dirs = ["Templates"]', 'coderag_store = "store"'):
+        path.write_text(f"{original}{legacy}\n", encoding="utf-8")
+        with pytest.raises(ConfigurationError, match=f"unknown fields: {legacy.split()[0]}"):
+            CorpusRegistry.from_file(path)
 
 
 def test_source_policy_blocks_root_nested_and_traversal(

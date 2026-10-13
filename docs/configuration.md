@@ -27,7 +27,7 @@ id = "all"
 corpora = ["sample"]
 ```
 
-`adapter` is one of the IDs in `codalith.languages.catalog`: `python`, `csharp`, `cpp-ue`, or `generic`. `embedding_provider` is `fake`, `fastembed`, or `openai`. `coderag_store` is used only by `--semantic adopt`; `--semantic build` always embeds into the new generation. An adopted store must record the same embedding model and dimension as the configured provider, and once adopted its absolute path is pinned in the generation manifest, so later edits to `coderag_store` affect only future builds.
+`adapter` is one of the IDs in `codalith.languages.catalog`: `python`, `csharp`, `cpp-ue`, or `generic`. `embedding_provider` is `fake`, `fastembed`, or `openai`. `semantic_store` is used only by `--semantic adopt`; `--semantic build` always embeds into the new generation. An adopted store must record the same embedding model and dimension as the configured provider, and once adopted its absolute path is pinned in the generation manifest, so later edits to `semantic_store` affect only future builds.
 
 `include_extensions` uses suffix matching, so `.Build.cs` and `.Target.cs` are supported. An empty list means the adapter decides which files it supports.
 

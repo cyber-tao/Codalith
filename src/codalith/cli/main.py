@@ -138,8 +138,8 @@ def _doctor(
                     semantic_match = True
                     if generation.manifest.semantic_available:
                         semantic_match = (
-                            store_fingerprint(generation.coderag_path)
-                            == generation.manifest.coderag_store_fingerprint
+                            store_fingerprint(generation.semantic_path)
+                            == generation.manifest.semantic_store_fingerprint
                         )
                         if not semantic_match:
                             failures.append(

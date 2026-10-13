@@ -42,8 +42,8 @@ def test_generation_contains_only_policy_selected_files(
     finally:
         index.close()
     assert generation.manifest.semantic_available
-    assert store_fingerprint(generation.coderag_path) == (
-        generation.manifest.coderag_store_fingerprint
+    assert store_fingerprint(generation.semantic_path) == (
+        generation.manifest.semantic_store_fingerprint
     )
 
 
@@ -294,11 +294,11 @@ def test_adopt_refuses_a_store_built_with_another_embedding_model(
     environment_factory: EnvironmentFactory,
 ) -> None:
     environment = environment_factory(semantic=True)
-    store = GenerationRepository(environment.policy).active(environment.corpus).coderag_path
+    store = GenerationRepository(environment.policy).active(environment.corpus).semantic_path
     before = store_fingerprint(store)
     adopted = replace(
         environment.corpus,
-        coderag_store=store,
+        semantic_store=store,
         embedding_provider="openai",
         embedding_model="text-embedding-3-small",
     )
@@ -328,16 +328,16 @@ def test_adopt_pins_the_external_store_and_records_coverage(
     )
     repository = GenerationRepository(environment.policy)
     external = tmp_path / "external-store"
-    shutil.copytree(repository.active(environment.corpus).coderag_path, external)
+    shutil.copytree(repository.active(environment.corpus).semantic_path, external)
     (environment.source_root / "src/beta.py").unlink()
-    adopter = replace(environment.corpus, coderag_store=external)
+    adopter = replace(environment.corpus, semantic_store=external)
     GenerationBuilder(environment.policy).build(adopter, semantic_mode="adopt")
     generation = repository.active(adopter)
-    assert generation.coderag_path == external.resolve()
-    assert generation.manifest.coderag_covered_files == 1
-    assert generation.manifest.coderag_extra_files == 1
-    moved = replace(adopter, coderag_store=tmp_path / "another-store")
-    assert repository.active(moved).coderag_path == external.resolve()
+    assert generation.semantic_path == external.resolve()
+    assert generation.manifest.semantic_covered_files == 1
+    assert generation.manifest.semantic_extra_files == 1
+    moved = replace(adopter, semantic_store=tmp_path / "another-store")
+    assert repository.active(moved).semantic_path == external.resolve()
 
 
 def test_adopt_rejects_a_store_whose_content_drifted(
@@ -348,12 +348,12 @@ def test_adopt_rejects_a_store_whose_content_drifted(
     repository = GenerationRepository(environment.policy)
     original = repository.active(environment.corpus)
     external = tmp_path / "external-store"
-    shutil.copytree(original.coderag_path, external)
+    shutil.copytree(original.semantic_path, external)
     cache = environment.source_root / "src/core/cache.py"
     cache.write_text(cache.read_text(encoding="utf-8") + "# drift\n", encoding="utf-8")
     with pytest.raises(IndexBuildError, match="differs from the structural snapshot"):
         GenerationBuilder(environment.policy).build(
-            replace(environment.corpus, coderag_store=external),
+            replace(environment.corpus, semantic_store=external),
             semantic_mode="adopt",
         )
     assert (
@@ -375,10 +375,10 @@ def test_build_mode_semantic_plane_covers_every_indexable_file(tmp_path: Path) -
         include_extensions=(".h", ".inl"),
     )
     generation = GenerationRepository(environment.policy).active(environment.corpus)
-    assert generation.coderag_path == generation.root / "coderag"
+    assert generation.semantic_path == generation.root / "semantic"
     assert generation.manifest.files == 3
-    assert generation.manifest.coderag_covered_files == 2
-    assert generation.manifest.coderag_extra_files == 0
+    assert generation.manifest.semantic_covered_files == 2
+    assert generation.manifest.semantic_extra_files == 0
 
 
 def test_build_mode_never_writes_the_configured_external_store(
@@ -390,10 +390,10 @@ def test_build_mode_never_writes_the_configured_external_store(
     external.mkdir()
     (external / "marker").write_text("keep", encoding="utf-8")
     before = store_fingerprint(external)
-    corpus = replace(environment.corpus, coderag_store=external)
+    corpus = replace(environment.corpus, semantic_store=external)
     GenerationBuilder(environment.policy).build(corpus, semantic_mode="build")
     generation = GenerationRepository(environment.policy).active(corpus)
-    assert generation.coderag_path == generation.root / "coderag"
+    assert generation.semantic_path == generation.root / "semantic"
     assert generation.manifest.semantic_available
     assert store_fingerprint(external) == before
 
@@ -404,7 +404,7 @@ def test_semantic_generation_is_invalid_after_an_engine_upgrade(
     environment = environment_factory(semantic=True)
     generation = GenerationRepository(environment.policy).active(environment.corpus)
     payload = json.loads(generation.manifest_path.read_text(encoding="utf-8"))
-    payload["coderag_version"] = "0.0.0-previous"
+    payload["semantic_engine_version"] = "0.0.0-previous"
     generation.manifest_path.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(IndexUnavailableError, match="built with semantic engine 0.0.0-previous"):
         GenerationRepository(environment.policy).active(environment.corpus)

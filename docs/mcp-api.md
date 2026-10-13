@@ -15,7 +15,7 @@ Input: `query`, optional `target`, `strategy`, and `limit` (1–50).
 - `text`: case-insensitive literal match of the whole query in the generation's indexed files (up to three lines per file, files with an exact-case match first), plus exact symbol evidence for identifiers in the query. It does not need the semantic plane.
 - `symbol`: exact symbol lookup, falling back to substring matches.
 
-Returns ranked hits with corpus/revision/generation, canonical source URI, path/range, symbol metadata, normalized score, contributing backends, snippet, degradation flag, and warnings. A corpus that cannot serve part of the request makes the response `degraded` instead of failing it.
+Returns ranked hits with corpus/revision/generation, canonical source URI, path/range, symbol metadata, normalized score, contributing backends (`structure`, `semantic`, `text`), snippet, degradation flag, and warnings. A corpus that cannot serve part of the request makes the response `degraded` instead of failing it.
 
 ### `codalith_context`
 

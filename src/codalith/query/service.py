@@ -436,7 +436,7 @@ class QueryService:
                             snippet=_bounded_snippet(hit.snippet),
                             span_end=max(end_line, hit.end_line),
                         )
-                        _merge(candidates, candidate, "coderag", rank, 1.0)
+                        _merge(candidates, candidate, "semantic", rank, 1.0)
                     if filtered_semantic_paths:
                         warnings.append(
                             f"Filtered {filtered_semantic_paths} semantic hit(s) outside "
@@ -993,8 +993,8 @@ def _semantic_pool(limit: int, manifest: IndexManifest) -> int:
     """Over-fetch in proportion to adopted-store files that fall outside the snapshot."""
 
     base = max(limit * 4, 20)
-    covered = manifest.coderag_covered_files or 0
-    extra = manifest.coderag_extra_files or 0
+    covered = manifest.semantic_covered_files or 0
+    extra = manifest.semantic_extra_files or 0
     if not covered or not extra:
         return base
     return min(_MAX_SEMANTIC_POOL, math.ceil(base * (covered + extra) / covered))
@@ -1524,7 +1524,7 @@ def _confidence(
         return "none"
     if degraded or any(source.stale for source in sources):
         return "low"
-    if any({"structure", "coderag"}.issubset(source.backends) for source in sources):
+    if any({"structure", "semantic"}.issubset(source.backends) for source in sources):
         return "high"
     if len(sources) >= 2 or any("structure" in source.backends for source in sources):
         return "medium"

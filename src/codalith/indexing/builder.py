@@ -18,6 +18,7 @@ from pathlib import Path
 from codalith.corpus.generations import (
     GENERATION_STORE_DIR,
     MANIFEST_SCHEMA_VERSION,
+    SEMANTIC_METADATA_ARTIFACT,
     STRUCTURE_SCHEMA_VERSION,
     Artifact,
     GenerationRepository,
@@ -118,11 +119,11 @@ class GenerationBuilder:
                 if semantic_mode == "build":
                     semantic_store = staging / GENERATION_STORE_DIR
                     recorded_store = GENERATION_STORE_DIR
-                elif corpus.coderag_store is not None:
-                    semantic_store = corpus.coderag_store.resolve()
+                elif corpus.semantic_store is not None:
+                    semantic_store = corpus.semantic_store.resolve()
                     recorded_store = str(semantic_store)
                 else:
-                    raise IndexBuildError("Semantic adopt mode requires corpus.coderag_store")
+                    raise IndexBuildError("Semantic adopt mode requires corpus.semantic_store")
                 semantic_info = prepare_semantic_index(
                     corpus,
                     semantic_store,
@@ -131,11 +132,11 @@ class GenerationBuilder:
                     indexed_files=_indexed_files(database),
                 )
                 _report(progress, "Semantic provenance verified")
-                semantic_metadata = staging / "coderag-meta.json"
+                semantic_metadata = staging / SEMANTIC_METADATA_ARTIFACT
                 write_semantic_metadata(semantic_metadata, semantic_info)
                 artifacts.append(
                     Artifact(
-                        path="coderag-meta.json",
+                        path=SEMANTIC_METADATA_ARTIFACT,
                         sha256=sha256_file(semantic_metadata),
                         size_bytes=semantic_metadata.stat().st_size,
                     )
@@ -149,7 +150,7 @@ class GenerationBuilder:
                 source_revision=corpus.revision,
                 source_fingerprint=structure.source_fingerprint,
                 created_at=datetime.now(UTC).isoformat(),
-                coderag_version=ENGINE_VERSION,
+                semantic_engine_version=ENGINE_VERSION,
                 embedding_provider=(
                     semantic_info.provider if semantic_info else corpus.embedding_provider
                 ),
@@ -157,12 +158,12 @@ class GenerationBuilder:
                     semantic_info.model if semantic_info else corpus.embedding_model
                 ),
                 embedding_dimension=semantic_info.dimension if semantic_info else None,
-                coderag_store_fingerprint=(
+                semantic_store_fingerprint=(
                     semantic_info.store_fingerprint if semantic_info else None
                 ),
-                coderag_store=recorded_store,
-                coderag_covered_files=semantic_info.covered_files if semantic_info else None,
-                coderag_extra_files=semantic_info.extra_files if semantic_info else None,
+                semantic_store=recorded_store,
+                semantic_covered_files=semantic_info.covered_files if semantic_info else None,
+                semantic_extra_files=semantic_info.extra_files if semantic_info else None,
                 source_selection_hash=source_selection_hash(corpus, self.policy),
                 adapter=corpus.adapter,
                 adapter_version=ADAPTERS[corpus.adapter].version,

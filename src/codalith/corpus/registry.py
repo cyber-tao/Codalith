@@ -24,7 +24,7 @@ _CORPUS_FIELDS = frozenset(
         "revision",
         "source_root",
         "index_root",
-        "coderag_store",
+        "semantic_store",
         "adapter",
         "embedding_provider",
         "embedding_model",
@@ -43,7 +43,7 @@ class Corpus:
     revision: str
     source_root: Path
     index_root: Path
-    coderag_store: Path | None
+    semantic_store: Path | None
     adapter: str
     embedding_provider: str
     embedding_model: str
@@ -178,14 +178,14 @@ def _parse_corpus(path: Path, raw: dict[str, Any], index: int) -> Corpus:
         raise ConfigurationError(f"Corpus {corpus_id} revision cannot be blank")
     source_root = resolve_config_path(path, _required_string(raw, "source_root", path))
     index_root = resolve_config_path(path, _required_string(raw, "index_root", path))
-    raw_coderag_store = raw.get("coderag_store")
-    if raw_coderag_store is not None and (
-        not isinstance(raw_coderag_store, str) or not raw_coderag_store.strip()
+    raw_semantic_store = raw.get("semantic_store")
+    if raw_semantic_store is not None and (
+        not isinstance(raw_semantic_store, str) or not raw_semantic_store.strip()
     ):
-        raise ConfigurationError(f"Corpus {corpus_id} coderag_store must be a path string")
-    coderag_store = (
-        resolve_config_path(path, raw_coderag_store)
-        if isinstance(raw_coderag_store, str)
+        raise ConfigurationError(f"Corpus {corpus_id} semantic_store must be a path string")
+    semantic_store = (
+        resolve_config_path(path, raw_semantic_store)
+        if isinstance(raw_semantic_store, str)
         else None
     )
     raw_extensions = _string_tuple(
@@ -217,7 +217,7 @@ def _parse_corpus(path: Path, raw: dict[str, Any], index: int) -> Corpus:
         revision=revision,
         source_root=source_root,
         index_root=index_root,
-        coderag_store=coderag_store,
+        semantic_store=semantic_store,
         adapter=adapter,
         embedding_provider=provider,
         embedding_model=str(raw.get("embedding_model", "")).strip(),

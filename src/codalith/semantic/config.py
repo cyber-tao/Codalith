@@ -16,8 +16,9 @@ class Config:
     model: str | None = None
     openai_api_key: str | None = field(default=None, repr=False)
     openai_base_url: str | None = None
-    # Keep the historical cache location so already-downloaded local models stay warm.
-    cache_dir: Path = field(default_factory=lambda: Path.home() / ".cache" / "coderag")
+    cache_dir: Path = field(
+        default_factory=lambda: Path.home() / ".cache" / "codalith" / "fastembed"
+    )
 
     max_file_bytes: int = 1_000_000
     max_chunk_lines: int = 200

@@ -29,7 +29,7 @@ Set these local `.env` values:
 
 - `CODALITH_UE_SOURCE_HOST_DIR`: UE checkout root containing `Engine/`.
 - `CODALITH_UE_INDEX_HOST_DIR`: writable structural generation directory.
-- `CODALITH_UE_CODERAG_HOST_DIR`: existing semantic store built over the same UE source.
+- `CODALITH_UE_SEMANTIC_HOST_DIR`: existing semantic store built over the same UE source.
 - embedding provider/model/base URL/key matching that store.
 
 Then adopt the existing semantic store and build the structural generation:
@@ -40,7 +40,7 @@ docker compose --profile ue up -d mcp-http-ue
 uv run codalith client-config --client codex --transport http
 ```
 
-`adopt` never re-embeds and never writes the external store. It refuses a store whose recorded embedding model or dimension differs from the configured provider, rejects files whose content hash differs from the structural snapshot, records coverage, and pins the store's absolute path in the generation manifest. A generation adopted inside a container therefore points at the container path; re-adopt to serve the same store from the host. `--semantic build` always embeds into the new generation's own `coderag/` directory; it is expensive and may call a paid embedding endpoint.
+`adopt` never re-embeds and never writes the external store. It refuses a store whose recorded embedding model or dimension differs from the configured provider, rejects files whose content hash differs from the structural snapshot, records coverage, and pins the store's absolute path in the generation manifest. A generation adopted inside a container therefore points at the container path; re-adopt to serve the same store from the host. `--semantic build` always embeds into the new generation's own `semantic/` directory; it is expensive and may call a paid embedding endpoint.
 
 Only one build per index root runs at a time; a second build fails immediately while `.build.lock` is held.
 
@@ -75,8 +75,9 @@ Published Compose ports default to `127.0.0.1`. Add exact Host/Origin values onl
 
 ## Migration notes
 
-The audit remediation changed persisted formats and public contracts. Rebuild or re-adopt every generation after upgrading; old generations report `invalid` until then.
+These changes altered persisted formats and public contracts. Rebuild or re-adopt every generation after upgrading; old generations report `invalid` until then. `adopt` never re-embeds.
 
+- Manifest schema 4 finishes absorbing CodeRAG into `codalith.semantic`: the provenance fields are now `semantic_engine_version`, `semantic_store`, `semantic_store_fingerprint`, `semantic_covered_files`, and `semantic_extra_files`, the artifact is `semantic-meta.json`, and a built store lives in the generation's `semantic/` directory. The registry key `coderag_store` is now `semantic_store`, and the Compose variables are `CODALITH_UE_SEMANTIC_STORE_DIR` and `CODALITH_UE_SEMANTIC_HOST_DIR`; rename `CODALITH_UE_CODERAG_HOST_DIR` in `.env`, or move the store, since the default host path changed from `.local/coderag/` to `.local/semantic/`. `codalith_search` reports the `semantic` backend instead of `coderag`, and fastembed models are cached under `~/.cache/codalith/fastembed`.
 - Manifest schema 3: `source_selection_hash` (now covering the source policy's deny globs and byte limit) replaces `chunk_policy_hash`, and semantic generations record `coderag_store`, `coderag_covered_files`, and `coderag_extra_files`.
 - Structure schema 4 adds the `name_match` reference resolution, the `symbol_search` trigram index, and per-symbol comparison digests; the `cpp-ue` adapter version 6 no longer stores `#include` directives as module dependencies. Building requires SQLite with FTS5 and the trigram tokenizer (3.34 or newer), which the container image and standard Python builds provide.
 - `--allow-external-rebuild` is removed. `--semantic build` always builds a generation-local store; `--semantic adopt` is the only way to use an external store.

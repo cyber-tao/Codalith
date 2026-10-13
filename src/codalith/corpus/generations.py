@@ -22,9 +22,10 @@ from codalith.errors import IndexBuildError, IndexInvalidError, IndexMissingErro
 from codalith.languages.catalog import ADAPTERS
 from codalith.semantic import ENGINE_VERSION
 
-MANIFEST_SCHEMA_VERSION = 3
+MANIFEST_SCHEMA_VERSION = 4
 STRUCTURE_SCHEMA_VERSION = 4
-GENERATION_STORE_DIR = "coderag"
+GENERATION_STORE_DIR = "semantic"
+SEMANTIC_METADATA_ARTIFACT = "semantic-meta.json"
 STRUCTURE_TABLES = ("files", "symbols", "references", "module_dependencies")
 _GENERATION_ID = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}$")
 _FileStamp = tuple[int, int, int]
@@ -47,14 +48,14 @@ class IndexManifest:
     source_revision: str
     source_fingerprint: str
     created_at: str
-    coderag_version: str
+    semantic_engine_version: str
     embedding_provider: str
     embedding_model: str
     embedding_dimension: int | None
-    coderag_store_fingerprint: str | None
-    coderag_store: str | None
-    coderag_covered_files: int | None
-    coderag_extra_files: int | None
+    semantic_store_fingerprint: str | None
+    semantic_store: str | None
+    semantic_covered_files: int | None
+    semantic_extra_files: int | None
     source_selection_hash: str
     adapter: str
     adapter_version: int
@@ -124,17 +125,17 @@ class IndexManifest:
         if self.semantic_available:
             if self.embedding_dimension is None or self.embedding_dimension <= 0:
                 raise IndexInvalidError("Semantic index has no embedding dimension")
-            if not self.coderag_store_fingerprint or not re.fullmatch(
-                r"[0-9a-f]{64}", self.coderag_store_fingerprint
+            if not self.semantic_store_fingerprint or not re.fullmatch(
+                r"[0-9a-f]{64}", self.semantic_store_fingerprint
             ):
                 raise IndexInvalidError("Semantic index has no valid store fingerprint")
-            if not self.coderag_store or (
-                self.coderag_store != GENERATION_STORE_DIR
-                and not Path(self.coderag_store).is_absolute()
+            if not self.semantic_store or (
+                self.semantic_store != GENERATION_STORE_DIR
+                and not Path(self.semantic_store).is_absolute()
             ):
                 raise IndexInvalidError("Semantic index has no valid store location")
-            covered = self.coderag_covered_files
-            extra = self.coderag_extra_files
+            covered = self.semantic_covered_files
+            extra = self.semantic_extra_files
             if (
                 not isinstance(covered, int)
                 or isinstance(covered, bool)
@@ -148,10 +149,10 @@ class IndexManifest:
             value is not None
             for value in (
                 self.embedding_dimension,
-                self.coderag_store_fingerprint,
-                self.coderag_store,
-                self.coderag_covered_files,
-                self.coderag_extra_files,
+                self.semantic_store_fingerprint,
+                self.semantic_store,
+                self.semantic_covered_files,
+                self.semantic_extra_files,
             )
         ):
             raise IndexInvalidError("Non-semantic generation contains semantic provenance")
@@ -180,8 +181,10 @@ class IndexManifest:
                 raise IndexInvalidError(f"Invalid artifact size: {artifact.path}")
         if "structure.sqlite" not in seen_artifacts:
             raise IndexInvalidError("Index manifest has no structure.sqlite artifact")
-        if self.semantic_available and "coderag-meta.json" not in seen_artifacts:
-            raise IndexInvalidError("Semantic manifest has no coderag-meta.json artifact")
+        if self.semantic_available and SEMANTIC_METADATA_ARTIFACT not in seen_artifacts:
+            raise IndexInvalidError(
+                f"Semantic manifest has no {SEMANTIC_METADATA_ARTIFACT} artifact"
+            )
 
     @property
     def counts(self) -> dict[str, int]:
@@ -201,7 +204,7 @@ class ActiveGeneration:
     root: Path
     manifest_path: Path
     structure_path: Path
-    coderag_path: Path
+    semantic_path: Path
     manifest: IndexManifest
 
 
@@ -276,18 +279,19 @@ class GenerationRepository:
             )
         if corpus.embedding_model and manifest.embedding_model != corpus.embedding_model:
             raise IndexInvalidError("Index embedding model does not match corpus configuration")
-        if manifest.semantic_available and manifest.coderag_version != ENGINE_VERSION:
+        if manifest.semantic_available and manifest.semantic_engine_version != ENGINE_VERSION:
             raise IndexInvalidError(
-                f"Semantic index was built with semantic engine {manifest.coderag_version}; "
+                f"Semantic index was built with semantic engine "
+                f"{manifest.semantic_engine_version}; "
                 f"the installed engine is {ENGINE_VERSION}"
             )
         return ActiveGeneration(
             root=root,
             manifest_path=manifest_path,
             structure_path=root / "structure.sqlite",
-            coderag_path=(
-                Path(manifest.coderag_store)
-                if manifest.coderag_store and manifest.coderag_store != GENERATION_STORE_DIR
+            semantic_path=(
+                Path(manifest.semantic_store)
+                if manifest.semantic_store and manifest.semantic_store != GENERATION_STORE_DIR
                 else root / GENERATION_STORE_DIR
             ),
             manifest=manifest,
@@ -308,9 +312,9 @@ class GenerationRepository:
                 or size != artifact.size_bytes
             ):
                 raise IndexInvalidError(f"Index artifact size mismatch: {artifact_path}")
-        if generation.manifest.semantic_available and not generation.coderag_path.is_dir():
+        if generation.manifest.semantic_available and not generation.semantic_path.is_dir():
             raise IndexInvalidError(
-                f"Missing semantic store for {corpus.corpus_id}: {generation.coderag_path}"
+                f"Missing semantic store for {corpus.corpus_id}: {generation.semantic_path}"
             )
 
     def verify(self, generation: ActiveGeneration) -> None:

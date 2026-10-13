@@ -120,7 +120,7 @@ class SemanticBackend:
         return _open_engine(
             engine_config(
                 corpus,
-                generation.coderag_path,
+                generation.semantic_path,
                 self.policy,
                 provider=generation.manifest.embedding_provider,
                 model=generation.manifest.embedding_model,
@@ -143,12 +143,12 @@ def generation_store_provenance(generation: ActiveGeneration) -> StoreProvenance
         )
     expected = StoreProvenance(manifest.embedding_model, manifest.embedding_dimension)
     try:
-        recorded = read_provenance(generation.coderag_path)
+        recorded = read_provenance(generation.semantic_path)
     except SemanticStoreError as exc:
         raise IndexInvalidError(str(exc)) from exc
     if recorded != expected:
         raise IndexInvalidError(
-            f"Semantic store {generation.coderag_path} records {recorded.describe()} but "
+            f"Semantic store {generation.semantic_path} records {recorded.describe()} but "
             f"generation {manifest.generation_id} expects {expected.describe()}"
         )
     return expected
@@ -251,11 +251,11 @@ def preflight_semantic_index(
 ) -> None:
     """Fail fast before an expensive structural scan when semantic setup is invalid."""
 
-    _validate_semantic_request(corpus, mode=mode, store_dir=corpus.coderag_store)
-    if mode != "adopt" or corpus.coderag_store is None:
+    _validate_semantic_request(corpus, mode=mode, store_dir=corpus.semantic_store)
+    if mode != "adopt" or corpus.semantic_store is None:
         return
     engine = _open_engine(
-        engine_config(corpus, corpus.coderag_store, policy),
+        engine_config(corpus, corpus.semantic_store, policy),
         error=IndexBuildError,
     )
     try:
@@ -280,7 +280,7 @@ def _validate_semantic_request(
         raise ValueError("Semantic mode must be build or adopt")
     if mode == "adopt":
         if store_dir is None:
-            raise IndexBuildError("Semantic adopt mode requires corpus.coderag_store")
+            raise IndexBuildError("Semantic adopt mode requires corpus.semantic_store")
         if not store_dir.is_dir():
             raise IndexBuildError(f"Semantic store does not exist: {store_dir}")
 

@@ -256,6 +256,7 @@ def test_semantic_hits_report_the_structural_language_of_their_file(tmp_path: Pa
         "Source/Core/Public/DelegateImpl.inl",
     }
     assert {hit.language for hit in hits} == {"cpp"}
+    assert all(hit.backends == ["semantic"] for hit in hits)
 
 
 def test_symbol_strategy_extracts_identifier_from_a_natural_language_query(
@@ -664,7 +665,7 @@ def test_status_rejects_a_generation_with_a_missing_semantic_store(
 ) -> None:
     environment = environment_factory(semantic=True)
     generation = GenerationRepository(environment.policy).active(environment.corpus)
-    shutil.rmtree(generation.coderag_path)
+    shutil.rmtree(generation.semantic_path)
     service = environment.service()
     try:
         status = service.status(target="sample")
@@ -685,11 +686,11 @@ def test_semantic_pool_scales_with_adopted_files_outside_the_generation(
     )
     assert _semantic_pool(10, manifest) == 40
     assert (
-        _semantic_pool(10, replace(manifest, coderag_covered_files=100, coderag_extra_files=300))
+        _semantic_pool(10, replace(manifest, semantic_covered_files=100, semantic_extra_files=300))
         == 160
     )
     assert (
-        _semantic_pool(50, replace(manifest, coderag_covered_files=1, coderag_extra_files=10_000))
+        _semantic_pool(50, replace(manifest, semantic_covered_files=1, semantic_extra_files=10_000))
         == 1_000
     )
 
@@ -699,11 +700,11 @@ def test_semantic_queries_refuse_a_store_with_drifted_provenance(
 ) -> None:
     environment = environment_factory(semantic=True)
     generation = GenerationRepository(environment.policy).active(environment.corpus)
-    meta_path = generation.coderag_path / "meta.json"
+    meta_path = generation.semantic_path / "meta.json"
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     meta["embed_model"] = "drifted-model"
     meta_path.write_text(json.dumps(meta), encoding="utf-8")
-    before = store_fingerprint(generation.coderag_path)
+    before = store_fingerprint(generation.semantic_path)
     service = environment.service()
     try:
         status = service.status(target="sample")
@@ -714,7 +715,7 @@ def test_semantic_queries_refuse_a_store_with_drifted_provenance(
         assert service.search("CachedValue", target="sample").degraded
     finally:
         service.close()
-    assert store_fingerprint(generation.coderag_path) == before
+    assert store_fingerprint(generation.semantic_path) == before
 
 
 def test_auto_search_reports_missing_semantic_plane_without_creating_a_store(
@@ -727,7 +728,7 @@ def test_auto_search_reports_missing_semantic_plane_without_creating_a_store(
         assert result.hits
         assert result.degraded
         assert any("Semantic index is unavailable" in item for item in result.warnings)
-        assert not GenerationRepository(environment.policy).active(environment.corpus).coderag_path.exists()
+        assert not GenerationRepository(environment.policy).active(environment.corpus).semantic_path.exists()
     finally:
         service.close()
 
