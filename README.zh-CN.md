@@ -71,7 +71,7 @@ fixtures/sample_corpus/  确定性本地冒烟语料
 src/codalith/corpus/     registry、policy、URI、generation、源码读取
 src/codalith/languages/  适配器目录（catalog）、协议与实现
 src/codalith/semantic/   混合检索引擎（分块、embedding、LanceDB）
-src/codalith/indexing/   SQLite 构建器、语义 generation 绑定、字面文本检索
+src/codalith/indexing/   generation 构建器、SQLite 结构写入与读取、语义 store 绑定、字面文本检索
 src/codalith/query/      与传输无关的查询服务
 src/codalith/mcp/        官方 SDK 绑定与传输层
 src/codalith/dashboard/  进程内遥测与运维面板 HTTP 路由

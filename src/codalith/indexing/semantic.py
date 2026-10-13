@@ -1,4 +1,4 @@
-"""Semantic-index integration through the in-tree engine's public API."""
+"""Generation-bound semantic plane: build, adopt, verify, and query one store per generation."""
 
 from __future__ import annotations
 
@@ -12,9 +12,9 @@ from contextlib import AbstractContextManager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from codalith.corpus.generations import ActiveGeneration
 from codalith.corpus.registry import Corpus
 from codalith.corpus.source_policy import SourcePolicy
-from codalith.corpus.store_manifest import ActiveGeneration
 from codalith.errors import (
     CodalithError,
     IndexBuildError,
@@ -57,7 +57,7 @@ class SemanticBuildInfo:
         return asdict(self)
 
 
-class CodeRAGBackend:
+class SemanticBackend:
     def __init__(self, policy: SourcePolicy) -> None:
         self.policy = policy
         self._engines: GenerationLeases[SemanticEngine] = GenerationLeases(_close_engine)
@@ -75,7 +75,7 @@ class CodeRAGBackend:
                 hits = engine.search(query, limit)
             except Exception as exc:
                 raise RetrievalError(
-                    f"CodeRAG search failed for {corpus.corpus_id}: {type(exc).__name__}: {exc}"
+                    f"Semantic search failed for {corpus.corpus_id}: {type(exc).__name__}: {exc}"
                 ) from exc
         return [
             SemanticHit(
@@ -118,7 +118,7 @@ class CodeRAGBackend:
         except IndexUnavailableError as exc:
             raise RetrievalError(str(exc)) from exc
         return _open_engine(
-            coderag_config(
+            engine_config(
                 corpus,
                 generation.coderag_path,
                 self.policy,
@@ -148,7 +148,7 @@ def generation_store_provenance(generation: ActiveGeneration) -> StoreProvenance
         raise IndexInvalidError(str(exc)) from exc
     if recorded != expected:
         raise IndexInvalidError(
-            f"CodeRAG store {generation.coderag_path} records {recorded.describe()} but "
+            f"Semantic store {generation.coderag_path} records {recorded.describe()} but "
             f"generation {manifest.generation_id} expects {expected.describe()}"
         )
     return expected
@@ -195,7 +195,7 @@ def prepare_semantic_index(
         raise IndexBuildError("Cannot prepare a semantic index without indexed source files")
     if mode == "build" and store_dir.exists():
         raise IndexBuildError(f"Semantic build target already exists: {store_dir}")
-    config = coderag_config(corpus, store_dir, policy)
+    config = engine_config(corpus, store_dir, policy)
     source_view: tempfile.TemporaryDirectory[str] | None = None
     try:
         if mode == "build":
@@ -216,7 +216,7 @@ def prepare_semantic_index(
             stored = engine.file_hashes()
         except Exception as exc:
             raise IndexBuildError(
-                f"Cannot {mode} CodeRAG store for {corpus.corpus_id}: "
+                f"Cannot {mode} semantic store for {corpus.corpus_id}: "
                 f"{type(exc).__name__}: {exc}"
             ) from exc
         finally:
@@ -225,7 +225,7 @@ def prepare_semantic_index(
         if source_view is not None:
             source_view.cleanup()
     if stats.total_files <= 0 or stats.total_chunks <= 0:
-        raise IndexBuildError("CodeRAG store is empty")
+        raise IndexBuildError("Semantic store is empty")
     if mode == "build":
         covered_files = _verify_built_store(corpus.source_root, stored, indexed_files)
         extra_files = 0
@@ -255,19 +255,19 @@ def preflight_semantic_index(
     if mode != "adopt" or corpus.coderag_store is None:
         return
     engine = _open_engine(
-        coderag_config(corpus, corpus.coderag_store, policy),
+        engine_config(corpus, corpus.coderag_store, policy),
         error=IndexBuildError,
     )
     try:
         stats = engine.stats()
     except Exception as exc:
         raise IndexBuildError(
-            f"Cannot preflight CodeRAG store for {corpus.corpus_id}: {type(exc).__name__}: {exc}"
+            f"Cannot preflight semantic store for {corpus.corpus_id}: {type(exc).__name__}: {exc}"
         ) from exc
     finally:
         engine.close()
     if stats.total_files <= 0 or stats.total_chunks <= 0:
-        raise IndexBuildError("CodeRAG store is empty")
+        raise IndexBuildError("Semantic store is empty")
 
 
 def _validate_semantic_request(
@@ -282,7 +282,7 @@ def _validate_semantic_request(
         if store_dir is None:
             raise IndexBuildError("Semantic adopt mode requires corpus.coderag_store")
         if not store_dir.is_dir():
-            raise IndexBuildError(f"CodeRAG store does not exist: {store_dir}")
+            raise IndexBuildError(f"Semantic store does not exist: {store_dir}")
 
 
 def _verify_built_store(
@@ -293,7 +293,7 @@ def _verify_built_store(
     outside = sorted(set(stored) - set(indexed_files))
     if outside:
         raise IndexBuildError(
-            f"CodeRAG indexed {len(outside)} file(s) outside the structural snapshot: "
+            f"The semantic store holds {len(outside)} file(s) outside the structural snapshot: "
             f"{', '.join(outside[:5])}"
         )
     changed = sorted(path for path, digest in stored.items() if indexed_files[path] != digest)
@@ -308,7 +308,8 @@ def _verify_built_store(
     )
     if skipped:
         raise IndexBuildError(
-            f"CodeRAG skipped {len(skipped)} indexable source file(s): {', '.join(skipped[:5])}"
+            f"The semantic index skipped {len(skipped)} indexable source file(s): "
+            f"{', '.join(skipped[:5])}"
         )
     return len(stored)
 
@@ -319,11 +320,11 @@ def _verify_adopted_store(
 ) -> tuple[int, int]:
     common = stored.keys() & indexed_files.keys()
     if not common:
-        raise IndexBuildError("Adopted CodeRAG store covers no file in the structural snapshot")
+        raise IndexBuildError("Adopted semantic store covers no file in the structural snapshot")
     drifted = sorted(path for path in common if stored[path] != indexed_files[path])
     if drifted:
         raise IndexBuildError(
-            f"Adopted CodeRAG store content differs from the structural snapshot for "
+            f"Adopted semantic store content differs from the structural snapshot for "
             f"{len(drifted)} file(s): {', '.join(drifted[:5])}"
         )
     return len(common), len(stored) - len(common)
@@ -337,7 +338,7 @@ def _has_indexable_text(path: Path) -> bool:
     return has_indexable_text(data)
 
 
-def coderag_config(
+def engine_config(
     corpus: Corpus,
     store_dir: Path,
     policy: SourcePolicy,
@@ -357,10 +358,10 @@ def coderag_config(
 
 
 def store_fingerprint(store_dir: Path) -> str:
-    """Hash every CodeRAG store byte so provenance detects same-size corruption."""
+    """Hash every semantic store byte so provenance detects same-size corruption."""
 
     if not store_dir.is_dir():
-        raise IndexBuildError(f"CodeRAG store does not exist: {store_dir}")
+        raise IndexBuildError(f"Semantic store does not exist: {store_dir}")
     digest = hashlib.sha256()
     files = sorted(path for path in store_dir.rglob("*") if path.is_file())
     for path in files:

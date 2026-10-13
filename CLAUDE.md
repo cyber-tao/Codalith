@@ -29,8 +29,8 @@ language adapter -> immutable SQLite structure.sqlite
 
 - `codalith.corpus`：配置、canonical URI、源策略、generation manifest、源码读取；不导入 tree-sitter，也不导入语义引擎的 store 或 embedding 实现。
 - `codalith.languages`：无 I/O 的结构抽取协议；`catalog` 是 adapter id、version、`RetrievalProfile` 与扩展名映射的唯一来源；UE 特性只存在于 `cpp_ue` 适配器和 UE profile。
-- `codalith.semantic`：分块、embedding、LanceDB 与 dense+BM25 混合检索。generation 绑定仍在 indexing。
-- `codalith.indexing`：构建并原子发布 SQLite 与语义 generation，字面文本检索。
+- `codalith.semantic`：分块、embedding、LanceDB 与 dense+BM25 混合检索；只认识显式 `Config`，不导入 Codalith 其他包。
+- `codalith.indexing`：`builder` 编排并原子发布 generation，`structure` 写入与读取 SQLite 快照，`semantic` 把语义 store 绑定到 generation，另含字面文本检索。
 - `codalith.query`：检索融合、context/read/symbol/graph/compare/status；每个请求对每个语料只解析一次 generation。
 - `codalith.mcp`：官方 MCP SDK 绑定；不放业务逻辑，`server`/`stdio` 不导入 `codalith.dashboard`。
 - `codalith.dashboard`：进程内遥测与面板 HTTP 路由，只由 HTTP 应用组装。
@@ -41,12 +41,13 @@ language adapter -> immutable SQLite structure.sqlite
 
 - `configs/registry.toml` 与 `configs/source-policy.toml` 是唯一配置入口，路径相对声明文件解析；源策略的 deny globs 与字节上限属于 generation 有效性。
 - `current.json` 只能指向完整且已发布的不可变 generation；失败构建不得改变它或任何已发布代的 store。
-- 语义 store 只能来自同一代快照：`build` 在 generation 内按 `structure.sqlite` 文件集合精确构建；`adopt` 必须校验交集文件哈希、记录覆盖率并固定 store 路径；打开 store 前必须校验其记录的 embedding model/dimension。
+- 语义 store 只能来自同一代快照：`build` 在 generation 内按 `structure.sqlite` 文件集合精确构建到尚不存在的目录；`adopt` 必须校验交集文件哈希、记录覆盖率并固定 store 路径；已有 store 只读打开，打开前必须校验其记录的 embedding model/dimension，不一致即拒绝。
 - `codalith_read` 只能读取结构索引中的相对路径，并比较当前 SHA-256 与 indexed SHA-256；deny 策略同时作用于所有工具输出。
 - `codalith_status` 不加载 embedding model、不扫描源码、不触发建库。
 - MCP schema `extra=forbid`；所有公开工具只读、幂等、closed-world；错误码由 `codalith.errors` 显式声明。
 - HTTP 默认 loopback publish，Host/Origin 白名单（覆盖所有路由）和完整流式 body 上限不可绕过。
 - 新 adapter、adapter 语义或其 `RetrievalProfile` 变更必须提升 `catalog` 中的 `version`，旧 generation 自动失效（profile 决定 `symbol_search` 中固化的符号排序）。
+- 语义引擎的分块、embedding 输入或 store 布局变更必须提升 `codalith.semantic.ENGINE_VERSION`，旧的语义 generation 自动失效。
 - 检索代码不得编码评测问句、关键词或期望答案路径；语言/引擎约定只能经 adapter 的 `RetrievalProfile` 进入查询层。
 
 ## 常用命令

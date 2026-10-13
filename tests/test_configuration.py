@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 
 from codalith.config import load_toml
+from codalith.corpus.generations import Artifact, GenerationRepository
 from codalith.corpus.registry import CorpusRegistry
-from codalith.corpus.store_manifest import Artifact, GenerationRepository
 from codalith.corpus.uris import parse_uri, source_uri, symbol_uri
 from codalith.errors import (
     ConfigurationError,

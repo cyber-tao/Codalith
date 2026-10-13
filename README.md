@@ -71,7 +71,7 @@ fixtures/sample_corpus/  deterministic local smoke corpus
 src/codalith/corpus/     registry, policy, URIs, generations, source reads
 src/codalith/languages/  adapter catalog, contracts, and implementations
 src/codalith/semantic/   hybrid retrieval engine (chunking, embeddings, LanceDB)
-src/codalith/indexing/   SQLite builder, semantic generation binding, literal text search
+src/codalith/indexing/   generation builder, SQLite structure writer/reader, semantic store binding, literal text search
 src/codalith/query/      transport-independent query service
 src/codalith/mcp/        official SDK bindings and transports
 src/codalith/dashboard/  process-local telemetry and dashboard HTTP routes

@@ -8,7 +8,7 @@ import pytest
 
 from codalith.corpus.registry import Corpus, CorpusRegistry
 from codalith.corpus.source_policy import SourcePolicy
-from codalith.indexing.structure.builder import StructureBuilder
+from codalith.indexing.builder import GenerationBuilder
 from codalith.query.service import QueryService
 
 
@@ -123,7 +123,7 @@ def build_environment(
     registry = CorpusRegistry.from_file(registry_path)
     policy = SourcePolicy.from_file(policy_path)
     corpus = registry.get_corpus(corpus_id)
-    StructureBuilder(policy).build(
+    GenerationBuilder(policy).build(
         corpus,
         semantic_mode="build" if semantic else "none",
     )

@@ -17,12 +17,12 @@ from codalith.benchmarks.runner import (
     run_mcp_benchmark,
     write_report,
 )
+from codalith.corpus.generations import GenerationRepository
 from codalith.corpus.registry import CorpusRegistry
 from codalith.corpus.source_policy import SourcePolicy
-from codalith.corpus.store_manifest import GenerationRepository
 from codalith.errors import CodalithError
-from codalith.indexing.coderag.backend import store_fingerprint
-from codalith.indexing.structure.builder import StructureBuilder
+from codalith.indexing.builder import GenerationBuilder
+from codalith.indexing.semantic import store_fingerprint
 from codalith.mcp.http import DEFAULT_MAX_REQUEST_BYTES, HTTPConfig, create_http_app
 from codalith.mcp.stdio import serve_stdio
 from codalith.query.service import QueryService
@@ -101,7 +101,7 @@ def _index(
 ) -> int:
     if args.index_command == "build":
         corpus = registry.get_corpus(args.corpus)
-        report = StructureBuilder(policy).build(
+        report = GenerationBuilder(policy).build(
             corpus,
             semantic_mode=args.semantic,
             progress=lambda message: print(message, file=sys.stderr, flush=True),
@@ -143,7 +143,7 @@ def _doctor(
                         )
                         if not semantic_match:
                             failures.append(
-                                f"CodeRAG fingerprint mismatch for {corpus.corpus_id}"
+                                f"Semantic store fingerprint mismatch for {corpus.corpus_id}"
                             )
                     checks.append(
                         {

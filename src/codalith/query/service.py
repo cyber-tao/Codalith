@@ -12,14 +12,14 @@ from contextlib import ExitStack, closing
 from dataclasses import dataclass, field
 from typing import Literal, cast
 
-from codalith.corpus.registry import Corpus, CorpusRegistry
-from codalith.corpus.source_policy import SourcePolicy
-from codalith.corpus.source_reader import SourceReader
-from codalith.corpus.store_manifest import (
+from codalith.corpus.generations import (
     ActiveGeneration,
     GenerationRepository,
     IndexManifest,
 )
+from codalith.corpus.registry import Corpus, CorpusRegistry
+from codalith.corpus.source_policy import SourcePolicy
+from codalith.corpus.source_reader import SourceReader
 from codalith.corpus.uris import parse_uri, source_uri, symbol_uri
 from codalith.errors import (
     IndexMissingError,
@@ -30,9 +30,8 @@ from codalith.errors import (
     SymbolNotFoundError,
     URIResolutionError,
 )
-from codalith.indexing.coderag import CodeRAGBackend
-from codalith.indexing.coderag.backend import generation_store_provenance
 from codalith.indexing.leases import GenerationLeases
+from codalith.indexing.semantic import SemanticBackend, generation_store_provenance
 from codalith.indexing.structure.models import (
     ComparisonGroup,
     FileRecord,
@@ -268,12 +267,12 @@ class QueryService:
         self.registry = registry
         self.policy = policy
         self.generations = GenerationRepository(policy)
-        self.coderag = CodeRAGBackend(policy)
+        self.semantic = SemanticBackend(policy)
         self.indices: GenerationLeases[StructureIndex] = GenerationLeases(StructureIndex.close)
         self.sources = SourceReader(policy)
 
     def close(self) -> None:
-        self.coderag.close()
+        self.semantic.close()
         self.indices.close()
 
     def search(
@@ -399,7 +398,7 @@ class QueryService:
             if strategy in {"auto", "semantic"}:
                 filtered_semantic_paths = 0
                 try:
-                    semantic_hits = self.coderag.search(
+                    semantic_hits = self.semantic.search(
                         corpus,
                         generation,
                         normalized_query,
@@ -413,11 +412,12 @@ class QueryService:
                 else:
                     eligible_semantic_hits = []
                     for hit in semantic_hits:
-                        if index.get_file(hit.path) is None:
+                        semantic_file = index.get_file(hit.path)
+                        if semantic_file is None:
                             filtered_semantic_paths += 1
                             continue
-                        eligible_semantic_hits.append(hit)
-                    for rank, hit in enumerate(eligible_semantic_hits, start=1):
+                        eligible_semantic_hits.append((hit, semantic_file))
+                    for rank, (hit, semantic_file) in enumerate(eligible_semantic_hits, start=1):
                         start_line, end_line = _bounded_range(
                             hit.start_line,
                             hit.end_line,
@@ -429,7 +429,7 @@ class QueryService:
                             path=hit.path,
                             start_line=start_line,
                             end_line=end_line,
-                            language=hit.language,
+                            language=semantic_file.language,
                             symbol=hit.symbol,
                             symbol_id=None,
                             kind=hit.kind,
@@ -439,7 +439,7 @@ class QueryService:
                         _merge(candidates, candidate, "coderag", rank, 1.0)
                     if filtered_semantic_paths:
                         warnings.append(
-                            f"Filtered {filtered_semantic_paths} CodeRAG hit(s) outside "
+                            f"Filtered {filtered_semantic_paths} semantic hit(s) outside "
                             f"generation {generation.manifest.generation_id}"
                         )
             if strategy == "text":

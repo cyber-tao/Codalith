@@ -20,6 +20,7 @@ from codalith.corpus.registry import Corpus
 from codalith.corpus.source_policy import SourcePolicy
 from codalith.errors import IndexBuildError, IndexInvalidError, IndexMissingError
 from codalith.languages.catalog import ADAPTERS
+from codalith.semantic import ENGINE_VERSION
 
 MANIFEST_SCHEMA_VERSION = 3
 STRUCTURE_SCHEMA_VERSION = 4
@@ -275,13 +276,11 @@ class GenerationRepository:
             )
         if corpus.embedding_model and manifest.embedding_model != corpus.embedding_model:
             raise IndexInvalidError("Index embedding model does not match corpus configuration")
-        if manifest.semantic_available:
-            installed = installed_coderag_version()
-            if manifest.coderag_version != installed:
-                raise IndexInvalidError(
-                    f"Semantic index was built with CodeRAG {manifest.coderag_version}; "
-                    f"installed CodeRAG is {installed}"
-                )
+        if manifest.semantic_available and manifest.coderag_version != ENGINE_VERSION:
+            raise IndexInvalidError(
+                f"Semantic index was built with semantic engine {manifest.coderag_version}; "
+                f"the installed engine is {ENGINE_VERSION}"
+            )
         return ActiveGeneration(
             root=root,
             manifest_path=manifest_path,
@@ -311,7 +310,7 @@ class GenerationRepository:
                 raise IndexInvalidError(f"Index artifact size mismatch: {artifact_path}")
         if generation.manifest.semantic_available and not generation.coderag_path.is_dir():
             raise IndexInvalidError(
-                f"Missing CodeRAG store for {corpus.corpus_id}: {generation.coderag_path}"
+                f"Missing semantic store for {corpus.corpus_id}: {generation.coderag_path}"
             )
 
     def verify(self, generation: ActiveGeneration) -> None:
@@ -369,12 +368,6 @@ def count_structure_rows(connection: sqlite3.Connection) -> dict[str, int]:
         row = connection.execute(f'SELECT count(*) FROM "{table}"').fetchone()
         counts[table] = int(row[0]) if row is not None else 0
     return counts
-
-
-def installed_coderag_version() -> str:
-    from codalith.semantic import ENGINE_VERSION
-
-    return ENGINE_VERSION
 
 
 def _file_stamp(path: Path) -> _FileStamp | None:

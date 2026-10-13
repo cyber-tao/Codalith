@@ -9,16 +9,16 @@ from pathlib import Path
 
 import pytest
 
-from codalith.corpus.store_manifest import GenerationRepository
+from codalith.corpus.generations import GenerationRepository
 from codalith.errors import IndexBuildError, IndexUnavailableError
-from codalith.indexing.coderag.backend import (
-    CodeRAGBackend,
+from codalith.indexing.builder import GenerationBuilder, build_lock
+from codalith.indexing.semantic import (
+    SemanticBackend,
     _materialize_source_view,
     preflight_semantic_index,
     prepare_semantic_index,
     store_fingerprint,
 )
-from codalith.indexing.structure.builder import StructureBuilder, build_lock
 from codalith.indexing.structure.models import ComparisonGroup
 from codalith.indexing.structure.schema import SYMBOL_SEARCH_SQL
 from codalith.indexing.structure.store import StructureIndex
@@ -51,7 +51,7 @@ def test_semantic_index_cannot_leak_files_outside_the_generation(
     semantic_environment: TestEnvironment,
 ) -> None:
     generation = GenerationRepository(semantic_environment.policy).active(semantic_environment.corpus)
-    backend = CodeRAGBackend(semantic_environment.policy)
+    backend = SemanticBackend(semantic_environment.policy)
     try:
         hits = backend.search(
             semantic_environment.corpus,
@@ -240,7 +240,7 @@ def test_build_fails_clearly_without_sqlite_trigram_support(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "codalith.indexing.structure.builder.SYMBOL_SEARCH_SQL",
+        "codalith.indexing.structure.writer.SYMBOL_SEARCH_SQL",
         SYMBOL_SEARCH_SQL.replace("'trigram'", "'missing_tokenizer'"),
     )
     with pytest.raises(IndexBuildError, match="trigram tokenizer"):
@@ -254,7 +254,7 @@ def test_new_generation_drops_deleted_source_without_stale_rows(
     environment = environment_factory(semantic=False)
     first = GenerationRepository(environment.policy).active(environment.corpus)
     (environment.source_root / "src/core/events.py").unlink()
-    report = StructureBuilder(environment.policy).build(environment.corpus)
+    report = GenerationBuilder(environment.policy).build(environment.corpus)
     second = GenerationRepository(environment.policy).active(environment.corpus)
     assert second.manifest.generation_id == report.generation_id
     assert second.manifest.generation_id != first.manifest.generation_id
@@ -278,11 +278,11 @@ def test_failed_build_never_replaces_the_active_pointer(
         raise IndexBuildError("forced semantic failure")
 
     monkeypatch.setattr(
-        "codalith.indexing.structure.builder.prepare_semantic_index",
+        "codalith.indexing.builder.prepare_semantic_index",
         fail,
     )
     with pytest.raises(IndexBuildError, match="forced semantic failure"):
-        StructureBuilder(environment.policy).build(
+        GenerationBuilder(environment.policy).build(
             environment.corpus,
             semantic_mode="build",
         )
@@ -331,7 +331,7 @@ def test_adopt_pins_the_external_store_and_records_coverage(
     shutil.copytree(repository.active(environment.corpus).coderag_path, external)
     (environment.source_root / "src/beta.py").unlink()
     adopter = replace(environment.corpus, coderag_store=external)
-    StructureBuilder(environment.policy).build(adopter, semantic_mode="adopt")
+    GenerationBuilder(environment.policy).build(adopter, semantic_mode="adopt")
     generation = repository.active(adopter)
     assert generation.coderag_path == external.resolve()
     assert generation.manifest.coderag_covered_files == 1
@@ -352,7 +352,7 @@ def test_adopt_rejects_a_store_whose_content_drifted(
     cache = environment.source_root / "src/core/cache.py"
     cache.write_text(cache.read_text(encoding="utf-8") + "# drift\n", encoding="utf-8")
     with pytest.raises(IndexBuildError, match="differs from the structural snapshot"):
-        StructureBuilder(environment.policy).build(
+        GenerationBuilder(environment.policy).build(
             replace(environment.corpus, coderag_store=external),
             semantic_mode="adopt",
         )
@@ -391,14 +391,14 @@ def test_build_mode_never_writes_the_configured_external_store(
     (external / "marker").write_text("keep", encoding="utf-8")
     before = store_fingerprint(external)
     corpus = replace(environment.corpus, coderag_store=external)
-    StructureBuilder(environment.policy).build(corpus, semantic_mode="build")
+    GenerationBuilder(environment.policy).build(corpus, semantic_mode="build")
     generation = GenerationRepository(environment.policy).active(corpus)
     assert generation.coderag_path == generation.root / "coderag"
     assert generation.manifest.semantic_available
     assert store_fingerprint(external) == before
 
 
-def test_semantic_generation_is_invalid_after_a_coderag_upgrade(
+def test_semantic_generation_is_invalid_after_an_engine_upgrade(
     environment_factory: EnvironmentFactory,
 ) -> None:
     environment = environment_factory(semantic=True)
@@ -406,7 +406,7 @@ def test_semantic_generation_is_invalid_after_a_coderag_upgrade(
     payload = json.loads(generation.manifest_path.read_text(encoding="utf-8"))
     payload["coderag_version"] = "0.0.0-previous"
     generation.manifest_path.write_text(json.dumps(payload), encoding="utf-8")
-    with pytest.raises(IndexUnavailableError, match="built with CodeRAG 0.0.0-previous"):
+    with pytest.raises(IndexUnavailableError, match="built with semantic engine 0.0.0-previous"):
         GenerationRepository(environment.policy).active(environment.corpus)
 
 
@@ -416,8 +416,8 @@ def test_concurrent_builds_of_one_corpus_are_rejected(
     environment = environment_factory(semantic=False)
     with build_lock(environment.index_root):
         with pytest.raises(IndexBuildError, match="Another index build"):
-            StructureBuilder(environment.policy).build(environment.corpus)
-    StructureBuilder(environment.policy).build(environment.corpus)
+            GenerationBuilder(environment.policy).build(environment.corpus)
+    GenerationBuilder(environment.policy).build(environment.corpus)
 
 
 def test_store_fingerprint_detects_same_size_corruption(tmp_path: Path) -> None:
@@ -458,7 +458,7 @@ def test_index_builder_does_not_follow_source_links(
         linked.symlink_to(outside)
     except OSError as exc:
         pytest.skip(f"symbolic links are unavailable: {exc}")
-    StructureBuilder(environment.policy).build(environment.corpus)
+    GenerationBuilder(environment.policy).build(environment.corpus)
     generation = GenerationRepository(environment.policy).active(environment.corpus)
     index = StructureIndex(generation.structure_path)
     try:
@@ -482,7 +482,7 @@ def test_semantic_source_view_copies_when_links_are_unavailable(
     def reject_link(*args: object, **kwargs: object) -> None:
         raise OSError("links disabled")
 
-    monkeypatch.setattr("codalith.indexing.coderag.backend.os.link", reject_link)
+    monkeypatch.setattr("codalith.indexing.semantic.os.link", reject_link)
     monkeypatch.setattr(Path, "symlink_to", reject_link)
     _materialize_source_view(source, view, ("nested/example.py",))
     copied = view / "nested/example.py"

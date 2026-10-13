@@ -9,13 +9,13 @@ from pathlib import Path
 
 import pytest
 
+from codalith.corpus.generations import GenerationRepository
 from codalith.corpus.registry import CorpusRegistry
 from codalith.corpus.source_policy import SourcePolicy
-from codalith.corpus.store_manifest import GenerationRepository
 from codalith.corpus.uris import source_uri
 from codalith.errors import RetrievalError, SourcePolicyError
-from codalith.indexing.coderag.backend import store_fingerprint
-from codalith.indexing.structure.builder import StructureBuilder
+from codalith.indexing.builder import GenerationBuilder
+from codalith.indexing.semantic import store_fingerprint
 from codalith.languages.catalog import NEUTRAL_PROFILE, UNREAL_PROFILE
 from codalith.query.service import (
     QueryService,
@@ -233,6 +233,29 @@ def test_query_outputs_withhold_paths_denied_by_the_source_policy(
         assert graph.warnings
     finally:
         service.close()
+
+
+def test_semantic_hits_report_the_structural_language_of_their_file(tmp_path: Path) -> None:
+    environment = build_environment(
+        tmp_path,
+        files={
+            "Source/Core/Public/Delegate.h": "class FDelegate {};\n",
+            "Source/Core/Public/DelegateImpl.inl": "inline void BindDelegate() {}\n",
+        },
+        semantic=True,
+        adapter="cpp-ue",
+        include_extensions=(".h", ".inl"),
+    )
+    service = environment.service()
+    try:
+        hits = service.search("delegate binding", target="sample", strategy="semantic").hits
+    finally:
+        service.close()
+    assert {hit.path for hit in hits} == {
+        "Source/Core/Public/Delegate.h",
+        "Source/Core/Public/DelegateImpl.inl",
+    }
+    assert {hit.language for hit in hits} == {"cpp"}
 
 
 def test_symbol_strategy_extracts_identifier_from_a_natural_language_query(
@@ -548,7 +571,7 @@ def test_source_reads_normalize_crlf_without_leaking_carriage_returns(
     environment = environment_factory(semantic=False)
     cache = environment.source_root / "src/core/cache.py"
     cache.write_bytes(b"first\r\nsecond\r\n")
-    StructureBuilder(environment.policy).build(environment.corpus)
+    GenerationBuilder(environment.policy).build(environment.corpus)
     service = environment.service()
     try:
         result = service.read(source_uri("sample", "src/core/cache.py", start_line=1, end_line=2))
@@ -566,7 +589,7 @@ def test_requests_keep_their_generation_while_a_new_one_is_published(
     try:
         with _Request(service) as request:
             snapshot = request.snapshot(environment.corpus)
-            StructureBuilder(environment.policy).build(environment.corpus)
+            GenerationBuilder(environment.policy).build(environment.corpus)
             newer = service.search("CachedValue", target="sample", strategy="symbol")
             assert newer.hits[0].generation_id != snapshot.generation_id
             assert snapshot.index.lookup_symbols("CachedValue")
@@ -601,7 +624,7 @@ def test_concurrent_queries_survive_generation_publishes(
         worker.start()
     try:
         for _ in range(3):
-            StructureBuilder(environment.policy).build(environment.corpus)
+            GenerationBuilder(environment.policy).build(environment.corpus)
     finally:
         stop.set()
         for worker in workers:
@@ -647,7 +670,7 @@ def test_status_rejects_a_generation_with_a_missing_semantic_store(
         status = service.status(target="sample")
         assert not status.ready
         assert status.corpora[0].state == "invalid"
-        assert "Missing CodeRAG store" in (status.corpora[0].message or "")
+        assert "Missing semantic store" in (status.corpora[0].message or "")
     finally:
         service.close()
 
@@ -741,7 +764,7 @@ def _compare_service(tmp_path: Path, sources: dict[str, str]) -> QueryService:
     registry_path.write_text("\n".join(rows), encoding="utf-8")
     registry = CorpusRegistry.from_file(registry_path)
     policy = SourcePolicy.from_file(policy_path)
-    builder = StructureBuilder(policy)
+    builder = GenerationBuilder(policy)
     for corpus_id in sources:
         builder.build(registry.get_corpus(corpus_id))
     return QueryService(registry, policy)
