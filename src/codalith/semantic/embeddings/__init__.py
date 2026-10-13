@@ -1,9 +1,7 @@
 """Pluggable embedding providers.
 
-A provider turns text into L2-comparable float32 vectors. The crucial contract change
-from the old CodeRAG: providers embed a *list of already-chunked texts* and return one
-vector per text — there is no file-level averaging anywhere. The embedding dimension is a
-property of the provider (and its model), never a hard-coded constant.
+A provider turns already-chunked texts into float32 vectors, one vector per text. The
+embedding dimension is a property of the provider and its model, never a hard-coded constant.
 """
 
 from __future__ import annotations
@@ -24,7 +22,7 @@ class EmbeddingProvider(Protocol):
 
     @property
     def model_id(self) -> str:
-        """Stable identifier of the underlying model (stored with each chunk)."""
+        """Stable identifier of the underlying model, recorded in the store provenance."""
 
     @property
     def dim(self) -> int:
@@ -38,31 +36,34 @@ class EmbeddingProvider(Protocol):
 
 
 def get_provider(config: Config) -> EmbeddingProvider:
-    """Construct the embedding provider named by ``config.provider``.
+    """Construct the provider named by ``config.provider``; heavy backends import lazily."""
 
-    Heavy backends (fastembed/openai) are imported lazily so that ``coderag --help`` and
-    the ``fake`` provider used in tests stay dependency-light and instant.
-    """
     provider = config.provider.lower()
     if provider == "fake":
         from codalith.semantic.embeddings.fake_provider import FakeEmbeddingProvider
 
         return FakeEmbeddingProvider()
     if provider == "fastembed":
-        from codalith.semantic.embeddings.fastembed_provider import FastEmbedProvider
+        from codalith.semantic.embeddings.fastembed_provider import (
+            DEFAULT_MODEL,
+            FastEmbedProvider,
+        )
 
         return FastEmbedProvider(
-            config.model,
+            config.model or DEFAULT_MODEL,
             cache_dir=config.cache_dir,
             device=config.embed_device,
             threads=config.embed_threads,
             batch_size=config.embed_batch_size,
         )
     if provider == "openai":
-        from codalith.semantic.embeddings.openai_provider import OpenAIEmbeddingProvider
+        from codalith.semantic.embeddings.openai_provider import (
+            DEFAULT_MODEL,
+            OpenAIEmbeddingProvider,
+        )
 
         return OpenAIEmbeddingProvider(
-            model=config.openai_model,
+            model=config.model or DEFAULT_MODEL,
             api_key=config.openai_api_key,
             base_url=config.openai_base_url,
         )

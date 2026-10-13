@@ -1,20 +1,16 @@
 """The single embedded store: LanceDB holds chunk metadata, text (BM25), and vectors (ANN).
 
-This replaces the former SQLite store + separate FAISS index. One LanceDB database at
-``store_dir`` with two tables:
+One LanceDB database at ``store_dir`` with two tables:
 
-* ``files``  — one row per indexed file (``path``, ``content_hash``, ``mtime``, ``size``,
-  ``language``): drives incremental change detection.
-* ``chunks`` — one row per chunk (``id``, ``path``, ``symbol``, ``kind``, ``language``,
-  ``start_line``, ``end_line``, ``text``, ``vector``): both BM25 (over ``text``) and vector
-  ANN (over ``vector``) live here, so there is no FAISS↔SQLite coordination to maintain.
+* ``files``: one row per indexed file (``path``, ``content_hash``, ``mtime``, ``size``,
+  ``language``, ``indexed_at``).
+* ``chunks``: one row per chunk (``id``, ``path``, ``symbol``, ``kind``, ``language``,
+  ``start_line``, ``end_line``, ``text``, ``vector``); BM25 runs over ``text`` and vector
+  ANN over ``vector``.
 
-``chunks.path`` is denormalized so a file's chunks are deleted with a single ``delete(
-"path = …")`` (LanceDB has no foreign keys). The integer ``chunks.id`` is the fusion/hydrate
-key (it replaces the FAISS id). Writes are buffered and flushed in batches — LanceDB is
-columnar and many tiny appends create severe fragment/version bloat. Reads query committed
-data only; the writer owns the buffer (guarded by a lock), so a background index stays safe
-alongside live queries (partial results until ``optimize`` runs).
+The integer ``chunks.id`` is the fusion/hydrate key. Writes are buffered and flushed in
+batches because LanceDB is columnar and many tiny appends create severe fragment/version
+bloat. Reads query committed data only.
 """
 
 from __future__ import annotations
@@ -24,6 +20,7 @@ import logging
 import math
 import re
 import threading
+import time
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -42,11 +39,6 @@ _FLUSH_ROWS = 8192
 # LanceDB needs enough rows to train a vector ANN index; below this, brute-force is exact
 # and fast, so we skip indexing (also keeps tiny test corpora on the exact path).
 _ANN_MIN_ROWS = 256
-# Incremental writes append to an *unindexed tail* that every vector query brute-forces.
-# Once that tail grows past this many rows, query latency starts to degrade noticeably
-# (a few thousand rows already costs tens of ms), so an incremental pass rebuilds the ANN
-# index instead of letting the tail grow unbounded. See ``maybe_reindex``.
-_ANN_REINDEX_TAIL = 4096
 _HYDRATE_COLS = [
     "id",
     "path",
@@ -79,10 +71,8 @@ class LanceStore:
         self._chunks_buf: list[dict[str, Any]] = []
         self._files_buf: list[dict[str, Any]] = []
         self._next_id = 0
-        self._ann_built = False
         if _CHUNKS in self._db.table_names():
             self._next_id = self._max_id() + 1
-        self._refresh_ann_state()
 
     # --- schema ---
 
@@ -140,8 +130,7 @@ class LanceStore:
     def bootstrap(self, embed_dim: int, embed_model: str) -> bool:
         """Record the embedding model/dim; clear the store if they changed.
 
-        Returns True when a rebuild is required (model/dim changed) — the caller just
-        re-indexes into the now-empty tables (there is no separate index to rebuild).
+        Returns True when a rebuild is required (model/dim changed).
         """
         meta_path = self._dir / _META_FILE
         prev: dict[str, Any] = {}
@@ -169,7 +158,6 @@ class LanceStore:
                 self._chunks_buf.clear()
                 self._files_buf.clear()
                 self._next_id = 0
-                self._ann_built = False
         meta_path.write_text(
             json.dumps(
                 {
@@ -187,17 +175,6 @@ class LanceStore:
             self._chunks_buf.clear()
             self._files_buf.clear()
 
-    def clear(self) -> None:
-        """Drop all data (used by a full rebuild). Keeps the recorded provenance meta."""
-        with self._lock:
-            for name in (_CHUNKS, _FILES):
-                if name in self._db.table_names():
-                    self._db.drop_table(name)
-            self._chunks_buf.clear()
-            self._files_buf.clear()
-            self._next_id = 0
-            self._ann_built = False
-
     # --- buffered writes ---
 
     def _flush(self) -> None:
@@ -212,22 +189,6 @@ class LanceStore:
         with self._lock:
             self._flush()
 
-    def _delete_path_rows(self, rel: str) -> int:
-        """Delete a file's chunk + file rows from the committed tables. Returns chunks gone."""
-        names = self._db.table_names()
-        removed = 0
-        pred = f"path = '{rel.replace(chr(39), chr(39) * 2)}'"
-        if _CHUNKS in names:
-            ctbl = self._db.open_table(_CHUNKS)
-            removed = len(
-                ctbl.search().where(pred).select(["id"]).limit(10**9).to_list()
-            )
-            if removed:
-                ctbl.delete(pred)
-        if _FILES in names:
-            self._db.open_table(_FILES).delete(pred)
-        return removed
-
     def write_file(
         self,
         rel: str,
@@ -237,22 +198,9 @@ class LanceStore:
         size: int,
         chunks: Sequence[Chunk],
         vectors: np.ndarray | None,
-        *,
-        replace: bool,
-    ) -> tuple[int, int]:
-        """Index one file: (replace its old rows, if any) then buffer its new rows.
-
-        Returns ``(chunks_added, chunks_removed)``. New files take the fully-batched fast
-        path (no flush); replacing a changed file flushes + deletes its old rows first, so
-        the delete-before-add invariant holds on the single writer thread.
-        """
-        import time
-
+    ) -> int:
+        """Buffer one file's rows. Returns the number of chunks added."""
         with self._lock:
-            removed = 0
-            if replace:
-                self._flush()
-                removed = self._delete_path_rows(rel)
             added = 0
             if chunks and vectors is not None:
                 mat = np.ascontiguousarray(vectors, dtype="float32")
@@ -281,17 +229,12 @@ class LanceStore:
                     "mtime": float(mtime),
                     "size": int(size),
                     "language": language,
-                "indexed_at": time.time(),
-            }
+                    "indexed_at": time.time(),
+                }
             )
             if len(self._chunks_buf) >= _FLUSH_ROWS:
                 self._flush()
-            return added, removed
-
-    def delete_file(self, rel: str) -> int:
-        with self._lock:
-            self._flush()
-            return self._delete_path_rows(rel)
+            return added
 
     def optimize(self) -> None:
         """Flush, compact, (re)build the BM25 index, and build the vector ANN index at scale."""
@@ -307,48 +250,18 @@ class LanceStore:
                 logger.exception("LanceDB optimize failed (continuing).")
             self._build_search_indexes(tbl)
 
-    def maybe_reindex(self) -> bool:
-        """Keep the ANN/FTS indexes fresh on an incremental pass, without a full optimize.
-
-        Incremental writes append rows to an *unindexed tail* that every vector query
-        brute-forces; left unbounded that tail is what turns sub-50ms retrieval into
-        hundreds of ms. This rebuilds the search indexes only when the tail has grown past
-        ``_ANN_REINDEX_TAIL`` (or no ANN index exists yet at scale) — otherwise it is a
-        cheap no-op (just a flush). Returns True iff it rebuilt. Skips the compaction that
-        ``optimize`` does, so it stays light enough for a watcher to call after each edit.
-        """
-        with self._lock:
-            self._flush()
-            if _CHUNKS not in self._db.table_names():
-                return False
-            tbl = self._db.open_table(_CHUNKS)
-            n = tbl.count_rows()
-            if n < _ANN_MIN_ROWS:
-                self._ann_built = False
-                return False
-            state = self._vector_index_stats(tbl)
-            # No index yet => the whole table is the (brute-forced) tail.
-            unindexed = state[1] if state is not None else n
-            if state is not None and unindexed <= _ANN_REINDEX_TAIL:
-                self._ann_built = True
-                return False
-            self._build_search_indexes(tbl)
-            return True
-
     def _build_search_indexes(self, tbl: Any) -> None:
-        """(Re)build the FTS, scalar (id/path), and vector ANN indexes for ``tbl``.
+        """Build the FTS, scalar (id/path), and vector ANN indexes for ``tbl``.
 
         Each build is independent and best-effort: a failure is logged loudly and leaves
         that lookup on LanceDB's brute-force/scan fallback rather than aborting the others.
-        ``_ann_built`` tracks the *real* state so a silent fallback is observable via
-        ``index_kind`` instead of masquerading as an ANN index.
         """
         try:
             tbl.create_fts_index("text", replace=True)
         except Exception:  # pragma: no cover
             logger.exception("LanceDB FTS index build failed (lexical scan fallback).")
-        # Scalar indexes make hydrate's ``id IN (...)`` and path deletes index lookups
-        # instead of full-table scans (which grow with the corpus).
+        # Scalar indexes turn ``id IN (...)`` hydration and path predicates into index
+        # lookups instead of full-table scans that grow with the corpus.
         for col in ("id", "path"):
             try:
                 tbl.create_scalar_index(col, replace=True)
@@ -358,8 +271,6 @@ class LanceStore:
                 )
         n = tbl.count_rows()
         if n < _ANN_MIN_ROWS:
-            # Brute-force is exact and fast at this scale; no ANN index to maintain.
-            self._ann_built = False
             return
         try:
             nlist = max(1, min(int(4 * math.sqrt(n)), n // 39))
@@ -369,60 +280,15 @@ class LanceStore:
                 num_partitions=nlist,
                 replace=True,
             )
-            self._ann_built = True
         except Exception:  # pragma: no cover - falls back to brute-force search
             logger.exception(
                 "LanceDB vector index build failed (brute-force fallback)."
             )
-            self._ann_built = False
 
-    def _vector_index_stats(self, tbl: Any) -> tuple[int, int] | None:
-        """``(indexed_rows, unindexed_rows)`` for the vector ANN index, or None if absent.
-
-        The unindexed count is the brute-forced tail; it drives the reindex decision.
-        Robust to lancedb version differences in the index/stats object shape.
-        """
-        try:
-            indices = tbl.list_indices()
-        except Exception:  # pragma: no cover - older/newer API shape
-            return None
-        name: str | None = None
-        for idx in indices:
-            cols = (
-                getattr(idx, "columns", None)
-                or getattr(idx, "column_names", None)
-                or []
-            )
-            if "vector" in cols:
-                name = getattr(idx, "name", None) or getattr(idx, "index_name", None)
-                break
-        if name is None:
-            return None
-        try:
-            stats = tbl.index_stats(name)
-        except Exception:  # pragma: no cover
-            return None
-        indexed = int(getattr(stats, "num_indexed_rows", 0) or 0)
-        unindexed = int(getattr(stats, "num_unindexed_rows", 0) or 0)
-        return indexed, unindexed
-
-    def _refresh_ann_state(self) -> None:
-        """Set ``_ann_built`` from what is actually on disk (called on open)."""
-        if _CHUNKS not in self._db.table_names():
-            self._ann_built = False
-            return
-        self._ann_built = (
-            self._vector_index_stats(self._db.open_table(_CHUNKS)) is not None
-        )
-
-    @property
-    def index_kind(self) -> str:
-        return "lancedb-ann" if self._ann_built else "lancedb"
-
-    # --- file metadata / change detection ---
+    # --- file metadata ---
 
     def all_file_metas(self) -> dict[str, dict[str, Any]]:
-        """Every file's change-detection metadata, in one scan (indexer preload)."""
+        """Every file's metadata, in one scan."""
         self.flush()
         if _FILES not in self._db.table_names():
             return {}
@@ -434,9 +300,6 @@ class LanceStore:
             .to_list()
         )
         return {r["path"]: r for r in rows}
-
-    def all_file_paths(self) -> list[str]:
-        return list(self.all_file_metas().keys())
 
     # --- retrieval ---
 
@@ -471,22 +334,6 @@ class LanceStore:
             return []
         return [(int(r["id"]), float(r["_score"])) for r in rows]
 
-    def chunk_ids_for_path(self, rel: str) -> list[int]:
-        """The chunk ids belonging to one file (for inspection/tests)."""
-        self.flush()
-        if _CHUNKS not in self._db.table_names():
-            return []
-        pred = f"path = '{rel.replace(chr(39), chr(39) * 2)}'"
-        tbl = self._db.open_table(_CHUNKS)
-        rows = (
-            tbl.search()
-            .where(pred)
-            .select(["id"])
-            .limit(max(1, tbl.count_rows()))
-            .to_list()
-        )
-        return [int(r["id"]) for r in rows]
-
     def hydrate(self, ids: Sequence[int]) -> dict[int, dict[str, Any]]:
         if not ids or _CHUNKS not in self._db.table_names():
             return {}
@@ -502,12 +349,6 @@ class LanceStore:
         return {int(r["id"]): r for r in rows}
 
     # --- stats ---
-
-    def total_chunks(self) -> int:
-        self.flush()
-        if _CHUNKS not in self._db.table_names():
-            return 0
-        return int(self._db.open_table(_CHUNKS).count_rows())
 
     def stats(self) -> IndexStats:
         self.flush()

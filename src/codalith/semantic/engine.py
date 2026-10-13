@@ -2,25 +2,22 @@
 
 from __future__ import annotations
 
-import logging
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from codalith.semantic.config import Config
-from codalith.semantic.types import IndexProgress, IndexStats, SearchHit
+from codalith.semantic.types import IndexStats, SearchHit
 
 if TYPE_CHECKING:
     from codalith.semantic.embeddings import EmbeddingProvider
     from codalith.semantic.indexer import Indexer
-    from codalith.semantic.retrieval.search import HybridSearcher
-    from codalith.semantic.store.lance_store import LanceStore
-
-logger = logging.getLogger(__name__)
+    from codalith.semantic.search import HybridSearcher
+    from codalith.semantic.store import LanceStore
 
 
 class SemanticEngine:
-    """Index a source tree and search it with dense and lexical retrieval."""
+    """Index a source snapshot and search it with dense and lexical retrieval."""
 
     def __init__(self, config: Config) -> None:
         self.config = config
@@ -28,7 +25,6 @@ class SemanticEngine:
         self._store: LanceStore | None = None
         self._indexer: Indexer | None = None
         self._searcher: HybridSearcher | None = None
-        self._index_lock = threading.Lock()
         self._build_lock = threading.RLock()
 
     @property
@@ -44,7 +40,7 @@ class SemanticEngine:
     @property
     def store(self) -> LanceStore:
         if self._store is None:
-            from codalith.semantic.store.lance_store import LanceStore
+            from codalith.semantic.store import LanceStore
 
             with self._build_lock:
                 if self._store is None:
@@ -67,30 +63,20 @@ class SemanticEngine:
     @property
     def searcher(self) -> HybridSearcher:
         if self._searcher is None:
-            from codalith.semantic.retrieval.search import HybridSearcher
+            from codalith.semantic.search import HybridSearcher
 
             with self._build_lock:
                 if self._searcher is None:
                     self._searcher = HybridSearcher(self.config, self.provider, self.store)
         return self._searcher
 
-    def index(
-        self,
-        path: str | Path | None = None,
-        *,
-        full: bool = False,
-        live: IndexProgress | None = None,
-    ) -> IndexStats:
-        """Incrementally index ``path`` (defaults to the configured watched directory)."""
+    def index(self, source_dir: Path) -> IndexStats:
+        return self.indexer.index(source_dir)
 
-        target = Path(path).expanduser() if path else self.config.watched_dir
-        with self._index_lock:
-            return self.indexer.index(target, full=full, live=live)
-
-    def search(self, query: str, top_k: int | None = None) -> list[SearchHit]:
+    def search(self, query: str, top_k: int) -> list[SearchHit]:
         """Hybrid dense and lexical search over the indexed source."""
 
-        return self.searcher.search(query, top_k or self.config.top_k)
+        return self.searcher.search(query, top_k)
 
     def status(self) -> dict[str, object]:
         """Index statistics and embedding provenance."""
@@ -101,7 +87,6 @@ class SemanticEngine:
             "model": self.provider.model_id,
             "embedding_dim": self.provider.dim,
             "store_dir": str(self.config.store_dir),
-            "watched_dir": str(self.config.watched_dir),
             "total_files": stats.total_files,
             "total_chunks": stats.total_chunks,
         }

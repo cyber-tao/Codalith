@@ -1,8 +1,7 @@
 """Local-first embedding provider backed by fastembed (ONNX, no torch, no API key).
 
-This is the default backend. The model is loaded lazily on first use so that
-``coderag --help``, ``status``, and any code path that doesn't actually embed stays fast
-and never triggers a model download.
+The model is loaded lazily on first use, so code paths that never embed stay fast and never
+trigger a model download.
 """
 
 from __future__ import annotations

@@ -13,9 +13,18 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from codalith.semantic._lines import split_lines
 from codalith.semantic.config import Config
 from codalith.semantic.types import Chunk
+
+
+def split_lines(text: str) -> list[str]:
+    r"""Split on ``\n`` only; chunk line numbers are 1-based indices into this list.
+
+    :meth:`str.splitlines` also breaks on ``\r``, ``\f``, ``\v``, U+2028, and others, which
+    would desync line numbers from Codalith's source reads for CRLF files or stray control
+    characters.
+    """
+    return text.split("\n")
 
 
 @dataclass(slots=True)
@@ -133,8 +142,3 @@ def build_chunks(
 
     chunks.sort(key=lambda c: c.start_line)
     return chunks
-
-
-def window_only(text: str, language: str, config: Config) -> list[Chunk]:
-    """Chunk a file with no symbol parser — pure line windows."""
-    return build_chunks(text, language, [], config)

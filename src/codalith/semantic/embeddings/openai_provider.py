@@ -1,11 +1,11 @@
-"""Opt-in OpenAI (and OpenAI-compatible) embedding provider.
+"""OpenAI and OpenAI-compatible embedding provider.
 
-Unlike the old CodeRAG, this embeds each chunk independently (no file-level averaging) and
-batches requests for throughput. The client and dimension are resolved lazily.
+Each chunk is embedded independently and requests are batched. The client and dimension are
+resolved lazily.
 
-Setting ``base_url`` points the same client at a self-hosted / local OpenAI-compatible
-server (Ollama, vLLM, LM Studio, LocalAI, text-embeddings-inference, …); such servers
-usually don't require an API key, so one is optional when ``base_url`` is given.
+Setting ``base_url`` points the same client at a self-hosted OpenAI-compatible server
+(Ollama, vLLM, LM Studio, LocalAI, text-embeddings-inference, ...); such servers usually
+don't require an API key, so one is optional when ``base_url`` is given.
 """
 
 from __future__ import annotations
@@ -19,6 +19,8 @@ import numpy as np
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_MODEL = "text-embedding-3-small"
 
 # Known output dimensions; anything else is probed on first use.
 _KNOWN_DIMS = {
@@ -50,8 +52,8 @@ class OpenAIEmbeddingProvider:
 
         if not self._api_key and not self._base_url:
             raise RuntimeError(
-                "OpenAI provider requires an API key (set OPENAI_API_KEY), or a "
-                "self-hosted endpoint (set OPENAI_BASE_URL)."
+                "OpenAI embeddings require an API key (CODALITH_EMBEDDING_API_KEY) or an "
+                "OpenAI-compatible endpoint (CODALITH_EMBEDDING_BASE_URL)."
             )
         # Local OpenAI-compatible servers often ignore the key but the SDK still
         # requires a non-empty string, so pass a harmless placeholder when absent.

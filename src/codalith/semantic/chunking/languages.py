@@ -1,17 +1,14 @@
-"""File-extension -> language mapping and the set of languages with symbol parsers."""
+"""File-extension -> language mapping and the languages with symbol parsers."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-# Languages for which we extract symbol-aware spans (function/class/method).
-# Python uses the stdlib ``ast``; the rest use tree-sitter.
+# Languages with symbol-aware spans (function/class/method). Python uses the stdlib
+# ``ast``; the rest use tree-sitter. Every other language is chunked into line windows.
 PYTHON = "python"
 TREE_SITTER_LANGUAGES = {"javascript", "typescript", "tsx", "go", "rust", "java"}
-SYMBOL_LANGUAGES = {PYTHON} | TREE_SITTER_LANGUAGES
 
-# Everything indexable. Languages not in SYMBOL_LANGUAGES are still indexed via the
-# line-window fallback (so docs/config/other code remain searchable).
 EXTENSION_TO_LANGUAGE = {
     ".py": "python",
     ".pyi": "python",
@@ -24,7 +21,6 @@ EXTENSION_TO_LANGUAGE = {
     ".go": "go",
     ".rs": "rust",
     ".java": "java",
-    # Indexed with the fallback chunker:
     ".c": "c",
     ".h": "c",
     ".cpp": "cpp",
@@ -48,7 +44,6 @@ EXTENSION_TO_LANGUAGE = {
     ".json": "json",
     ".cfg": "ini",
     ".ini": "ini",
-    # Common markup/web/config text — searchable in most repos, line-window chunked.
     ".xml": "xml",
     ".html": "html",
     ".htm": "html",
@@ -61,8 +56,7 @@ EXTENSION_TO_LANGUAGE = {
     ".gradle": "gradle",
 }
 
-# Well-known text files that have no (or an unconventional) extension. Matched on the
-# lowercased file *name* when the extension lookup misses.
+# Well-known text files without a conventional extension, matched on the lowercased name.
 FILENAME_TO_LANGUAGE = {
     "dockerfile": "dockerfile",
     "makefile": "make",
@@ -76,19 +70,12 @@ FILENAME_TO_LANGUAGE = {
 }
 
 
-def detect_language(path: str | Path, *, all_text: bool = False) -> str | None:
-    """Return the language for ``path``, or ``None`` if it should not be indexed.
+def detect_language(path: str | Path) -> str:
+    """Return the chunking language for ``path``; unrecognized files are plain ``"text"``."""
 
-    With ``all_text=True`` any unrecognized file is treated as plain ``"text"`` so a whole
-    directory (docs, notes, config) becomes searchable, not just code. Binary files are
-    still rejected later by the indexer's NUL-byte sniff, so this stays safe.
-    """
     p = Path(path)
-    lang = EXTENSION_TO_LANGUAGE.get(p.suffix.lower())
-    if lang:
-        return lang
-    lang = FILENAME_TO_LANGUAGE.get(p.name.lower())
-    if lang:
-        return lang
-    return "text" if all_text else None
-
+    return (
+        EXTENSION_TO_LANGUAGE.get(p.suffix.lower())
+        or FILENAME_TO_LANGUAGE.get(p.name.lower())
+        or "text"
+    )

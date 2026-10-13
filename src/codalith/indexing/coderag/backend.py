@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import importlib
 import json
 import os
 import shutil
@@ -25,8 +24,8 @@ from codalith.errors import (
     RetrievalError,
 )
 from codalith.indexing.leases import GenerationLeases
-from codalith.semantic.api import SemanticEngine
 from codalith.semantic.config import Config
+from codalith.semantic.engine import SemanticEngine
 
 _STORE_PROVENANCE_FILE = "meta.json"
 _CODERAG_BINARY_SNIFF_BYTES = 8192
@@ -252,9 +251,7 @@ def prepare_semantic_index(
             )
             view_root = Path(source_view.name)
             _materialize_source_view(corpus.source_root, view_root, tuple(indexed_files))
-            engine = SemanticEngine(
-                coderag_config(corpus, store_dir, policy, source_view=view_root)
-            )
+            engine = SemanticEngine(coderag_config(corpus, store_dir, policy))
         else:
             engine = _open_verified_engine(
                 coderag_config(corpus, store_dir, policy),
@@ -262,7 +259,7 @@ def prepare_semantic_index(
             )
         try:
             if mode == "build":
-                engine.index(full=True)
+                engine.index(view_root)
             status = engine.status()
             stored = _stored_file_hashes(engine)
         except Exception as exc:
@@ -333,13 +330,6 @@ def _validate_semantic_request(
 ) -> None:
     if mode not in {"build", "adopt"}:
         raise ValueError("Semantic mode must be build or adopt")
-    if corpus.embedding_provider == "openai":
-        try:
-            importlib.import_module("openai")
-        except ModuleNotFoundError as exc:
-            raise IndexBuildError(
-                "OpenAI embeddings require the openai package"
-            ) from exc
     if mode == "adopt":
         if store_dir is None:
             raise IndexBuildError("Semantic adopt mode requires corpus.coderag_store")
@@ -414,39 +404,15 @@ def coderag_config(
     *,
     provider: str | None = None,
     model: str | None = None,
-    source_view: Path | None = None,
 ) -> Config:
-    """``source_view`` is a materialized snapshot that the engine must index without filtering."""
-
-    defaults = Config()
-    provider = provider or corpus.embedding_provider
     model = corpus.embedding_model if model is None else model
     return Config(
-        provider=provider,
-        model=model if provider == "fastembed" and model else defaults.model,
-        openai_model=(model if provider == "openai" and model else defaults.openai_model),
+        store_dir=store_dir,
+        provider=provider or corpus.embedding_provider,
+        model=model or None,
         openai_api_key=os.getenv("CODALITH_EMBEDDING_API_KEY"),
         openai_base_url=os.getenv("CODALITH_EMBEDDING_BASE_URL"),
-        cache_dir=defaults.cache_dir,
-        watched_dir=source_view or corpus.source_root,
-        store_dir=store_dir,
-        ignore_globs=(
-            ()
-            if source_view is not None
-            else tuple(dict.fromkeys([*defaults.ignore_globs, *corpus.exclude_globs]))
-        ),
-        use_gitignore=source_view is None,
-        index_all_text=source_view is not None,
         max_file_bytes=policy.max_file_bytes,
-        max_chunk_lines=defaults.max_chunk_lines,
-        window_lines=defaults.window_lines,
-        window_overlap=defaults.window_overlap,
-        top_k=defaults.top_k,
-        fetch_k=defaults.fetch_k,
-        rrf_k=defaults.rrf_k,
-        dense_weight=defaults.dense_weight,
-        lexical_weight=defaults.lexical_weight,
-        adaptive_fusion=True,
     )
 
 

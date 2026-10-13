@@ -1,7 +1,7 @@
 """Symbol extraction for non-Python languages via tree-sitter.
 
-Uses the modern ``tree_sitter`` (>=0.23) API with the official per-language grammar wheels
-(``tree_sitter_python``, ``tree_sitter_go``, ...). Parsers are cached per language. Any
+Uses the ``tree_sitter`` API with the official per-language grammar wheels
+(``tree_sitter_go``, ``tree_sitter_java``, ...). Parsers are cached per language. Any
 parse failure is the caller's cue to fall back to line windows, so a missing or broken
 grammar never breaks indexing.
 """
