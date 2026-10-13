@@ -5,7 +5,6 @@
 .vscode/mcp.json
 .serena
 .local
-external/
 .venv
 venv
 __pycache__

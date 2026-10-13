@@ -5,7 +5,6 @@
 .codex/
 .vscode/mcp.json
 .serena/
-external/
 .venv/
 venv/
 __pycache__/

@@ -54,7 +54,7 @@ include = ["codalith*"]
 addopts = "-q"
 pythonpath = ["src"]
 testpaths = ["tests"]
-norecursedirs = ["external", ".venv", "build", "dist"]
+norecursedirs = [".venv", "build", "dist"]
 
 [tool.ruff]
 line-length = 100
@@ -69,7 +69,7 @@ ignore = ["E501"]
 python_version = "3.11"
 strict = true
 mypy_path = ["src", "typings"]
-exclude = ["external/", ".venv/", "build/"]
+exclude = [".venv/", "build/"]
 
 [[tool.mypy.overrides]]
 module = ["tests.*"]
