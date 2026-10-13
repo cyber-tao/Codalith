@@ -67,6 +67,7 @@ def get_provider(config: Config) -> EmbeddingProvider:
             model=config.model or DEFAULT_MODEL,
             api_key=config.openai_api_key,
             base_url=config.openai_base_url,
+            batch_size=config.embed_batch_size,
         )
     raise ValueError(
         f"Unknown embedding provider {config.provider!r}. "

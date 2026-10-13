@@ -44,6 +44,17 @@ uv run codalith client-config --client codex --transport http
 
 Only one build per index root runs at a time; a second build fails immediately while `.build.lock` is held.
 
+For a fresh local Ollama build, use an installed `qwen3-embedding` model through its OpenAI-compatible `/v1` endpoint. The 4B model produces 2560-dimensional vectors. Create a local model alias with `num_ctx=32768` before using that endpoint, because its OpenAI interface cannot set the context size per request. Set the Compose base URL to `http://host.docker.internal:11434/v1`; host-side builds use `http://127.0.0.1:11434/v1`. Leave the API key empty for the local service. Pin the UE Git tag's resolved commit in `CODALITH_UE_SOURCE_REVISION` and export its selected source to a separate local directory instead of changing an unrelated checkout.
+
+Override the indexing service's adoption command when rebuilding vectors:
+
+```bash
+docker compose --profile ue run --rm index-ue index build --corpus ue-5.7.4 --semantic build
+docker compose --profile ue up -d mcp-http-ue
+```
+
+The indexer streams files into bounded batches shared across files. Semantic chunks also have an 8000-byte UTF-8 input limit, preserving source line references while splitting long lines when necessary. Qwen3 queries receive a general retrieval instruction; documents remain unprefixed. Semantic engine version 1.1.0 invalidates earlier generations for these input changes. Verify unusually dense numeric chunks with Ollama's native `truncate=false` preflight before a large build, then confirm the OpenAI endpoint reports the same token count.
+
 ## Diagnostics
 
 ```bash

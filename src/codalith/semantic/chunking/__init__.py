@@ -39,7 +39,11 @@ def chunk_file(text: str, language: str, config: Config) -> list[Chunk]:
         )
         spans = []
 
-    return base.build_chunks(text, language, spans, config)
+    return [
+        bounded
+        for chunk in base.build_chunks(text, language, spans, config)
+        for bounded in base.limit_chunk_bytes(chunk)
+    ]
 
 
 __all__ = ["chunk_file", "languages"]

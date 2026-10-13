@@ -15,6 +15,7 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
 from codalith.benchmarks.models import BenchmarkCase, BenchmarkReport, BenchmarkRow
+from codalith.query.models import ReadResponse, SearchHit
 
 
 def load_dataset(path: str | Path) -> list[BenchmarkCase]:
@@ -96,10 +97,10 @@ async def _run_mcp_benchmark(
                         BenchmarkRow(
                             id=case.id,
                             latency_ms=(time.perf_counter() - started) * 1000,
-                            file_recall_at_5=None,
-                            reciprocal_rank=None,
-                            ndcg_at_10=None,
-                            symbol_recall_at_5=None,
+                            file_recall_at_5=0.0 if case.expected_files else None,
+                            reciprocal_rank=0.0 if case.expected_files else None,
+                            ndcg_at_10=0.0 if case.expected_files else None,
+                            symbol_recall_at_5=0.0 if case.expected_symbols else None,
                             citation_valid=False,
                             degraded=True,
                             negative_passed=False if case.negative else None,
@@ -129,16 +130,28 @@ async def _call(
 
 async def _validate_citations(session: ClientSession, hits: list[object]) -> bool:
     for raw in hits:
-        if not isinstance(raw, dict) or not isinstance(raw.get("uri"), str):
+        try:
+            hit = SearchHit.model_validate(raw)
+        except ValueError:
             return False
-        payload = await _call(session, "codalith_read", {"uri": raw["uri"]})
+        payload = await _call(session, "codalith_read", {"uri": hit.uri})
+        try:
+            source = ReadResponse.model_validate(payload)
+        except ValueError:
+            return False
         if (
-            payload.get("uri") != raw["uri"]
-            or payload.get("generation_id") != raw.get("generation_id")
-            or payload.get("stale")
+            source.uri != hit.uri
+            or source.corpus_id != hit.corpus_id
+            or source.revision != hit.revision
+            or source.generation_id != hit.generation_id
+            or source.path != hit.path
+            or source.start_line != hit.start_line
+            or source.end_line != hit.end_line
+            or source.stale
+            or source.sha256 != source.indexed_sha256
+            or len(source.sha256) != 64
+            or any(character not in "0123456789abcdef" for character in source.sha256)
         ):
-            return False
-        if not isinstance(payload.get("sha256"), str):
             return False
     return True
 
@@ -155,11 +168,14 @@ def _score_case(
         for raw in hits
         if isinstance(raw, dict) and isinstance(raw.get("path"), str)
     ])
-    symbols = _unique_ranked([
-        raw["symbol"]
+    symbol_hits = list(dict.fromkeys(
+        (raw["path"], raw["symbol"])
         for raw in hits
-        if isinstance(raw, dict) and isinstance(raw.get("symbol"), str)
-    ])
+        if isinstance(raw, dict)
+        and isinstance(raw.get("path"), str)
+        and isinstance(raw.get("symbol"), str)
+    ))
+    symbols = _unique_ranked([symbol for _, symbol in symbol_hits])
     if case.negative:
         negative_passed = not hits
         file_recall = reciprocal_rank = ndcg = symbol_recall = None
@@ -168,7 +184,7 @@ def _score_case(
         file_recall = _recall(files[:5], case.expected_files)
         reciprocal_rank = _reciprocal_rank(files, case.expected_files)
         ndcg = _ndcg(files[:10], case.expected_files)
-        symbol_recall = _symbol_recall(symbols[:5], case.expected_symbols)
+        symbol_recall = _symbol_recall(symbol_hits[:5], case.expected_symbols, case.expected_files)
     return BenchmarkRow(
         id=case.id,
         latency_ms=latency_ms,
@@ -276,14 +292,16 @@ def _ndcg(ranked: list[str], relevant: list[str]) -> float | None:
     return dcg / ideal if ideal else 0.0
 
 
-def _symbol_recall(ranked: list[str], relevant: list[str]) -> float | None:
+def _symbol_recall(
+    ranked: list[tuple[str, str]], relevant: list[str], expected_files: list[str]
+) -> float | None:
     if not relevant:
         return None
-    normalized = {item.casefold() for item in ranked}
+    wanted_files = set(expected_files)
+    names = {symbol for path, symbol in ranked if not wanted_files or path in wanted_files}
     found = 0
     for expected in set(relevant):
-        folded = expected.casefold()
-        if any(item == folded or item.endswith(f"::{folded}") or item.endswith(f".{folded}") for item in normalized):
+        if any(item == expected or item.endswith(f"::{expected}") or item.endswith(f".{expected}") for item in names):
             found += 1
     return found / len(set(relevant))
 

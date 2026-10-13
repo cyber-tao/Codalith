@@ -7,6 +7,6 @@ LanceDB or an embedding model.
 
 # Raising ENGINE_VERSION invalidates every semantic generation; bump it whenever chunking,
 # embedding input, or the store layout changes.
-ENGINE_VERSION = "1.0.0"
+ENGINE_VERSION = "1.1.0"
 
 __all__ = ["ENGINE_VERSION"]

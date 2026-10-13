@@ -11,10 +11,88 @@ they discover spans.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from codalith.semantic.config import Config
 from codalith.semantic.types import Chunk
+
+MAX_CHUNK_BYTES = 8_000
+
+
+def limit_chunk_bytes(chunk: Chunk) -> list[Chunk]:
+    """Bound UTF-8 inputs without discarding text or changing source coordinates."""
+    if len(chunk.text.encode("utf-8")) <= MAX_CHUNK_BYTES:
+        return [chunk]
+
+    result: list[Chunk] = []
+    block: list[str] = []
+    block_bytes = 0
+    block_start = chunk.start_line
+    block_end = chunk.start_line
+    lines = split_lines(chunk.text)
+    for offset, line in enumerate(lines):
+        line_number = chunk.start_line + offset
+        if offset < len(lines) - 1:
+            line += "\n"
+        line_bytes = len(line.encode("utf-8"))
+        if block and block_bytes + line_bytes > MAX_CHUNK_BYTES:
+            result.append(
+                replace(
+                    chunk,
+                    text="".join(block),
+                    start_line=block_start,
+                    end_line=block_end,
+                )
+            )
+            block = []
+            block_bytes = 0
+        if line_bytes > MAX_CHUNK_BYTES:
+            result.extend(_split_long_line(chunk, line, line_number))
+            continue
+        if not line and not block:
+            continue
+        if not block:
+            block_start = line_number
+        block.append(line)
+        block_end = line_number
+        block_bytes += line_bytes
+    if block:
+        result.append(
+            replace(
+                chunk,
+                text="".join(block),
+                start_line=block_start,
+                end_line=block_end,
+            )
+        )
+    return result
+
+
+def _split_long_line(chunk: Chunk, line: str, line_number: int) -> list[Chunk]:
+    result: list[Chunk] = []
+    ending = "\n" if line.endswith("\n") else ""
+    body = line[:-1] if ending else line
+    byte_limit = MAX_CHUNK_BYTES - len(ending)
+    start = 0
+    size = 0
+    for offset, character in enumerate(body):
+        character_bytes = len(character.encode("utf-8"))
+        if size + character_bytes > byte_limit:
+            result.append(
+                replace(
+                    chunk,
+                    text=body[start:offset],
+                    start_line=line_number,
+                    end_line=line_number,
+                )
+            )
+            start = offset
+            size = 0
+        size += character_bytes
+    result.append(
+        replace(chunk, text=body[start:] + ending, start_line=line_number, end_line=line_number)
+    )
+    return result
 
 
 def split_lines(text: str) -> list[str]:

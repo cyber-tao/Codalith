@@ -221,12 +221,21 @@ class LanceStore:
         import numpy as np
 
         with self._lock:
-            added = 0
-            if chunks and vectors is not None:
+            mat = None
+            if chunks:
+                if vectors is None:
+                    raise SemanticStoreError(f"Missing chunk vectors for {rel}")
                 mat = np.ascontiguousarray(vectors, dtype="float32")
+                expected_shape = (len(chunks), self.provenance.dimension)
+                if mat.shape != expected_shape or not np.isfinite(mat).all():
+                    raise SemanticStoreError(
+                        f"Invalid chunk vectors for {rel}: expected finite {expected_shape}"
+                    )
+            added = 0
+            if mat is not None:
                 norms = np.linalg.norm(mat, axis=1, keepdims=True)
                 mat = mat / np.where(norms == 0.0, 1.0, norms)
-                for chunk, vec in zip(chunks, mat, strict=False):
+                for chunk, vec in zip(chunks, mat, strict=True):
                     self._chunks_buf.append(
                         {
                             "id": self._next_id,
