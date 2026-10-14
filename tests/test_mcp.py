@@ -138,6 +138,42 @@ async def _exercise_http_contract(endpoint: str) -> None:
             )
             assert not context.isError
             assert context.structuredContent["sources"]  # type: ignore[index]
+            source = context.structuredContent["sources"][0]  # type: ignore[index]
+            source_read = await session.call_tool("codalith_read", {"uri": source["uri"]})
+            assert not source_read.isError
+            evidence = source_read.structuredContent
+            assert evidence is not None
+            assert (evidence["uri"], evidence["text"], evidence["sha256"]) == (
+                source["uri"],
+                source["text"],
+                source["sha256"],
+            )
+            assert evidence["generation_id"] == source["generation_id"]
+
+            symbols = await session.call_tool(
+                "codalith_symbol", {"query": "CachedValue", "target": "sample"}
+            )
+            assert not symbols.isError
+            definition = symbols.structuredContent["definitions"][0]  # type: ignore[index]
+            symbol_read = await session.call_tool(
+                "codalith_read", {"uri": definition["uri"]}
+            )
+            assert symbol_read.isError
+            assert symbol_read.structuredContent["error"]["code"] == "invalid_uri"  # type: ignore[index]
+            definition_read = await session.call_tool(
+                "codalith_read", {"uri": definition["source_uri"]}
+            )
+            assert not definition_read.isError
+
+            requested_uri = source["uri"].split("#", 1)[0] + "#L1-L200"
+            expanded = await session.call_tool("codalith_read", {"uri": requested_uri})
+            assert not expanded.isError
+            actual = expanded.structuredContent
+            assert actual is not None
+            assert actual["end_line"] == actual["total_lines"] < 200
+            assert actual["uri"] != requested_uri
+            repeated = await session.call_tool("codalith_read", {"uri": actual["uri"]})
+            assert repeated.structuredContent == actual
             invalid = await session.call_tool(
                 "codalith_status",
                 {"unexpected": True},

@@ -4,6 +4,14 @@ Both transports use the official Python MCP SDK and the same strict Pydantic sch
 
 Every tool resolves each target corpus to one generation for the whole call. Paths denied by the source policy are withheld from every output and counted in `warnings`.
 
+## Agent workflow and citations
+
+Install the `codalith-source` skill for retrieval choices and evidence boundaries; the MCP tool schemas remain the executable contract. Server initialization lists registered corpus revisions, workspaces, and the default target. Registration does not mean an index is ready. Check `codalith_status` when target/version or readiness is uncertain, rather than before every request, and select the requested target explicitly.
+
+Use context text directly when it is sufficient, current, and hash-matched. Use search/symbol results for discovery, then read only the missing implementation. Stop when the question is answered or needs runtime evidence. Static call/reference evidence cannot enumerate a running process's callback registrations, registration history, or execution order.
+
+Source citations use the exact returned `codalith://<corpus>/source/<path>#Lx-Ly` URI. A symbol's `uri` identifies the symbol; its `source_uri` locates source. Symbol/status/bare corpus URIs are not source citations. To cite a different range, request it through `codalith_read`, then cite the response's actual URI rather than the requested URI: ranges can be shortened at the end of a file. Keep the accompanying revision/generation provenance, check warnings/stale/truncation, and do not combine different generations into one verified snapshot.
+
 ## Tools
 
 ### `codalith_search`
@@ -25,9 +33,9 @@ Returns non-overlapping source spans with current/indexed hashes, stale/decoding
 
 ### `codalith_read`
 
-Input: one canonical `codalith://<corpus>/source/<path>#Lx-Ly` URI. Ranges always use both bounds; a single line is `#L5-L5`.
+Input: one canonical `codalith://<corpus>/source/<path>` URI, optionally with a `#Lx-Ly` range. Ranges always use both bounds; a single line is `#L5-L5`. Without a range, the source policy's default line limit applies. Symbol URIs are invalid for this tool.
 
-The path must exist in the active structural generation. The response includes the `generation_id` it was verified against, the actual canonical range, total lines, text, both hashes, and stale state.
+The path must exist in the active structural generation. The response includes the `generation_id` it was verified against, the actual canonical range, total lines, text, both hashes, and stale state. The returned URI always identifies the actual range; use it unchanged as the citation.
 
 ### `codalith_symbol`
 

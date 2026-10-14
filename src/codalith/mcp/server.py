@@ -156,11 +156,24 @@ def build_instructions(service: QueryService) -> str:
     corpora = ", ".join(
         f"{item.corpus_id} ({item.revision})" for item in service.registry.corpora.values()
     )
+    workspaces = ", ".join(
+        f"{item.workspace_id} [{', '.join(item.corpus_ids)}]"
+        for item in service.registry.workspaces.values()
+    )
     return (
         "Codalith provides version-pinned source evidence for AI coding agents. "
-        f"Available corpora: {corpora}. Use codalith_context for implementation questions, "
-        "codalith_search for discovery, and codalith_read for exact cited ranges. "
-        "Every source result carries a codalith:// URI, revision, and generation id."
+        f"Registered corpora: {corpora}. Registered workspaces: {workspaces or 'none'}. "
+        f"Default target: {service.registry.default_target}. Registration is not readiness; "
+        "use codalith_status when target/version or index state is uncertain, not before "
+        "every query. Pass the requested target explicitly. Use codalith_context for "
+        "bounded implementation evidence, codalith_symbol for known identifiers, and "
+        "codalith_search for discovery. Reuse sufficient returned text without redundant "
+        "reads. Cite returned codalith:// source URIs exactly; symbol/status/corpus URIs "
+        "are not source citations. For a new line range, call codalith_read and cite its "
+        "returned URI. Check revision, generation, warnings, stale and truncated state. "
+        "Static source and graph edges do not establish a running process's callback "
+        "membership, registration history or execution order. Stop when the evidence "
+        "answers the question or the remaining fact requires runtime evidence."
     )
 
 

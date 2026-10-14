@@ -1,25 +1,27 @@
 ---
 name: codalith-source
-description: Use Codalith MCP to retrieve and cite versioned, indexed source for implementation questions, symbol discovery, and code relationships. Apply when source evidence is needed from an available corpus; skip ordinary tasks that do not need source inspection.
+description: Retrieve and cite versioned source through Codalith MCP for implementation questions, symbol discovery, and code relationships. Use when a task needs indexed source evidence; skip ordinary tasks without source inspection.
 ---
 
 # Codalith source evidence
 
-Use the existing Codalith MCP tools. Select the indexed corpus or workspace matching the requested project and version, and pass `target` explicitly where supported. Available corpora are described by the server. Use `codalith_status` when readiness, revision, or target selection is uncertain; reuse that information while it remains applicable.
+Use the existing Codalith MCP tools and pass the matching project/version `target` explicitly where supported. The server lists registered corpora and workspaces; registration does not establish index readiness. Use `codalith_status` only when readiness, revision, or target selection is uncertain, and reuse its result while applicable. If the requested version is unavailable, state the limitation instead of substituting another version's implementation.
 
 Choose the tool that supplies the missing evidence; these are alternatives, not a mandatory sequence:
 
-- **Implementation or behavior questions:** Prefer `codalith_context`, which retrieves source and compiles a bounded context pack in one call. An initial request often needs only 3-5 spans and 6,000-10,000 characters, such as `max_spans=4, max_chars=8000`. Adjust to the question and returned truncation rather than treating these as fixed limits.
-- **Known identifiers:** Use `codalith_symbol` for definitions and canonical symbol URIs. Start with an exact name; use fuzzy lookup or broader discovery when needed.
-- **Discovery:** Use `codalith_search` with `auto` for mixed discovery or `semantic` for conceptual descriptions. Use `text` for the complete literal string being sought, not a natural-language question. Request a small result set first.
-- **Additional source:** Use `codalith_read` for an exact range that is missing, abbreviated, or truncated. Reuse returned canonical source URIs with `#Lx-Ly` ranges. Fresh, matching-hash context spans already provide verified source; do not read the same span again merely to verify it.
-- **Relationships:** Use `codalith_graph` with a returned symbol URI when callers, callees, or related symbols matter. Start with the relevant direction and a shallow depth; expand only a useful branch.
-- **Version differences:** Use `codalith_compare` only when both requested versions have indexed corpora. Its structural comparison does not establish runtime equivalence.
+- **Implementation:** Prefer `codalith_context` for retrieval plus source text. Start with a bounded pack, for example `max_spans=4, max_chars=8000`; adjust to missing evidence and truncation.
+- **Known identifier:** Use `codalith_symbol` for definitions and their `source_uri`; exact lookup first.
+- **Discovery:** Use `codalith_search` with `auto` or conceptual `semantic`. Use `text` for the complete literal string, not a question. Start with a small result set.
+- **Missing source:** Use `codalith_read` when a snippet or span omits the relevant implementation. Fresh matching-hash context text already supplies verified evidence; do not mechanically reread it.
+- **Relationships:** Use `codalith_graph` with a returned symbol URI. Expand a shallow, relevant branch only when it can answer a remaining question.
+- **Versions:** Use `codalith_compare` when both versions are indexed; its structural differences do not establish runtime equivalence.
 
-Ground conclusions in the returned source text. Cite the relevant canonical URI and range, and retain revision and generation information when identifying the evidence. Distinguish an observed declaration or implementation from an inferred runtime effect. Stop retrieving once the evidence answers the question; fetch only the specific missing part when it does not.
+Ground each implementation claim in returned source text. Copy an issued `codalith://<corpus>/source/<path>#Lx-Ly` URI exactly when citing; `symbol/...`, status, and bare corpus URIs are identifiers, not source citations. To cite a narrower or wider range, request it with `codalith_read` first and use the response's actual URI. Do not invent or edit citation line ranges. Keep revision/generation provenance when identifying the snapshot.
 
-Inspect `degraded`, `warnings`, `stale`, decoding state, and `truncated` before relying on a result. Explain material coverage gaps. Do not present stale source or results from different generations as one verified snapshot. Each call is generation-consistent; separate calls may observe a newly published generation.
+Stop when the evidence answers the question. If static source cannot establish a runtime fact, explain that boundary rather than expanding searches indefinitely: a call site or delegate declaration does not enumerate callbacks registered in a running process, their registration history, or their execution order. Separate visible code order from runtime assumptions.
 
-An empty symbol lookup does not prove absence: macros, generated declarations, or partial parsing can limit structural extraction. A graph's `name_match` is name-based evidence; `ambiguous` and `unresolved` edges do not establish resolved calls. Truncated results do not establish exhaustive coverage.
+Check `degraded`, `warnings`, `stale`, decoding state, and `truncated`; explain material gaps. Each call is generation-consistent, but separate calls can observe a new generation. Do not merge stale or different-generation evidence into one verified snapshot.
 
-For unavailable or invalid indexes, report the affected target and limitation. Use retryable errors to decide whether a focused retry is useful. Querying does not authorize building or rebuilding indexes, changing configuration, or opening database files directly. Do not run deep doctor routinely; it is an explicit diagnostic operation, not a prerequisite for source questions.
+An empty symbol lookup does not prove API absence: macros, generated declarations, or partial parsing can limit extraction. Use focused text/context evidence if absence matters, and qualify the checked scope. Graph `name_match` is name-based evidence; `ambiguous` or `unresolved` edges do not prove resolved calls. Truncated results are not exhaustive.
+
+Report unavailable or invalid indexes and retry only when the error makes a focused retry useful. Source queries do not authorize rebuilding indexes, changing configuration, or opening databases directly. Deep doctor is an explicit diagnostic operation, not a routine prerequisite.
