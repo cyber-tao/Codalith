@@ -173,7 +173,9 @@ def build_instructions(service: QueryService) -> str:
         "returned URI. Check revision, generation, warnings, stale and truncated state. "
         "Static source and graph edges do not establish a running process's callback "
         "membership, registration history or execution order. Stop when the evidence "
-        "answers the question or the remaining fact requires runtime evidence."
+        "answers the question or the remaining fact requires runtime evidence. "
+        "Keep the answer to supported claims needed for the question; a valid URI alone "
+        "does not prove a claim or an exhaustive always/never assertion."
     )
 
 

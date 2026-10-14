@@ -18,6 +18,8 @@ Choose the tool that supplies the missing evidence; these are alternatives, not 
 
 Ground each implementation claim in returned source text. Copy an issued `codalith://<corpus>/source/<path>#Lx-Ly` URI exactly when citing; `symbol/...`, status, and bare corpus URIs are identifiers, not source citations. To cite a narrower or wider range, request it with `codalith_read` first and use the response's actual URI. Do not invent or edit citation line ranges. Keep revision/generation provenance when identifying the snapshot.
 
+Answer the requested facts first and omit optional implementation details unless the retrieved spans establish them. A valid URI does not prove its attached claim. Before asserting "only", "always", or "never", check whether unexamined paths or shared/enclosing state could change the result; otherwise qualify the conclusion.
+
 Stop when the evidence answers the question. If static source cannot establish a runtime fact, explain that boundary rather than expanding searches indefinitely: a call site or delegate declaration does not enumerate callbacks registered in a running process, their registration history, or their execution order. Separate visible code order from runtime assumptions.
 
 Check `degraded`, `warnings`, `stale`, decoding state, and `truncated`; explain material gaps. Each call is generation-consistent, but separate calls can observe a new generation. Do not merge stale or different-generation evidence into one verified snapshot.

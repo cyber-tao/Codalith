@@ -102,7 +102,7 @@ sh ./install.sh --agent codex --agent claude --scope project --project "/path/to
 
 When `--scope project` omits `--project`, the current working directory is the target project. The checkout containing the installer does not need to be the target project. `--home PATH` selects an isolated user-home root and ignores host path overrides and executable-based automatic detection; it does not change the shell's environment variables. Use explicit `--agent` values to populate a new isolated home.
 
-Use `--agent all` to select every supported integration deliberately. Without it, automatic discovery avoids creating configuration directories for Agent applications that are not detected. An unsupported scope or no detected client is an actionable error; use an explicit supported `--agent` rather than treating an empty installation as success.
+Use `--agent all` to select every supported integration deliberately; in project scope this selects the six clients with project MCP support and omits user-only Windsurf. Without it, automatic discovery avoids creating configuration directories for Agent applications that are not detected. An explicitly selected unsupported scope or no detected client is an actionable error; use an explicit supported `--agent` rather than treating an empty installation as success.
 
 Repeated installation is idempotent. Matching skill content and MCP entries are left unchanged. Conflicting existing `codalith` entries or modified skill files stop installation; inspect the dry run and use `--replace` only when you intend to replace those Codalith-owned values. Other server entries and unrelated settings are retained.
 
