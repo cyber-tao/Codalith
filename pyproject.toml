@@ -50,6 +50,9 @@ default = true
 where = ["src"]
 include = ["codalith*"]
 
+[tool.setuptools.data-files]
+"share/codalith/skills/codalith-source" = ["skills/codalith-source/SKILL.md"]
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]

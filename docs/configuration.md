@@ -51,6 +51,6 @@ Patterns follow the same matching rules and are checked case-insensitively at in
 
 Compose sets the in-container registry, source policy, and listen host itself. `CODALITH_REGISTRY` and `CODALITH_SOURCE_POLICY` select the TOML files for direct local commands, and `CODALITH_DASHBOARD_DIR` points the HTTP server at prebuilt dashboard assets.
 
-The application does not mutate `.env` or client configuration. Docker Compose loads `.env`; direct local commands require the relevant variables in the process environment.
+Runtime commands do not mutate `.env` or client configuration. The explicit agent installer merges only the selected MCP configurations and skill paths, with backups; see [Installation](installation.md). Docker Compose loads `.env`; direct local commands require the relevant variables in the process environment.
 
 Never commit `.env`, mounted source, generated indexes, reports, or credentials.

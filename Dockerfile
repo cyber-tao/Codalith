@@ -21,6 +21,9 @@ WORKDIR /opt/codalith
 
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
+COPY skills ./skills
+COPY scripts ./scripts
+COPY install.sh install.ps1 ./
 COPY configs ./configs
 COPY fixtures ./fixtures
 COPY benchmarks ./benchmarks

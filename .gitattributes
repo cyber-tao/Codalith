@@ -8,5 +8,7 @@
 *.jsonl text eol=lf
 *.md text eol=lf
 *.sql text eol=lf
+*.sh text eol=lf
+*.ps1 text eol=lf
 .env.example text eol=lf
 Dockerfile text eol=lf

@@ -4,6 +4,8 @@
 
 Codalith 是为 Claude Code、Codex 等 AI 编程工具提供源码查询能力的本地优先 MCP 服务。它把不可变的 SQLite 结构索引与混合语义检索结合起来，通过官方 MCP 协议返回有范围限制、可校验哈希的源码证据。
 
+推荐搭配内置的 `codalith-source` skill 使用：skill 指导工具选择与证据核验，MCP 提供带版本的真实源码。
+
 核心框架不绑定领域。当前 Python、C# 与 C++/Unreal Engine 提供结构化适配器；其他文本语料可使用通用适配器，但不会伪造符号能力。
 
 ## 核心保证
@@ -25,7 +27,35 @@ Codalith 不是托管式多租户网关，因此不再包含鉴权、RBAC、审�
 - [Bun](https://bun.sh/)（可选，用于本地构建运维面板）
 - Docker Compose（可选）
 
-## 快速开始
+## 一键安装 skill 并配置 Agent
+
+在源码仓库中执行一条命令，即可接入已有服务：
+
+```powershell
+# Windows
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+```bash
+# macOS / Linux
+sh ./install.sh
+```
+
+安装器只需要 `uv` 或 Python 3.11+，不需要先安装 embedding 环境或运行 `uv sync`。它自动检测支持的 Agent，安装 skill，合并 `codalith` MCP 配置，并验证 `http://127.0.0.1:8765/mcp` 服务。已有配置会保留，修改前会创建备份。可以用 `--agent codex --agent claude` 明确选择客户端，或用 `--dry-run` 离线预览。
+
+首次试用时，加上 `--start-service sample` 即可在同一条命令中启动 Docker Compose、构建演示索引并安装客户端集成：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 --start-service sample
+```
+
+```bash
+sh ./install.sh --start-service sample
+```
+
+项目级安装、支持的 Agent、复用 UE 索引、备份与验证方式见 [跨平台安装文档](docs/installation.md)。
+
+## 手动启动服务
 
 ```bash
 uv sync --frozen --extra dev
@@ -106,6 +136,7 @@ uv run codalith benchmark \
 
 ## 进一步文档
 
+- [跨平台 skill + MCP 安装](docs/installation.md)
 - [架构与不变量](docs/architecture.md)
 - [配置](docs/configuration.md)
 - [MCP API](docs/mcp-api.md)

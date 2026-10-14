@@ -58,6 +58,14 @@ def _dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         return _claude_agent_benchmark(args)
     if args.command == "client-config":
         return _client_config(args)
+    if args.command == "install-agents":
+        from codalith.install.__main__ import error_message, run_from_args
+
+        try:
+            return run_from_args(args)
+        except (OSError, ValueError) as exc:
+            print(error_message(exc), file=sys.stderr)
+            return 2
     registry = CorpusRegistry.from_file(args.registry)
     policy = SourcePolicy.from_file(args.policy)
     if args.command == "serve":
@@ -324,6 +332,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--registry", default=_DEFAULT_REGISTRY)
     parser.add_argument("--policy", default=_DEFAULT_POLICY)
     subparsers = parser.add_subparsers(dest="command")
+    from codalith.install.__main__ import add_arguments
+
+    add_arguments(subparsers.add_parser("install-agents", help="Install native skill and configure agent MCP clients"))
 
     serve = subparsers.add_parser("serve", help="Run the MCP server")
     serve.add_argument("--transport", choices=("stdio", "http"), default="stdio")

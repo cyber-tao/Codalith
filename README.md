@@ -4,6 +4,8 @@
 
 Codalith is a local-first MCP source-intelligence service for AI coding agents. It combines an immutable SQLite structural index with hybrid semantic retrieval, then returns bounded, hash-verified source evidence through the official MCP protocol.
 
+Use the bundled `codalith-source` skill together with MCP: the skill guides tool selection and evidence checking, while MCP supplies versioned source text.
+
 The core is language-neutral. Python, C#, and C++/Unreal Engine have structural adapters today; other text corpora can use the generic adapter without pretending to provide symbols.
 
 ## What it guarantees
@@ -25,7 +27,35 @@ Codalith is not a hosted multi-tenant gateway. Authentication, RBAC, audit datab
 - [Bun](https://bun.sh/) (optional, to build the operations dashboard locally)
 - Docker Compose (optional)
 
-## Quick start
+## Install the skill and connect your agents
+
+From a source checkout, connect supported agents to an existing service with one command:
+
+```powershell
+# Windows
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+```bash
+# macOS / Linux
+sh ./install.sh
+```
+
+The installer needs only `uv` or Python 3.11+, without an embedding environment or `uv sync`. It detects supported agents, installs the skill, merges the `codalith` MCP configuration, and checks the service at `http://127.0.0.1:8765/mcp`. Existing configuration is preserved and changed files are backed up. Use `--agent codex --agent claude` to select clients explicitly, or `--dry-run` to preview offline.
+
+For a new sample service, add `--start-service sample`; this starts Docker Compose, builds the demo index, and then installs the client integration:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 --start-service sample
+```
+
+```bash
+sh ./install.sh --start-service sample
+```
+
+See [cross-platform installation](docs/installation.md) for project scope, supported agents, existing UE indexes, backups, and validation.
+
+## Start a service manually
 
 ```bash
 uv sync --frozen --extra dev
@@ -106,6 +136,7 @@ uv run codalith benchmark \
 
 ## Documentation
 
+- [Cross-platform skill + MCP installation](docs/installation.md)
 - [Architecture and invariants](docs/architecture.md)
 - [Configuration](docs/configuration.md)
 - [MCP API](docs/mcp-api.md)

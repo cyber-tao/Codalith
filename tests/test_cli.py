@@ -37,6 +37,14 @@ def test_version_and_http_client_config_do_not_require_local_config(
     assert payload["mcpServers"]["codalith"]["url"] == "http://127.0.0.1:8765/mcp"
 
 
+def test_agent_install_cli_does_not_require_local_registry(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    assert main(["install-agents", "--agent", "codex", "--home", str(tmp_path / "user"), "--no-probe"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "installed" and result["agents"][0]["agent"] == "codex"
+    assert (tmp_path / "user/.agents/skills/codalith-source/SKILL.md").is_file()
+
+
 def test_stdio_client_config_is_independent_of_client_working_directory(
     semantic_environment: TestEnvironment,
     capsys,
