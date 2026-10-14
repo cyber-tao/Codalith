@@ -52,6 +52,10 @@ def _dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         return _benchmark(args)
     if args.command == "agent-benchmark":
         return _agent_benchmark(args)
+    if args.command == "native-agent-benchmark":
+        return _native_agent_benchmark(args)
+    if args.command == "claude-agent-benchmark":
+        return _claude_agent_benchmark(args)
     if args.command == "client-config":
         return _client_config(args)
     registry = CorpusRegistry.from_file(args.registry)
@@ -225,6 +229,49 @@ def _agent_benchmark(args: argparse.Namespace) -> int:
     return 0 if report["completed"] and report["errors"] == 0 else 1
 
 
+def _native_agent_benchmark(args: argparse.Namespace) -> int:
+    from codalith.benchmarks.native_runner import run_native_agent_comparison
+
+    report = run_native_agent_comparison(
+        image=args.image,
+        model=args.model,
+        reasoning_effort=args.reasoning_effort,
+        endpoint=args.endpoint_url,
+        mcp_container=args.mcp_container,
+        auth_file=args.auth_file,
+        dataset_path=args.dataset,
+        skill_path=args.skill,
+        output_dir=args.output_dir,
+        repeats=args.repeats,
+        case_timeout_s=args.case_timeout,
+        sandbox=args.container_sandbox,
+    )
+    _print_json({
+        "completed": report["completed"],
+        "errors": report["errors"],
+        "summaries": report["summaries"],
+        "output_dir": str(Path(args.output_dir).resolve()),
+    })
+    return 0 if report["completed"] and report["errors"] == 0 else 1
+
+
+def _claude_agent_benchmark(args: argparse.Namespace) -> int:
+    from codalith.benchmarks.claude_runner import run_claude_agent_comparison
+
+    report = run_claude_agent_comparison(
+        image=args.image, model=args.model, effort=args.effort,
+        endpoint=args.endpoint_url, mcp_container=args.mcp_container,
+        settings_file=args.settings_file, dataset_path=args.dataset,
+        skill_path=args.skill, output_dir=args.output_dir,
+        repeats=args.repeats, case_timeout_s=args.case_timeout,
+    )
+    _print_json({
+        "completed": report["completed"], "errors": report["errors"],
+        "summaries": report["summaries"], "output_dir": str(Path(args.output_dir).resolve()),
+    })
+    return 0 if report["completed"] and report["errors"] == 0 else 1
+
+
 def _client_config(args: argparse.Namespace) -> int:
     if args.transport == "http":
         if args.client == "codex":
@@ -346,6 +393,43 @@ def _parser() -> argparse.ArgumentParser:
     agent_benchmark.add_argument("--timeout", type=float, default=180)
     agent_benchmark.add_argument("--seed", type=int, default=42)
     agent_benchmark.add_argument("--think", action="store_true", help="Enable the model's native reasoning mode")
+
+    native_benchmark = subparsers.add_parser(
+        "native-agent-benchmark", help="Compare native Codex MCP and skill agents in isolated containers"
+    )
+    native_benchmark.add_argument("--image", required=True)
+    native_benchmark.add_argument("--mcp-container", required=True)
+    native_benchmark.add_argument("--endpoint-url", default="http://127.0.0.1:8765/mcp")
+    native_benchmark.add_argument("--model", required=True)
+    native_benchmark.add_argument("--reasoning-effort", default="high", choices=("low", "medium", "high", "xhigh", "max", "ultra"))
+    native_benchmark.add_argument(
+        "--auth-file", type=Path,
+        default=Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))) / "auth.json",
+    )
+    native_benchmark.add_argument("--dataset", required=True)
+    native_benchmark.add_argument("--skill", required=True)
+    native_benchmark.add_argument("--output-dir", required=True)
+    native_benchmark.add_argument("--repeats", type=int, default=2)
+    native_benchmark.add_argument("--case-timeout", type=float, default=600)
+    native_benchmark.add_argument("--container-sandbox", choices=("read-only", "danger-full-access"), default="read-only")
+
+    claude_benchmark = subparsers.add_parser(
+        "claude-agent-benchmark", help="Compare native Claude Code MCP and skill agents in isolated containers"
+    )
+    claude_benchmark.add_argument("--image", required=True)
+    claude_benchmark.add_argument("--mcp-container", required=True)
+    claude_benchmark.add_argument("--endpoint-url", default="http://127.0.0.1:8765/mcp")
+    claude_benchmark.add_argument("--model", required=True)
+    claude_benchmark.add_argument("--effort", default="max", choices=("low", "medium", "high", "xhigh", "max"))
+    claude_benchmark.add_argument(
+        "--settings-file", type=Path,
+        default=Path(os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude"))) / "settings.json",
+    )
+    claude_benchmark.add_argument("--dataset", required=True)
+    claude_benchmark.add_argument("--skill", required=True)
+    claude_benchmark.add_argument("--output-dir", required=True)
+    claude_benchmark.add_argument("--repeats", type=int, default=2)
+    claude_benchmark.add_argument("--case-timeout", type=float, default=600)
 
     client = subparsers.add_parser("client-config", help="Print client configuration")
     client.add_argument("--client", choices=("codex", "claude"), required=True)

@@ -146,3 +146,55 @@ def test_agent_benchmark_passes_explicit_reasoning_and_output_budget(tmp_path: P
     ]) == 0
     assert received["think"] is True
     assert received["output_tokens"] == 3072
+
+
+@pytest.mark.parametrize("completed,errors,exit_code", [(True, 0, 0), (True, 1, 1), (False, 0, 1)])
+def test_native_agent_benchmark_does_not_require_registry(
+    tmp_path: Path, monkeypatch, capsys, completed: bool, errors: int, exit_code: int,
+) -> None:
+    from codalith.benchmarks import native_runner
+
+    monkeypatch.chdir(tmp_path)
+    received = {}
+
+    def compare(**kwargs):
+        received.update(kwargs)
+        return {"completed": completed, "errors": errors, "summaries": {}}
+
+    monkeypatch.setattr(native_runner, "run_native_agent_comparison", compare)
+    assert main([
+        "native-agent-benchmark", "--image", "sha256:test", "--mcp-container", "test-mcp",
+        "--model", "test-model", "--reasoning-effort", "ultra", "--auth-file", "existing-auth.json",
+        "--dataset", "tasks.jsonl", "--skill", "SKILL.md", "--output-dir", "results",
+    ]) == exit_code
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["completed"] is completed and payload["errors"] == errors
+    assert received["reasoning_effort"] == "ultra"
+    assert received["auth_file"] == Path("existing-auth.json")
+    assert received["repeats"] == 2 and received["case_timeout_s"] == 600
+    assert received["sandbox"] == "read-only"
+
+
+@pytest.mark.parametrize("completed,errors,exit_code", [(True, 0, 0), (True, 1, 1), (False, 0, 1)])
+def test_claude_agent_benchmark_does_not_require_registry(
+    tmp_path: Path, monkeypatch, capsys, completed: bool, errors: int, exit_code: int,
+) -> None:
+    from codalith.benchmarks import claude_runner
+
+    monkeypatch.chdir(tmp_path)
+    received = {}
+
+    def compare(**kwargs):
+        received.update(kwargs)
+        return {"completed": completed, "errors": errors, "summaries": {}}
+
+    monkeypatch.setattr(claude_runner, "run_claude_agent_comparison", compare)
+    assert main([
+        "claude-agent-benchmark", "--image", "sha256:test", "--mcp-container", "test-mcp",
+        "--model", "glm-5.3[1M]", "--settings-file", "existing-settings.json",
+        "--dataset", "tasks.jsonl", "--skill", "SKILL.md", "--output-dir", "results",
+    ]) == exit_code
+    assert json.loads(capsys.readouterr().out)["errors"] == errors
+    assert received["model"] == "glm-5.3[1M]" and received["effort"] == "max"
+    assert received["settings_file"] == Path("existing-settings.json")
+    assert received["repeats"] == 2 and received["case_timeout_s"] == 600

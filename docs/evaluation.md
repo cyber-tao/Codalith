@@ -116,3 +116,98 @@ the API's generated-token budget and counters. Keep each profile's two arms iden
 apart from skill discovery, and report profiles separately: changing both reasoning
 and output budget cannot isolate the effect of reasoning alone. Preserve failed
 primary results rather than replacing them with the supplementary run.
+
+## Native Codex comparison
+
+`native-agent-benchmark` runs the official Codex CLI in a fresh, physically isolated
+Docker container for each attempt. Both arms receive the same native model, effort,
+developer instructions, final JSON schema, and seven MCP tools. Only the skill arm
+mounts the unchanged candidate under `.agents/skills`; native discovery initially
+exposes metadata, and shell events show whether the body was actually read.
+
+```bash
+uv run codalith native-agent-benchmark \
+  --image sha256:<verified-native-cli-image> \
+  --mcp-container codalith-mcp-http-ue-1 \
+  --model gpt-6.1-sol --reasoning-effort ultra \
+  --container-sandbox danger-full-access \
+  --dataset benchmarks/datasets/ue-agent-tasks.jsonl \
+  --skill skills/codalith-source/SKILL.md \
+  --output-dir reports/ue-agent-native --repeats 2
+```
+
+The container root and workspace mounts are read-only, temporary runtime directories
+are ephemeral, and the existing authentication file is mounted read-only for Codex's
+own authentication reader. Source, index, qrels, reports, host history, and Docker
+socket are absent. Sharing the MCP container's network namespace preserves the
+original loopback endpoint. Preserve Docker's default capabilities and seccomp. The
+explicit inner `danger-full-access` profile relies on this external container
+boundary; the runner defaults to `read-only` and never falls back automatically.
+Approval is fixed to `never`; web, apps, plugins, memories, delegation, ancestor
+instructions, and bundled skills are disabled. Both arms retain the desktop native
+originator for account routing.
+
+Freeze the dataset, skill, source generation, immutable image, requested model,
+effort, configuration, schema, and ABBA/BAAB schedule before formal answers. Native
+attempts have a 600-second process deadline and no orchestrator retries or artificial
+MCP/model-call cap. This differs from the earlier local API profile; compare the two
+native arms directly. Preserve failures and unrun cases in the planned denominator.
+
+Native JSONL is retained verbatim. Deduplicate MCP and shell items by their native
+item IDs; MCP counts describe logical calls, not underlying HTTP requests. Native
+outer turns are not model-request counts. Report input, cached input, output, and
+reasoning output counters separately, leaving unavailable fields null. Cached input
+is part of input and reasoning output is part of output: total tokens are input plus
+output. Wall time covers process startup through exit, including container startup,
+skill reads, and MCP work; citation auditing is measured separately. Provider-side
+caching and internal retries may affect elapsed time and cannot be fully controlled.
+
+Apply the unchanged blinded factual rubric and citation round-trip checks. Review all
+native shell commands independently for evidence or authentication bypass, and AND
+that policy assessment with factual success. A command needing review is not itself
+a violation; partial skill reads and harmless workspace metadata reads remain valid.
+Use all attempts for the primary comparison, with the eight source tasks reported
+separately. Conditional results for activated skills are descriptive only.
+
+## Native Claude Code comparison
+
+`claude-agent-benchmark` uses the installed Claude Code version's official CLI
+package, with the user's existing gateway configuration and an explicitly selected
+model. Isolated containers run the real Claude agent loop. The runtime loader reads
+the existing settings through a read-only mount, supplies provider environment
+variables to Claude without logging or copying credentials, and applies common
+controls for both arms. No global settings are changed.
+
+```bash
+uv run codalith claude-agent-benchmark \
+  --image sha256:<verified-claude-cli-image> \
+  --mcp-container codalith-mcp-http-ue-1 \
+  --model 'glm-5.3[1M]' --effort max \
+  --dataset benchmarks/datasets/ue-agent-tasks.jsonl \
+  --skill skills/codalith-source/SKILL.md \
+  --output-dir reports/ue-agent-claude --repeats 2
+```
+
+Both arms expose the same Read and Skill built-ins and the same seven MCP tools.
+The common permission policy blocks file reads outside the isolated workspace and
+explicitly denies runtime configuration and process files. A has no candidate;
+B mounts its unchanged bytes under `.claude/skills`. Preserve normal native skill
+discovery: bare and safe modes would suppress the metadata intervention. Disable
+bundled skills, hooks, plugins, memory, delegation, and tool search; inspect native
+initialization events to verify the effective model, tools, and skills. The frozen
+prompts alone enter stdin. Shared instructions and the final JSON schema are identical.
+
+Retain raw stream-json events, including failures, permission denials, retries,
+tool-use IDs, structured output, and the final cumulative usage. Claude input usage
+differs from Codex: `input_tokens`, `cache_read_input_tokens`, and
+`cache_creation_input_tokens` are disjoint, so total input is their sum; total tokens
+add output once. Do not sum intermediate assistant usage into the final cumulative
+result. Keep missing fields unknown and separately expose partial observations.
+Client-estimated dollar costs do not establish actual GLM gateway charges.
+
+Use the same 48-attempt schedule, 600-second deadline, blinded rubric, citation
+round-trips, native tool compliance review, and all-attempt denominator. Report
+logical MCP calls separately from Skill, Read, output-format tools, and retries.
+Wall time includes CLI/container startup and tool work; citation audits are separate.
+Requested and CLI-reported model names identify the route but cannot independently
+prove the gateway's underlying model weights.
