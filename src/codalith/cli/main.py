@@ -50,6 +50,8 @@ def _dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         return 2
     if args.command == "benchmark":
         return _benchmark(args)
+    if args.command == "agent-benchmark":
+        return _agent_benchmark(args)
     if args.command == "client-config":
         return _client_config(args)
     registry = CorpusRegistry.from_file(args.registry)
@@ -195,6 +197,33 @@ def _benchmark(args: argparse.Namespace) -> int:
     return 0
 
 
+def _agent_benchmark(args: argparse.Namespace) -> int:
+    from codalith.benchmarks.agent_runner import run_agent_comparison
+
+    report = run_agent_comparison(
+        endpoint=args.endpoint_url,
+        model_url=args.model_url,
+        model=args.model,
+        dataset_path=args.dataset,
+        skill_path=args.skill,
+        output_dir=args.output_dir,
+        repeats=args.repeats,
+        max_turns=args.max_turns,
+        max_mcp_calls=args.max_mcp_calls,
+        context_tokens=args.context_tokens,
+        output_tokens=args.output_tokens,
+        timeout_s=args.timeout,
+        seed=args.seed,
+    )
+    _print_json({
+        "completed": report["completed"],
+        "errors": report["errors"],
+        "summaries": report["summaries"],
+        "output_dir": str(Path(args.output_dir).resolve()),
+    })
+    return 0 if report["completed"] and report["errors"] == 0 else 1
+
+
 def _client_config(args: argparse.Namespace) -> int:
     if args.transport == "http":
         if args.client == "codex":
@@ -298,6 +327,23 @@ def _parser() -> argparse.ArgumentParser:
     benchmark.add_argument("--min-mrr", type=float, default=0.65)
     benchmark.add_argument("--min-ndcg", type=float, default=0.75)
     benchmark.add_argument("--max-p95-ms", type=float, default=2_000)
+
+    agent_benchmark = subparsers.add_parser(
+        "agent-benchmark", help="Compare MCP-only and on-demand skill agents through a local model"
+    )
+    agent_benchmark.add_argument("--endpoint-url", default="http://127.0.0.1:8765/mcp")
+    agent_benchmark.add_argument("--model-url", default="http://127.0.0.1:11434")
+    agent_benchmark.add_argument("--model", required=True)
+    agent_benchmark.add_argument("--dataset", required=True)
+    agent_benchmark.add_argument("--skill", required=True)
+    agent_benchmark.add_argument("--output-dir", required=True)
+    agent_benchmark.add_argument("--repeats", type=int, default=2)
+    agent_benchmark.add_argument("--max-turns", type=int, default=8)
+    agent_benchmark.add_argument("--max-mcp-calls", type=int, default=10)
+    agent_benchmark.add_argument("--context-tokens", type=int, default=32_768)
+    agent_benchmark.add_argument("--output-tokens", type=int, default=1_536)
+    agent_benchmark.add_argument("--timeout", type=float, default=180)
+    agent_benchmark.add_argument("--seed", type=int, default=42)
 
     client = subparsers.add_parser("client-config", help="Print client configuration")
     client.add_argument("--client", choices=("codex", "claude"), required=True)

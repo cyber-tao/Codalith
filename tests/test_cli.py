@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from codalith.cli.main import main
 from conftest import TestEnvironment
 
@@ -91,3 +93,36 @@ def test_deep_doctor_verifies_generation_and_semantic_store(
             "semantic_fingerprint_valid": True,
         }
     ]
+
+
+@pytest.mark.parametrize("completed,errors,exit_code", [(True, 0, 0), (True, 1, 1), (False, 0, 1)])
+def test_agent_benchmark_does_not_require_registry_and_reports_run_failures(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+    completed: bool,
+    errors: int,
+    exit_code: int,
+) -> None:
+    from codalith.benchmarks import agent_runner
+
+    monkeypatch.chdir(tmp_path)
+    received = {}
+
+    def compare(**kwargs):
+        received.update(kwargs)
+        return {"completed": completed, "errors": errors, "summaries": {}}
+
+    monkeypatch.setattr(agent_runner, "run_agent_comparison", compare)
+    assert main([
+        "agent-benchmark",
+        "--model", "local-model",
+        "--dataset", "tasks.jsonl",
+        "--skill", "SKILL.md",
+        "--output-dir", "results",
+    ]) == exit_code
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["completed"] is completed
+    assert payload["errors"] == errors
+    assert payload["output_dir"] == str(tmp_path / "results")
+    assert received["model"] == "local-model"
