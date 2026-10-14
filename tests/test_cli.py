@@ -126,3 +126,23 @@ def test_agent_benchmark_does_not_require_registry_and_reports_run_failures(
     assert payload["errors"] == errors
     assert payload["output_dir"] == str(tmp_path / "results")
     assert received["model"] == "local-model"
+    assert received["think"] is False
+
+
+def test_agent_benchmark_passes_explicit_reasoning_and_output_budget(tmp_path: Path, monkeypatch) -> None:
+    from codalith.benchmarks import agent_runner
+
+    monkeypatch.chdir(tmp_path)
+    received = {}
+
+    def compare(**kwargs):
+        received.update(kwargs)
+        return {"completed": True, "errors": 0, "summaries": {}}
+
+    monkeypatch.setattr(agent_runner, "run_agent_comparison", compare)
+    assert main([
+        "agent-benchmark", "--model", "local-model", "--dataset", "tasks.jsonl",
+        "--skill", "SKILL.md", "--output-dir", "results", "--think", "--output-tokens", "3072",
+    ]) == 0
+    assert received["think"] is True
+    assert received["output_tokens"] == 3072

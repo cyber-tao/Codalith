@@ -151,6 +151,7 @@ class _Settings:
     output_tokens: int
     timeout_s: float
     seed: int
+    think: bool
 
 
 @dataclass(frozen=True)
@@ -255,13 +256,14 @@ def run_agent_comparison(
     output_tokens: int = 1536,
     timeout_s: float = 180,
     seed: int = 42,
+    think: bool = False,
 ) -> dict[str, Any]:
     """Run both arms serially after a same-context model overflow rejection probe."""
     if any(value < 1 for value in (repeats, max_turns, max_mcp_calls, context_tokens, output_tokens)) or timeout_s <= 0:
         raise ValueError("Agent budgets and timeout_s must be positive")
     settings = _Settings(
         endpoint, _local_model_url(model_url), model, repeats, max_turns, max_mcp_calls,
-        context_tokens, output_tokens, timeout_s, seed,
+        context_tokens, output_tokens, timeout_s, seed, think,
     )
     dataset = Path(dataset_path)
     tasks = _load_tasks(dataset)
@@ -293,10 +295,12 @@ async def _model_metadata(settings: _Settings, *, full: bool = False) -> dict[st
 async def _preflight(settings: _Settings, metadata: dict[str, Any]) -> dict[str, Any]:
     if not {"completion", "tools"}.issubset(metadata["show"].get("capabilities", [])):
         raise RuntimeError("Model must advertise completion and native tools capabilities")
+    if settings.think and "thinking" not in metadata["show"].get("capabilities", []):
+        raise RuntimeError("Model must advertise thinking capability when think=True")
     prompt = "contextcheck " * (settings.context_tokens + 2048)
     request = {
         "model": settings.model, "messages": [{"role": "user", "content": prompt}],
-        "tools": [], "think": False, "stream": False, "truncate": False, "shift": False,
+        "tools": [], "think": settings.think, "stream": False, "truncate": False, "shift": False,
         "keep_alive": _KEEP_ALIVE,
         "options": {"temperature": 0, "seed": settings.seed, "num_ctx": settings.context_tokens, "num_predict": 1},
     }
@@ -507,7 +511,7 @@ async def _run_case(
                 raise TimeoutError("Agent case wall deadline exceeded")
             request = {
                 "model": settings.model, "messages": messages, "tools": native_tools,
-                "think": False, "stream": False, "truncate": False, "shift": False,
+                "think": settings.think, "stream": False, "truncate": False, "shift": False,
                 "keep_alive": _KEEP_ALIVE,
                 "options": {"temperature": 0, "seed": settings.seed, "num_ctx": settings.context_tokens, "num_predict": settings.output_tokens},
             }

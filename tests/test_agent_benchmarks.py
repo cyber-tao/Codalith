@@ -39,6 +39,9 @@ class _MockModel:
         self.malformed_prompt: str | None = None
         self.invalid_prompt: str | None = None
         self.endless = False
+        self.expected_think = False
+        self.expected_output_tokens = 1536
+        self.capabilities = ["completion", "tools"]
 
     def __call__(self, origin: str, route: str, payload: dict[str, Any] | None, timeout_s: float) -> dict[str, Any]:
         assert origin == "http://127.0.0.1:11434"
@@ -48,12 +51,12 @@ class _MockModel:
         if route == "/api/version":
             return {"version": "test-version"}
         if route == "/api/show":
-            return {"capabilities": ["completion", "tools"], "model_info": {"general.architecture": "mock"}}
+            return {"capabilities": self.capabilities, "model_info": {"general.architecture": "mock"}}
         if route == "/api/ps":
             return {"models": [{"name": "mock:latest", "size_vram": 16, "context_length": 32768}]}
         assert route == "/api/chat" and payload is not None
         self.requests.append(copy.deepcopy(payload))
-        assert payload["think"] is False and payload["stream"] is False
+        assert payload["think"] is self.expected_think and payload["stream"] is False
         assert payload["truncate"] is False and payload["shift"] is False
         assert payload["options"]["num_ctx"] == 32768
         assert payload["options"]["seed"] == 42 and payload["options"]["temperature"] == 0
@@ -61,7 +64,7 @@ class _MockModel:
             if self.overflow_rejected:
                 raise agent_runner._ModelError("Model API HTTP 400: context overflow", {"error": "request exceeds context length"})
             return {"message": {"role": "assistant", "content": "silently truncated"}}
-        assert payload["options"]["num_predict"] == 1536
+        assert payload["options"]["num_predict"] == self.expected_output_tokens
         prompt = payload["messages"][1]["content"]
         if prompt == self.fail_prompt:
             raise agent_runner._ModelError("Model API HTTP 500", {"error": "failed", "prompt_eval_count": 71, "eval_count": 3})
@@ -276,3 +279,33 @@ def test_empty_evidence_is_not_a_coverage_denominator_or_failure(
         assert summary["expected_facts"] == 1 and summary["expected_evidence_facts"] == 0
         assert summary["evidence_coverage"] is None
         assert summary["source_forbidden_skill_activations"] == 0
+
+
+def test_thinking_mode_is_explicit_in_preflight_and_formal_requests(
+    semantic_environment: TestEnvironment, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = _MockModel()
+    model.expected_think = True
+    model.expected_output_tokens = 3072
+    model.capabilities.append("thinking")
+    monkeypatch.setattr(agent_runner, "_api_request", model)
+    report = _run(semantic_environment, _files(tmp_path, [_task("source")]), repeats=1, think=True, output_tokens=3072)
+    assert report["completed"] is True and report["errors"] == 0
+    assert report["metadata"]["settings"]["think"] is True
+    assert report["metadata"]["model_preflight"]["request_controls"]["think"] is True
+    assert all(request["think"] is True for request in model.requests)
+    assert all(request["options"]["num_predict"] == 3072 for request in model.requests if request["tools"])
+    assert all(row["citation_audit"][0]["valid"] for row in report["rows"])
+
+
+def test_thinking_mode_requires_model_capability_before_any_chat_request(
+    semantic_environment: TestEnvironment, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = _MockModel()
+    model.expected_think = True
+    monkeypatch.setattr(agent_runner, "_api_request", model)
+    report = _run(semantic_environment, _files(tmp_path, [_task("source")]), repeats=1, think=True)
+    assert report["completed"] is False
+    assert "thinking capability" in report["infrastructure_errors"][0]
+    assert all(row["not_run"] for row in report["rows"])
+    assert model.requests == []

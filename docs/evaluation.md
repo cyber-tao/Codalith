@@ -108,3 +108,11 @@ tasks, as well as task-level paired outcomes and costs. Repeated deterministic r
 measure stability; twelve tasks remain twelve independent tasks. This small experiment
 does not establish a general advantage across models or agent hosts, and the existing
 retrieval benchmarks remain a separate measurement.
+
+The default profile disables native reasoning and allows 1,536 generated tokens per
+turn. An independent supplementary profile can use `--think --output-tokens 3072`
+with its own output directory and frozen protocol. Reasoning tokens are included in
+the API's generated-token budget and counters. Keep each profile's two arms identical
+apart from skill discovery, and report profiles separately: changing both reasoning
+and output budget cannot isolate the effect of reasoning alone. Preserve failed
+primary results rather than replacing them with the supplementary run.

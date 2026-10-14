@@ -214,6 +214,7 @@ def _agent_benchmark(args: argparse.Namespace) -> int:
         output_tokens=args.output_tokens,
         timeout_s=args.timeout,
         seed=args.seed,
+        think=args.think,
     )
     _print_json({
         "completed": report["completed"],
@@ -344,6 +345,7 @@ def _parser() -> argparse.ArgumentParser:
     agent_benchmark.add_argument("--output-tokens", type=int, default=1_536)
     agent_benchmark.add_argument("--timeout", type=float, default=180)
     agent_benchmark.add_argument("--seed", type=int, default=42)
+    agent_benchmark.add_argument("--think", action="store_true", help="Enable the model's native reasoning mode")
 
     client = subparsers.add_parser("client-config", help="Print client configuration")
     client.add_argument("--client", choices=("codex", "claude"), required=True)
