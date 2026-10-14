@@ -99,7 +99,7 @@ def parse_claude_events(events: list[dict[str, Any]]) -> dict[str, Any]:
             errors.append(f"Event {number} has an invalid parent tool-use ID")
             other.append(event)
             continue
-        if parent is not None:
+        if parent is not None and kind in {"assistant", "user", "result"}:
             subagents.append(event)
         if kind == "system" and event.get("subtype") == "init":
             init.append(event)

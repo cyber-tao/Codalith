@@ -106,6 +106,27 @@ def test_native_tools_and_subagent_ids_are_preserved_without_parent_collision() 
     assert {normalize_claude_mcp_result(item)["uri"] for item in parsed["mcp_items"]} == {"main", "child"}
 
 
+def test_parent_linked_mcp_progress_is_preserved_without_becoming_subagent_activity() -> None:
+    progress = {
+        "type": "tool_progress", "parent_tool_use_id": "search",
+        "tool_use_id": "search-heartbeat-0", "tool_name": "codalith_search",
+        "elapsed_time_seconds": 1,
+    }
+    events = [_use("search", "mcp__codalith__codalith_search"), progress, _result("{}", "search"), _final()]
+    original = copy.deepcopy(events)
+    parsed = parse_claude_events(events)
+    assert events == original and parsed["completed"]
+    assert parsed["subagent_events"] == [] and parsed["other_events"] == [progress]
+    assert len(parsed["tool_items"]) == len(parsed["mcp_items"]) == 1
+
+
+def test_parent_linked_child_result_is_still_subagent_activity_without_replacing_root_result() -> None:
+    root = _final()
+    child = _final(parent_tool_use_id="spawn", structured_output={"answer": "child"})
+    parsed = parse_claude_events([root, child])
+    assert parsed["result"] == root and parsed["subagent_events"] == [child]
+
+
 def test_unknown_retry_denial_compaction_and_unmatched_result_are_retained() -> None:
     parsed = parse_claude_events([
         {"type": "system", "subtype": "init", "model": "glm-5.3"},
