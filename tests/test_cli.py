@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from codalith import __version__
 from codalith.cli.main import main
 from conftest import TestEnvironment
 
@@ -31,7 +32,7 @@ def test_version_and_http_client_config_do_not_require_local_config(
     monkeypatch.setenv("CODALITH_HTTP_PORT", "")
     monkeypatch.setenv("CODALITH_HTTP_MAX_REQUEST_BYTES", "")
     assert main(["--version"]) == 0
-    assert capsys.readouterr().out.strip() == "0.2.0"
+    assert capsys.readouterr().out.strip() == __version__
     assert main(["client-config", "--client", "claude", "--transport", "http"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["mcpServers"]["codalith"]["url"] == "http://127.0.0.1:8765/mcp"

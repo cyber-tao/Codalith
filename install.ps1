@@ -8,7 +8,7 @@ if ($null -ne $codalithUv) {
 }
 
 foreach ($codalithPythonName in @('python', 'python3', 'py')) {
-    $codalithPython = Get-Command $codalithPythonName -CommandType Application -ErrorAction SilentlyContinue
+    $codalithPython = Get-Command $codalithPythonName -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($null -eq $codalithPython) {
         continue
     }
