@@ -1,5 +1,6 @@
 ---
 import { createHash } from 'node:crypto';
+import packageMetadata from '../../package.json';
 import source from '../../../fixtures/sample_corpus/src/core/events.py?raw';
 import evidence from '../evidence/sample.json';
 import '../styles/home.css';
@@ -13,6 +14,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 const home = `${base}/${zh ? 'zh-cn/' : ''}`;
 const doc = (path: string) => `${home}${path}/`;
 const repository = 'https://github.com/cyber-tao/Codalith';
+const version = `v${packageMetadata.version}`;
 if (createHash('sha256').update(source).digest('hex') !== evidence.sha256) {
   throw new Error('The sample source changed. Reverify the homepage evidence before publishing.');
 }
@@ -67,7 +69,7 @@ const reasons = zh ? [
     <main id="main">
       <section class="hero wrap" aria-labelledby="hero-title">
         <div class="hero-copy">
-          <a class="release" href={`${repository}/blob/master/pyproject.toml`}><span class="status-dot"></span> v0.2.0 <span class="release-divider">/</span> {zh ? '本地优先 · MCP 源码检索' : 'LOCAL-FIRST SOURCE INTELLIGENCE'} <span aria-hidden="true">↗</span></a>
+          <a class="release" href={`${repository}/blob/master/pyproject.toml`}><span class="status-dot"></span> {version} <span class="release-divider">/</span> {zh ? '本地优先 · MCP 源码检索' : 'LOCAL-FIRST SOURCE INTELLIGENCE'} <span aria-hidden="true">↗</span></a>
           <h1 id="hero-title">{zh ? <>让编程代理的回答，<em>有源码可循。</em></> : <>Give your agent<br />code it can <em>cite.</em></>}</h1>
           <p class="intro">{description}</p>
           <div class="actions">
@@ -122,7 +124,7 @@ const reasons = zh ? [
 
       <section class="manual wrap" aria-labelledby="manual-title"><div><p class="eyebrow">{zh ? '继续探索' : 'GO A LITTLE DEEPER'}</p><h2 id="manual-title">{zh ? '为真实的代码库做好准备。' : 'Make it work for your codebase.'}</h2></div><div class="manual-links"><a href={doc('guides/configuration')}><span>01</span>{zh ? '配置源码与 embedding' : 'Configure source & embeddings'}<span aria-hidden="true">↗</span></a><a href={doc('guides/mcp-api')}><span>02</span>{zh ? '探索七个 MCP 工具' : 'Explore the seven MCP tools'}<span aria-hidden="true">↗</span></a><a href={doc('guides/operations')}><span>03</span>{zh ? '运行、诊断与部署' : 'Run, diagnose & deploy'}<span aria-hidden="true">↗</span></a><a href={doc('guides/evaluation')}><span>04</span>{zh ? '评估检索与引用质量' : 'Evaluate retrieval & citations'}<span aria-hidden="true">↗</span></a></div></section>
     </main>
-    <footer class="footer wrap"><div class="footer-brand"><img src={`${base}/brand/codalith-mark.png`} alt="" width="38" height="38" /><span>Codalith</span><p>{zh ? '让每个回答，有源码可循。' : 'A source behind every answer.'}</p></div><div class="footer-links"><a href={doc('start')}>{zh ? '快速开始' : 'Get started'}</a><a href={repository}>GitHub ↗</a><a href={`${repository}/blob/master/${zh ? 'README.zh-CN.md' : 'README.md'}#${zh ? '许可证与致谢' : 'licensing-and-attribution'}`}>{zh ? '许可证说明' : 'License status'}</a><a href={`${base}/evidence.json`}>{zh ? '示例证据' : 'Sample evidence'}</a><span>v0.2.0</span></div><p class="footer-note">{zh ? '静态文档网站。页面示例为公开测试语料的本地记录，不连接线上 MCP 服务。' : 'Static documentation. Examples are local recordings from the public fixture, with no live MCP connection.'}</p></footer>
+    <footer class="footer wrap"><div class="footer-brand"><img src={`${base}/brand/codalith-mark.png`} alt="" width="38" height="38" /><span>Codalith</span><p>{zh ? '让每个回答，有源码可循。' : 'A source behind every answer.'}</p></div><div class="footer-links"><a href={doc('start')}>{zh ? '快速开始' : 'Get started'}</a><a href={repository}>GitHub ↗</a><a href={`${repository}/blob/master/${zh ? 'README.zh-CN.md' : 'README.md'}#${zh ? '许可证与致谢' : 'licensing-and-attribution'}`}>{zh ? '许可证说明' : 'License status'}</a><a href={`${base}/evidence.json`}>{zh ? '示例证据' : 'Sample evidence'}</a><span>{version}</span></div><p class="footer-note">{zh ? '静态文档网站。页面示例为公开测试语料的本地记录，不连接线上 MCP 服务。' : 'Static documentation. Examples are local recordings from the public fixture, with no live MCP connection.'}</p></footer>
     <script>
       const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
       function activate(tab: HTMLButtonElement) {
