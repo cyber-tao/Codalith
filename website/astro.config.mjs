@@ -1,10 +1,17 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
+import { fileURLToPath } from 'node:url';
 
 export default defineConfig({
   site: 'https://cyber-tao.github.io',
   base: '/Codalith',
   trailingSlash: 'always',
+  vite: {
+    resolve: {
+      // The components barrel also includes global documentation styles.
+      alias: { 'starlight-icon': fileURLToPath(new URL('user-components/Icon.astro', import.meta.resolve('@astrojs/starlight'))) },
+    },
+  },
   integrations: [
     starlight({
       title: 'Codalith',
@@ -20,6 +27,9 @@ export default defineConfig({
       components: {
         SiteTitle: './src/components/SiteTitle.astro',
         Head: './src/components/Head.astro',
+        Header: './src/components/DocsHeader.astro',
+        ThemeProvider: './src/components/ThemeInit.astro',
+        MobileMenuFooter: './src/components/HeaderControls.astro',
       },
       sidebar: [
         { slug: 'start', label: 'Get started', translations: { 'zh-CN': '快速开始' } },

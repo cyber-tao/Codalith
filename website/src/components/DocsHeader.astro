@@ -1,0 +1,22 @@
+---
+import Search from '@astrojs/starlight/components/Search.astro';
+import SiteTitle from './SiteTitle.astro';
+import HeaderControls from './HeaderControls.astro';
+---
+<div class="docs-header">
+  <SiteTitle />
+  <div class="docs-search"><Search /></div>
+  <HeaderControls />
+</div>
+<style>
+  .docs-header { display: flex; align-items: center; gap: 28px; height: 100%; }
+  .docs-search { margin-inline: auto; width: min(24rem, 100%); }
+  @media (max-width: 799px) {
+    .docs-header { gap: 12px; padding-inline-end: calc(var(--sl-menu-button-size) + 12px); }
+    .docs-search { width: auto; }
+  }
+  @media (max-width: 560px) {
+    .docs-header { gap: 8px; }
+    .docs-header :global(.site-title > span) { display: none; }
+  }
+</style>

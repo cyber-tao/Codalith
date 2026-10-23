@@ -1,0 +1,92 @@
+---
+import Icon from 'starlight-icon';
+
+interface Props {
+  lang?: 'en' | 'zh-CN';
+  englishHref?: string;
+  chineseHref?: string;
+}
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const zh = Astro.props.lang ? Astro.props.lang === 'zh-CN' : Astro.url.pathname.includes('/zh-cn/');
+const suffix = /\/404(?:\.html)?\/?$/.test(Astro.url.pathname)
+  ? '' : Astro.url.pathname.slice(base.length).replace(/^\/(?:zh-cn\/)?/, '');
+const englishHref = Astro.props.englishHref ?? `${base}/${suffix}`;
+const chineseHref = Astro.props.chineseHref ?? `${base}/zh-cn/${suffix}`;
+---
+<div class="header-controls" aria-label={zh ? '网站偏好与源码' : 'Site preferences and source'}>
+  <details class="language-picker">
+    <summary aria-label={zh ? '切换语言' : 'Change language'} title={zh ? '切换语言' : 'Change language'}>
+      <Icon name="translate" size="19px" />
+      <Icon name="down-caret" size="11px" />
+    </summary>
+    <ul aria-label={zh ? '语言' : 'Language'}>
+      <li><a href={englishHref} lang="en" hreflang="en" aria-current={!zh ? 'true' : undefined}>English <span aria-hidden="true">{!zh ? '✓' : ''}</span></a></li>
+      <li><a href={chineseHref} lang="zh-CN" hreflang="zh-CN" aria-current={zh ? 'true' : undefined}>简体中文 <span aria-hidden="true">{zh ? '✓' : ''}</span></a></li>
+    </ul>
+  </details>
+  <span class="divider" aria-hidden="true"></span>
+  <button class="theme-toggle" type="button" role="switch" aria-checked="false" aria-label={zh ? '深色主题' : 'Dark theme'} title={zh ? '切换明暗主题' : 'Toggle light and dark theme'}>
+    <span class="toggle-track"><span class="toggle-thumb"><Icon name="sun" class="sun" size="13px" /><Icon name="moon" class="moon" size="13px" /></span></span>
+  </button>
+  <span class="divider" aria-hidden="true"></span>
+  <a class="github-link" href="https://github.com/cyber-tao/Codalith" aria-label={zh ? 'GitHub 仓库' : 'GitHub repository'} title={zh ? 'GitHub 仓库' : 'GitHub repository'}><Icon name="github" size="21px" /></a>
+</div>
+<style>
+  .header-controls { --control-text: #52665e; --control-hover: #183e35; --control-line: #d4dcd3; --control-track: #e3eae2; --control-thumb: #fff; --control-panel: #fcfdf9; display: flex; align-items: center; gap: 11px; color: var(--control-text); flex-shrink: 0; line-height: 1; }
+  :global([data-theme='dark']) .header-controls { --control-text: #a6b5bd; --control-hover: #edf6ef; --control-line: #29383b; --control-track: #182121; --control-thumb: #0b1210; --control-panel: #14201a; }
+  .language-picker { position: relative; }
+  summary { display: flex; align-items: center; justify-content: center; gap: 6px; list-style: none; cursor: pointer; min-width: 36px; height: 38px; border-radius: 5px; }
+  summary::-webkit-details-marker { display: none; }
+  summary:hover, .github-link:hover, .theme-toggle:hover { color: var(--control-hover); }
+  ul { position: absolute; right: 0; top: calc(100% + 9px); z-index: 60; min-width: 152px; list-style: none; padding: 5px; margin: 0; border: 1px solid var(--control-line); border-radius: 7px; background: var(--control-panel); box-shadow: 0 12px 28px #0002; font-size: 13px; }
+  li { margin: 0; padding: 0; }
+  li a { display: flex; align-items: center; justify-content: space-between; min-height: 38px; gap: 20px; border-radius: 4px; padding: 8px 11px; text-decoration: none; color: var(--control-text); white-space: nowrap; }
+  li a:hover, li a[aria-current] { background: var(--control-track); color: var(--control-hover); }
+  .divider { width: 1px; height: 20px; background: var(--control-line); }
+  .theme-toggle { display: grid; place-items: center; width: 42px; height: 38px; border: 0; border-radius: 5px; padding: 0; background: none; color: var(--control-text); cursor: pointer; }
+  .toggle-track { display: block; width: 40px; height: 22px; padding: 2px; border: 1px solid var(--control-line); border-radius: 20px; background: var(--control-track); }
+  .toggle-thumb { display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--control-thumb); color: var(--control-hover); box-shadow: 0 1px 3px #0002; transition: transform .18s ease; }
+  .toggle-thumb :global(.moon) { display: none; }
+  :global([data-theme='dark']) .toggle-thumb { transform: translateX(18px); }
+  :global([data-theme='dark']) .toggle-thumb :global(.moon) { display: block; }
+  :global([data-theme='dark']) .toggle-thumb :global(.sun) { display: none; }
+  .github-link { display: grid; place-items: center; width: 30px; height: 38px; border-radius: 5px; color: inherit; }
+  summary:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid #58b48c; outline-offset: 3px; }
+  @media (prefers-reduced-motion: reduce) { .toggle-thumb { transition: none; } }
+  @media (max-width: 560px) { .header-controls { gap: 6px; } }
+</style>
+<script>
+  const switches = document.querySelectorAll<HTMLButtonElement>('.theme-toggle');
+  const syncSwitches = () => {
+    const dark = document.documentElement.dataset.theme === 'dark';
+    switches.forEach((button) => button.setAttribute('aria-checked', String(dark)));
+  };
+  syncSwitches();
+  window.addEventListener('codalith-theme-change', syncSwitches);
+  switches.forEach((button) => button.addEventListener('click', () => {
+    const theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = theme;
+    try { localStorage.setItem('starlight-theme', theme); } catch {}
+    window.dispatchEvent(new Event('codalith-theme-change'));
+  }));
+
+  const pickers = document.querySelectorAll<HTMLDetailsElement>('.language-picker');
+  document.addEventListener('click', (event) => {
+    pickers.forEach((picker) => {
+      if (event.target instanceof Node && !picker.contains(event.target)) picker.open = false;
+    });
+  });
+  pickers.forEach((picker) => {
+    picker.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && picker.open) {
+        picker.open = false;
+        picker.querySelector('summary')?.focus();
+      }
+    });
+    picker.addEventListener('focusout', () => {
+      requestAnimationFrame(() => {
+        if (!picker.contains(document.activeElement)) picker.open = false;
+      });
+    });
+  });
+</script>

@@ -1,0 +1,17 @@
+<script is:inline>
+  (() => {
+    const preference = window.matchMedia('(prefers-color-scheme: dark)');
+    const syncTheme = () => {
+      let stored;
+      try { stored = localStorage.getItem('starlight-theme'); } catch {}
+      document.documentElement.dataset.theme = stored === 'light' || stored === 'dark'
+        ? stored : preference.matches ? 'dark' : 'light';
+      window.dispatchEvent(new Event('codalith-theme-change'));
+    };
+    syncTheme();
+    preference.addEventListener('change', syncTheme);
+    window.addEventListener('storage', (event) => {
+      if (event.key === 'starlight-theme' || event.key === null) syncTheme();
+    });
+  })();
+</script>

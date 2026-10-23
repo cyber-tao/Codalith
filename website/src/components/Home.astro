@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto';
 import source from '../../../fixtures/sample_corpus/src/core/events.py?raw';
 import evidence from '../evidence/sample.json';
 import '../styles/home.css';
+import HeaderControls from './HeaderControls.astro';
+import ThemeInit from './ThemeInit.astro';
 
 interface Props { lang: 'en' | 'zh-CN' }
 const { lang } = Astro.props;
@@ -35,6 +37,7 @@ const reasons = zh ? [
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <ThemeInit />
     <title>{zh ? 'Codalith — 有源码可循的 AI 编程' : 'Codalith — Source evidence for AI coding agents'}</title>
     <meta name="description" content={description} />
     <meta name="theme-color" content="#153d36" />
@@ -52,13 +55,13 @@ const reasons = zh ? [
     <a class="skip" href="#main">{zh ? '跳到正文' : 'Skip to content'}</a>
     <header class="header wrap">
       <a class="brand" href={home} aria-label={zh ? 'Codalith 首页' : 'Codalith home'}>
-        <img src={`${base}/brand/codalith-logo.png`} alt="Codalith" width="180" height="60" />
+        <img class="logo-light" src={`${base}/brand/codalith-logo.png`} alt="Codalith" width="180" height="60" />
+        <img class="logo-dark" src={`${base}/brand/codalith-logo-dark.png`} alt="Codalith" width="180" height="60" />
       </a>
       <nav aria-label={zh ? '主导航' : 'Main navigation'}>
         <a class="nav-docs" href={doc('guides/mcp-api')}>{zh ? '文档' : 'Documentation'}</a>
-        <a class="nav-github" href={repository}>GitHub <span aria-hidden="true">↗</span></a>
-        <a class="language" href={`${base}/${zh ? '' : 'zh-cn/'}`} lang={zh ? 'en' : 'zh-CN'}>{zh ? 'English' : '简体中文'}</a>
         <a class="button small" href={doc('start')}>{zh ? '快速开始' : 'Get started'} <span aria-hidden="true">↗</span></a>
+        <HeaderControls lang={lang} englishHref={`${base}/`} chineseHref={`${base}/zh-cn/`} />
       </nav>
     </header>
     <main id="main">

@@ -6,6 +6,11 @@
   --sl-color-accent-high: #c6f3df;
   --sl-content-width: 48rem;
 }
+:root[data-theme='dark'] {
+  --sl-color-bg: #0c1412;
+  --sl-color-bg-nav: #101b16;
+  --sl-color-bg-sidebar: #101b16;
+}
 :root[data-theme='light'] {
   --sl-color-accent-low: #d9f0e6;
   --sl-color-accent: #176048;
