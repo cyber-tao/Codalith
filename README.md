@@ -1,35 +1,76 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/codalith-logo-dark.png">
+    <img src="docs/assets/brand/codalith-logo.png" alt="Codalith" width="420">
+  </picture>
+</p>
+
 # Codalith
 
-[中文说明](README.zh-CN.md)
+**English** · [简体中文](README.zh-CN.md)
 
-Codalith is a local-first MCP source-intelligence service for AI coding agents. It combines an immutable SQLite structural index with hybrid semantic retrieval, then returns bounded, hash-verified source evidence through the official MCP protocol.
+**Versioned source evidence for AI coding agents.**
 
-Use the bundled `codalith-source` skill together with MCP: the skill guides tool selection and evidence checking, while MCP supplies versioned source text.
+Codalith is a local-first MCP service that helps agents find implementations, resolve symbols, follow references, and compare source revisions. It combines an immutable SQLite structural index with hybrid semantic retrieval, then returns bounded source text with line citations, revision and generation metadata, and current/indexed SHA-256 hashes.
 
-The core is language-neutral. Python, C#, and C++/Unreal Engine have structural adapters today; other text corpora can use the generic adapter without pretending to provide symbols.
+[Quick start](#-quick-start) · [MCP tools](#mcp-tools) · [Documentation](#documentation) · [Website source](website/README.md)
 
-## What it guarantees
+## ✨ What you can do
 
-- Every source result, read, and graph node identifies a corpus revision and immutable index generation, and one call never mixes generations.
-- `codalith://` citations can only read files present in that generation.
-- The shared deny policy bounds reads and filters every tool output; reads report post-index changes.
-- A generation is published with one atomic pointer update only after its artifacts validate; a failed build changes nothing.
-- A semantic store is either built inside its generation from exactly the snapshot's files or adopted after content verification, and is never rewritten by Codalith.
-- stdio and Streamable HTTP expose the same seven strict, read-only MCP tools with stable error codes.
-- The HTTP service is loopback-first, checks Host and Origin on every route, and bounds streamed bodies.
+- **Find the implementation.** Combine symbol, file, semantic, and literal-text discovery; retrieve a bounded context pack for a question.
+- **Check the evidence.** Read canonical `codalith://` source URIs and detect source changes since indexing through hash and stale-state reporting.
+- **Explore relationships.** Resolve definitions, traverse bounded reference graphs, and compare symbol structure between registered corpora.
+- **Pin the source version.** Each call uses one immutable generation per corpus. A new generation is published atomically after validation.
+- **Use your existing agent.** The same seven read-only tools work over stdio and Streamable HTTP. The bundled `codalith-source` skill guides retrieval and citation checks.
+- **Inspect service operation.** The optional HTTP dashboard shows readiness, generation sizes, query latency, tool usage, and process telemetry.
 
-Codalith is not a hosted multi-tenant gateway. Authentication, RBAC, audit databases, rate-limit shells, Knowledge Cards, source priors, and the old PostgreSQL semantic store are intentionally absent.
+Structural adapters are available for **Python**, **C#**, and **C++ / Unreal Engine**. The **generic** adapter indexes other text without claiming structural symbol extraction.
 
-## Requirements
+## From a question to source evidence
 
-- Python 3.11+
-- [uv](https://docs.astral.sh/uv/)
-- [Bun](https://bun.sh/) (optional, to build the operations dashboard locally)
-- Docker Compose (optional)
+For the bundled sample corpus, call `codalith_context` with:
 
-## Install the skill and connect your agents
+```json
+{
+  "query": "How does EventBus dispatch an event?",
+  "target": "sample",
+  "max_spans": 2,
+  "max_chars": 4000
+}
+```
 
-From a source checkout, connect supported agents to an existing service with one command:
+The returned context includes `EventBus` at `codalith://sample/source/src/core/events.py#L15-L24`. Its dispatch implementation is:
+
+```python
+def dispatch(self, event: Event) -> None:
+    for handler in self._handlers.get(event.name, []):
+        handler(event)
+```
+
+The example is backed by the checked-in [sample source](fixtures/sample_corpus/src/core/events.py). A local sample run returned revision `sample-v1`, matching current/indexed hashes, `stale: false`, `truncated: false`, and `degraded: false`. Generation IDs change on each build. Inspect these fields and `warnings` before using the evidence; cite the exact returned source URI.
+
+## 🚀 Quick start
+
+### 1. Start the local sample service
+
+Install **Python 3.11+**, [uv](https://docs.astral.sh/uv/), and Git. Run these commands from a terminal:
+
+```bash
+git clone https://github.com/cyber-tao/Codalith.git
+cd Codalith
+uv sync --frozen
+uv run --frozen codalith index build --corpus sample --semantic build
+uv run --frozen codalith doctor --target sample --deep
+uv run --frozen codalith serve --transport http
+```
+
+The sample uses deterministic **fake embeddings**: no API key or embedding-model download is needed. It demonstrates the indexing and agent-integration flow; it is not a semantic-quality benchmark.
+
+The build reports **2 files and 8 symbols**. Doctor should report `"ready": true` and `"failures": []`. Keep the server terminal open. The default MCP endpoint is `http://127.0.0.1:8765/mcp`; [readiness](http://127.0.0.1:8765/readyz) returns HTTP 200 when the default target is ready.
+
+### 2. Connect your agent
+
+Open another terminal in the checkout and run the installer for your platform:
 
 ```powershell
 # Windows
@@ -41,106 +82,115 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 sh ./install.sh
 ```
 
-The installer needs only `uv` or Python 3.11+, without an embedding environment or `uv sync`. It detects supported agents, installs the skill, merges the `codalith` MCP configuration, and checks the service at `http://127.0.0.1:8765/mcp`. Existing configuration is preserved and changed files are backed up. Use `--agent codex --agent claude` to select clients explicitly, or `--dry-run` to preview offline.
+The installer detects supported agents, verifies MCP connectivity and readiness, installs `codalith-source`, and merges the `codalith` MCP entry. Changed configuration files are backed up. Restart the selected agent or reload its MCP configuration, then ask:
 
-For a new sample service, add `--start-service sample`; this starts Docker Compose, builds the demo index, and then installs the client integration:
+> Use Codalith's sample corpus to explain how EventBus dispatches an event. Cite the source.
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 --start-service sample
-```
+Supported integrations: **Codex, Claude Code, Cursor, Windsurf, VS Code Copilot, Gemini CLI, and OpenCode v1**. Use `--agent codex --agent claude` to select clients or `--dry-run` to preview changes. Native agent trust and MCP approval prompts still apply. See [installation](docs/installation.md) for project scope, remote environments, backups, and `--check`.
 
-```bash
-sh ./install.sh --start-service sample
-```
-
-See [cross-platform installation](docs/installation.md) for project scope, supported agents, existing UE indexes, backups, and validation.
-
-## Start a service manually
+To print configuration without writing client files:
 
 ```bash
-uv sync --frozen --extra dev
-uv run codalith index build --corpus sample --semantic build
-uv run codalith doctor --target sample --deep
-uv run codalith serve --transport http
+uv run --frozen codalith client-config --client codex --transport http
+uv run --frozen codalith client-config --client claude --transport stdio
 ```
 
-The MCP endpoint is `http://127.0.0.1:8765/mcp`. Print a client configuration without modifying user files:
+### Optional: use Docker and the dashboard
 
-```bash
-uv run codalith client-config --client codex --transport http
-uv run codalith client-config --client claude --transport stdio
-```
-
-Docker performs the sample index step before starting the server, and its image includes the operations dashboard at `http://127.0.0.1:8765/dashboard/`:
+With Docker Compose installed, this command builds the image, indexes the sample, and starts the HTTP service:
 
 ```bash
 docker compose up --build mcp-http
 ```
 
-## MCP tools
+Open the [operations dashboard](http://127.0.0.1:8765/dashboard/). To start the sample service and install agent integration together, add `--start-service sample` to the platform installer instead. Use one service on port 8765 at a time.
 
-| Tool | Purpose |
-| --- | --- |
-| `codalith_search` | Structural, semantic, or literal-text discovery |
-| `codalith_context` | Bounded context pack with verified source text |
-| `codalith_read` | Exact read of a canonical source URI |
-| `codalith_symbol` | Exact or fuzzy symbol resolution |
-| `codalith_graph` | Bounded incoming/outgoing reference traversal |
-| `codalith_compare` | Structural comparison of two corpora |
-| `codalith_status` | Side-effect-free readiness and provenance |
-
-See [MCP API](docs/mcp-api.md) for schemas and error behavior.
-
-## Repository layout
-
-```text
-configs/                 TOML corpus registry and source policy
-benchmarks/datasets/     independent sample, UE regression, and holdout sets
-dashboard/               React operations dashboard (built with Bun)
-fixtures/sample_corpus/  deterministic local smoke corpus
-src/codalith/corpus/     registry, policy, URIs, generations, source reads
-src/codalith/languages/  adapter catalog, contracts, and implementations
-src/codalith/semantic/   hybrid retrieval engine (chunking, embeddings, LanceDB)
-src/codalith/indexing/   generation builder, SQLite structure writer/reader, semantic store binding, literal text search
-src/codalith/query/      transport-independent query service
-src/codalith/mcp/        official SDK bindings and transports
-src/codalith/dashboard/  process-local telemetry and dashboard HTTP routes
-src/codalith/benchmarks/ real MCP benchmark runner
-src/codalith/cli/        single `codalith` command tree
-tests/                   unit, integration, security, and protocol tests
-```
-
-## Development validation
+For a source-run service, build the dashboard separately before starting the HTTP server:
 
 ```bash
+bun install --cwd dashboard --frozen-lockfile
+bun run --cwd dashboard build
+```
+
+See [operations](docs/operations.md) for health checks, dashboard behavior, and UE setup.
+
+## MCP tools
+
+| Tool | Use it to |
+| --- | --- |
+| `codalith_search` | Discover source with `auto`, `semantic`, `text`, or `symbol` retrieval |
+| `codalith_context` | Get a bounded, non-overlapping source context pack |
+| `codalith_read` | Read an indexed canonical source URI, with hash and stale-state reporting |
+| `codalith_symbol` | Resolve exact or fuzzy symbol definitions |
+| `codalith_graph` | Traverse bounded incoming or outgoing reference evidence |
+| `codalith_compare` | Compare structural symbols between two corpora |
+| `codalith_status` | Check readiness and provenance without loading embedding models or scanning source |
+
+Tool inputs reject unknown fields. Both transports use the official MCP Python SDK. Source-policy deny rules filter tool outputs; source reads use configured line and byte budgets. Full inputs, response fields, limits, and errors are in the [MCP API reference](docs/mcp-api.md).
+
+## Bring your own source
+
+Configure corpora in [configs/registry.toml](configs/registry.toml) and read budgets/deny patterns in [configs/source-policy.toml](configs/source-policy.toml). Paths resolve relative to the TOML file that declares them. Each corpus records a source root, revision, index root, adapter, file-selection rules, and embedding provider.
+
+| Setting | Choices and behavior |
+| --- | --- |
+| Structural adapter | `python`, `csharp`, `cpp-ue`, `generic` |
+| Embeddings | `fake` for deterministic tests, `fastembed` for local models, `openai` for an OpenAI-compatible endpoint |
+| `--semantic build` | Builds a fresh generation-local semantic store from that snapshot's indexed files |
+| `--semantic adopt` | Reuses an existing store after model/dimension and source-content verification; records coverage and pins the store path |
+| `--semantic none` | Builds a structural generation; semantic retrieval and full readiness are unavailable |
+
+Semantic queries also need their configured embedding provider at query time. Literal `text` and `symbol` retrieval do not need a semantic plane. Local-first deployment can use local embedding models; selecting an external endpoint sends embedding inputs to that provider.
+
+The default sample index is under `data/indexes/sample`. Compose persists it in the `codalith-data` volume. Source selection, adapter versions, semantic-engine versions, and configuration are part of generation validity; relevant changes require rebuilding or re-adopting. See [configuration](docs/configuration.md), [architecture](docs/architecture.md), and [UE operations](docs/operations.md#ue-574).
+
+## Status and boundaries
+
+- **Development status:** persisted formats and configuration may change; follow the [migration notes](docs/operations.md#migration-notes) when upgrading.
+- **Deployment:** HTTP publishes to loopback by default, checks Host/Origin, and limits request bodies. There is no built-in network authentication or multi-tenant access control; use a trusted, authenticated boundary for remote access.
+- **Evidence:** reference graphs describe static evidence. They do not establish a running process's callback registrations or execution order.
+- **Operations:** dashboard telemetry is bounded, process-local, and reset on restart. It is not a durable audit log.
+
+## Documentation
+
+| Guide | Contents |
+| --- | --- |
+| [Installation](docs/installation.md) | Agent setup, supported clients, scope, verification, and recovery |
+| [Configuration](docs/configuration.md) | Corpus registry, source policy, paths, and environment |
+| [MCP API](docs/mcp-api.md) | Tools, source citations, schemas, and error contracts |
+| [Architecture](docs/architecture.md) | Module boundaries, immutable generations, and invariants |
+| [Operations](docs/operations.md) | Local/Compose services, dashboard, UE, and migrations |
+| [Evaluation](docs/evaluation.md) | Real MCP benchmarks, independent datasets, and acceptance gates |
+| [Website source](website/README.md) | Build and preview the bilingual project website |
+
+## Development and feedback
+
+Install development dependencies, then run the Python checks:
+
+```bash
+uv sync --frozen --extra dev
+uv run --frozen pytest -q
 uv run --frozen ruff check src tests
 uv run --frozen mypy src
-uv run --frozen pytest -q
+```
+
+For dashboard changes:
+
+```bash
 bun install --cwd dashboard --frozen-lockfile
 bun run --cwd dashboard typecheck
 bun run --cwd dashboard test
 bun run --cwd dashboard build
-docker compose config --quiet
-docker compose --profile ue config --quiet
-docker compose --profile test config --quiet
 ```
 
-Run an independent dataset against a live endpoint:
+For an HTTP integration check against a running sample service:
 
 ```bash
-uv run codalith benchmark \
-  --dataset benchmarks/datasets/sample-smoke.jsonl \
-  --endpoint-url http://127.0.0.1:8765/mcp \
-  --label local-sample
+uv run --frozen codalith benchmark --dataset benchmarks/datasets/sample-smoke.jsonl --endpoint-url http://127.0.0.1:8765/mcp --label local-sample
 ```
 
-## Documentation
+Report reproducible problems through [GitHub Issues](https://github.com/cyber-tao/Codalith/issues). Include the command, corpus revision, generation ID, relevant warnings, and a minimal reproduction; omit source you cannot share and all credentials.
 
-- [Cross-platform skill + MCP installation](docs/installation.md)
-- [Architecture and invariants](docs/architecture.md)
-- [Configuration](docs/configuration.md)
-- [MCP API](docs/mcp-api.md)
-- [Operations, UE setup, and migration notes](docs/operations.md)
-- [Evaluation](docs/evaluation.md)
+## Licensing and attribution
 
-This repository is in development. Index and configuration schemas may change without compatibility shims; rebuild generations after such changes (see the migration notes in [Operations](docs/operations.md)).
+The repository currently has no root-level license declaring terms for the whole project. The semantic engine includes its own [Apache-2.0 license](src/codalith/semantic/LICENSE) and [CodeRAG attribution](src/codalith/semantic/NOTICE). Those component notices do not establish a repository-wide license. Indexed source remains subject to its original license and access terms.

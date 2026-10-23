@@ -20,3 +20,7 @@ build/
 data/
 reports/
 .local/
+node_modules/
+website/.astro/
+website/src/content/docs/guides/
+website/public/brand/

@@ -1,0 +1,19 @@
+:root {
+  --sl-font: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --sl-font-mono: 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+  --sl-color-accent-low: #173e35;
+  --sl-color-accent: #5cceb0;
+  --sl-color-accent-high: #c6f3df;
+  --sl-content-width: 48rem;
+}
+:root[data-theme='light'] {
+  --sl-color-accent-low: #d9f0e6;
+  --sl-color-accent: #176048;
+  --sl-color-accent-high: #153d36;
+  --sl-color-bg: #fafbf7;
+  --sl-color-bg-nav: #f3f5ef;
+  --sl-color-bg-sidebar: #f3f5ef;
+}
+.sl-markdown-content :is(h1, h2, h3) { letter-spacing: -.025em; }
+.sl-markdown-content code:not(pre code) { border-radius: 3px; }
+a:focus-visible, button:focus-visible { outline: 3px solid #4a9b7c; outline-offset: 4px; }

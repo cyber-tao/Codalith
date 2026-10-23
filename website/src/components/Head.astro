@@ -1,0 +1,7 @@
+---
+const route = Astro.locals.starlightRoute;
+const isNotFound = route.entry.id === '404';
+const head = route.head.filter(({ tag, attrs }) => !isNotFound || !(tag === 'link' && ['canonical', 'alternate'].includes(String(attrs?.rel))));
+---
+{head.map(({ tag: Tag, attrs, content }) => <Tag {...attrs} set:html={content} />)}
+{isNotFound && <meta name="robots" content="noindex" />}

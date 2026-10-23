@@ -1,0 +1,17 @@
+{
+  "verified_on": "2026-10-23",
+  "source_commit": "019866d",
+  "method": "Isolated CLI index build + deep doctor + QueryService context/symbol/read over the public sample fixture; the temporary generation was removed after verification.",
+  "query": "How does EventBus dispatch an event?",
+  "target": "sample",
+  "revision": "sample-v1",
+  "source_uri": "codalith://sample/source/src/core/events.py#L15-L24",
+  "sha256": "2479d1197d4855fc3ce473c74eac4ab3140c217b61ccceef90d3753f9a5b5e93",
+  "confidence": "medium",
+  "degraded": false,
+  "stale": false,
+  "truncated": false,
+  "warnings": [],
+  "embedding_provider": "fake",
+  "limitation": "A fixture demonstration of source provenance, not a semantic relevance benchmark or a live endpoint."
+}

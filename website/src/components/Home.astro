@@ -1,0 +1,157 @@
+---
+import { createHash } from 'node:crypto';
+import source from '../../../fixtures/sample_corpus/src/core/events.py?raw';
+import evidence from '../evidence/sample.json';
+import '../styles/home.css';
+
+interface Props { lang: 'en' | 'zh-CN' }
+const { lang } = Astro.props;
+const zh = lang === 'zh-CN';
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const home = `${base}/${zh ? 'zh-cn/' : ''}`;
+const doc = (path: string) => `${home}${path}/`;
+const repository = 'https://github.com/cyber-tao/Codalith';
+if (createHash('sha256').update(source).digest('hex') !== evidence.sha256) {
+  throw new Error('The sample source changed. Reverify the homepage evidence before publishing.');
+}
+const lines = source.split(/\r?\n/).slice(14, 24);
+const title = zh ? '让编程代理的回答，有源码可循。' : 'Give your agent code it can cite.';
+const description = zh
+  ? 'Codalith 为 AI 编程代理提供本地优先、版本明确的源码检索，通过 MCP 返回代码片段、精确行号与可核验的来源。'
+  : 'Local-first, versioned source intelligence for AI coding agents. Retrieve code through MCP, verify its revision, and cite the exact lines.';
+const start = 'uv sync --frozen\nuv run codalith index build --corpus sample --semantic build\nuv run codalith doctor --target sample --deep\nuv run codalith serve --transport http';
+const reasons = zh ? [
+  ['版本明确', '在同一代索引中检索', '结构索引与语义存储绑定到不可变 generation。每次请求固定所用快照，构建失败保留当前版本。'],
+  ['引用具体', '回到真正的实现', '返回准确的源码 URI、行号和内容哈希。上下文受篇幅预算约束，并显式报告过期、截断与降级状态。'],
+  ['部署自主', '由你选择源码与模型', '源码和索引由你管理。使用本地 FastEmbed 或 OpenAI 兼容 embedding 服务，按语料选择语言适配器。'],
+] : [
+  ['PIN THE VERSION', 'One generation per request.', 'Structure and semantic retrieval share an immutable generation. A failed build leaves the published snapshot untouched.'],
+  ['FOLLOW THE EVIDENCE', 'Go back to the implementation.', 'Get source URIs, line ranges, and content hashes. Bounded context reports stale content, truncation, and degraded retrieval explicitly.'],
+  ['KEEP CONTROL', 'Your source. Your model choice.', 'Manage your own source and indexes. Use local FastEmbed or an OpenAI-compatible embedding endpoint, with an adapter per corpus.'],
+];
+---
+<!doctype html>
+<html lang={lang}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{zh ? 'Codalith — 有源码可循的 AI 编程' : 'Codalith — Source evidence for AI coding agents'}</title>
+    <meta name="description" content={description} />
+    <meta name="theme-color" content="#153d36" />
+    <meta property="og:title" content={`Codalith — ${title}`} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content={new URL(`${base}/brand/codalith-logo.png`, Astro.site).href} />
+    <meta property="og:url" content={new URL(home, Astro.site).href} />
+    <link rel="canonical" href={new URL(home, Astro.site)} />
+    <link rel="alternate" hreflang="en" href={new URL(`${base}/`, Astro.site)} />
+    <link rel="alternate" hreflang="zh-CN" href={new URL(`${base}/zh-cn/`, Astro.site)} />
+    <link rel="icon" type="image/png" href={`${base}/brand/codalith-mark.png`} />
+  </head>
+  <body>
+    <a class="skip" href="#main">{zh ? '跳到正文' : 'Skip to content'}</a>
+    <header class="header wrap">
+      <a class="brand" href={home} aria-label={zh ? 'Codalith 首页' : 'Codalith home'}>
+        <img src={`${base}/brand/codalith-logo.png`} alt="Codalith" width="180" height="60" />
+      </a>
+      <nav aria-label={zh ? '主导航' : 'Main navigation'}>
+        <a class="nav-docs" href={doc('guides/mcp-api')}>{zh ? '文档' : 'Documentation'}</a>
+        <a class="nav-github" href={repository}>GitHub <span aria-hidden="true">↗</span></a>
+        <a class="language" href={`${base}/${zh ? '' : 'zh-cn/'}`} lang={zh ? 'en' : 'zh-CN'}>{zh ? 'English' : '简体中文'}</a>
+        <a class="button small" href={doc('start')}>{zh ? '快速开始' : 'Get started'} <span aria-hidden="true">↗</span></a>
+      </nav>
+    </header>
+    <main id="main">
+      <section class="hero wrap" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <a class="release" href={`${repository}/blob/master/pyproject.toml`}><span class="status-dot"></span> v0.2.0 <span class="release-divider">/</span> {zh ? '本地优先 · MCP 源码检索' : 'LOCAL-FIRST SOURCE INTELLIGENCE'} <span aria-hidden="true">↗</span></a>
+          <h1 id="hero-title">{zh ? <>让编程代理的回答，<em>有源码可循。</em></> : <>Give your agent<br />code it can <em>cite.</em></>}</h1>
+          <p class="intro">{description}</p>
+          <div class="actions">
+            <a class="button" href={doc('start')}>{zh ? '从示例开始' : 'Start with the sample'} <span aria-hidden="true">↗</span></a>
+            <a class="text-link" href="#evidence">{zh ? '看看返回的证据' : 'See the evidence'} <span aria-hidden="true">↓</span></a>
+          </div>
+          <p class="hero-note">{zh ? 'Python 3.11+ · HTTP / stdio · sample 无需 API key' : 'Python 3.11+ · HTTP / stdio · No API key for the sample'}</p>
+        </div>
+        <div class="evidence-window" id="evidence">
+          <div class="window-title"><span><i></i><i></i><i></i></span><span>QUESTION → SOURCE</span><span class="window-label">MCP</span></div>
+          <div class="question"><span class="prompt-marker">›</span><p>How does EventBus dispatch an event?</p></div>
+          <div class="evidence-tabs" role="tablist" aria-label={zh ? '示例结果' : 'Example result'}>
+            <button id="context-tab" type="button" role="tab" aria-selected="true" aria-controls="context-panel" tabindex="0">codalith_context</button>
+            <button id="read-tab" type="button" role="tab" aria-selected="false" aria-controls="read-panel" tabindex="-1">codalith_read</button>
+          </div>
+          <div id="context-panel" role="tabpanel" aria-labelledby="context-tab">
+            <div class="file-heading"><span>src/core/events.py</span><span>PYTHON</span></div>
+            <div class="source-code" aria-label={zh ? '源码第 15 至 24 行' : 'Source lines 15 to 24'}>{lines.map((line, index) => <div class:list={['code-line', { focused: index >= 7 }]}><span aria-hidden="true">{index + 15}</span><code>{line || ' '}</code></div>)}</div>
+            <div class="result-meta"><span><b>revision</b> sample-v1</span><span><b>stale</b> false</span><span><b>degraded</b> false</span></div>
+          </div>
+          <div id="read-panel" role="tabpanel" aria-labelledby="read-tab" hidden>
+            <div class="file-heading"><span>{zh ? '读取并核验来源' : 'Read and verify the source'}</span><span>JSON</span></div>
+            <pre class="read-result"><code>{JSON.stringify({ uri: evidence.source_uri, revision: evidence.revision, sha256: `${evidence.sha256.slice(0, 16)}…`, indexed_sha256: `${evidence.sha256.slice(0, 16)}…`, stale: evidence.stale, truncated: evidence.truncated }, null, 2)}</code></pre>
+            <p class="read-note">{zh ? '为便于阅读，哈希值已缩短。完整记录见示例证据。' : 'Hashes shortened for display. Full values are in the evidence record.'}</p>
+          </div>
+          <div class="citation"><span aria-hidden="true">↳</span><code>{evidence.source_uri}</code></div>
+          <div class="window-bottom"><span class="status-dot"></span><span>{zh ? '真实 sample 语料返回结果 · 离线记录' : 'Actual sample corpus result · recorded locally'}</span></div>
+        </div>
+      </section>
+
+      <div class="compatibility wrap"><p>{zh ? '接入你已经在用的编程代理' : 'WORKS WITH YOUR EXISTING CODING AGENT'}</p><div><span>Codex</span><span>Claude Code</span><span>Cursor</span><span>Windsurf</span><span>VS Code Copilot</span><span>Gemini CLI</span><span>OpenCode</span></div><a href={doc('guides/installation')}>{zh ? '接入说明与版本限制' : 'Setup & version notes'} <span aria-hidden="true">↗</span></a></div>
+
+      <section class="workflow wrap" aria-labelledby="workflow-title">
+        <div class="section-heading"><p class="eyebrow">01 / {zh ? '从问题到证据' : 'A SHORTER PATH TO THE SOURCE'}</p><h2 id="workflow-title">{zh ? '从一个问题，找到具体代码。' : <>From a question.<br />To the exact lines.</>}</h2><p>{zh ? '让代理知道它找到什么、来自哪个版本，以及可以引用哪里。' : 'Give the agent the implementation, its source revision, and a citation you can follow.'}</p></div>
+        <ol class="steps">
+          <li><span class="step-number">01</span><h3>{zh ? '索引你的源码' : 'Index your source'}</h3><p>{zh ? '注册源码目录、版本与适配器，构建独立的结构和语义快照。' : 'Register a source root, revision, and adapter. Build its structural and semantic snapshot.'}</p><code>codalith index build</code></li>
+          <li><span class="step-number">02</span><h3>{zh ? '通过 MCP 检索' : 'Ask through MCP'}</h3><p>{zh ? '用语义、文本或符号发现相关实现，再获取有预算约束的上下文。' : 'Discover implementations with semantic, text, or symbol search. Retrieve bounded context.'}</p><code>codalith_context</code></li>
+          <li><span class="step-number">03</span><h3>{zh ? '核验并引用' : 'Verify and cite'}</h3><p>{zh ? '检查哈希与状态，使用返回的准确源码 URI 和行号支撑回答。' : 'Check hashes and status. Ground the answer in the exact returned source URI and line range.'}</p><code>codalith://…/source/…#Lx-Ly</code></li>
+        </ol>
+      </section>
+
+      <section class="principles" aria-labelledby="principles-title"><div class="wrap">
+        <div class="principles-heading"><p class="eyebrow">02 / {zh ? '把依据带回回答' : 'CONTEXT WITH A CHAIN OF EVIDENCE'}</p><h2 id="principles-title">{zh ? '每个答案，都能追溯到代码。' : <>The answer is useful.<br />The source makes it checkable.</>}</h2></div>
+        <div class="reasons">{reasons.map(([label, heading, body], i) => <article><span class="reason-index">0{i + 1}</span><p class="eyebrow">{label}</p><h3>{heading}</h3><p>{body}</p><a href={doc(i === 2 ? 'guides/configuration' : 'guides/architecture')}>{zh ? '了解设计' : 'Explore the design'} <span aria-hidden="true">↗</span></a></article>)}</div>
+        <div class="boundary"><span aria-hidden="true">↳</span><p>{zh ? '由你决定 embedding 运行在哪里。OpenAI 兼容服务会接收 embedding 输入；静态图关系会保留不明确的解析状态。' : 'You choose where embeddings run. An OpenAI-compatible provider receives embedding inputs. Static graph edges retain their resolution uncertainty.'}</p></div>
+      </div></section>
+
+      <section class="quickstart wrap" id="quickstart" aria-labelledby="start-title">
+        <div class="quickstart-copy"><p class="eyebrow">03 / {zh ? '先跑通，再深入' : 'START SMALL. THEN BRING YOUR CODE.'}</p><h2 id="start-title">{zh ? '从两份源码开始。' : 'Start with two source files.'}</h2><p>{zh ? '克隆仓库，准备 Python 3.11+ 与 uv。在项目根目录运行这些命令，即可构建内置 sample 并启动本地 MCP 服务。' : 'Clone the repository and install Python 3.11+ and uv. Run these commands from the project root to build the bundled sample and start the MCP server.'}</p><p class="sample-limit">{zh ? 'sample 使用确定性的假 embedding，无需 API key。它用于验证接入与引用流程，不能衡量真实语义检索质量。' : 'The sample uses deterministic fake embeddings and needs no API key. It verifies integration and citations; it does not measure semantic relevance.'}</p><a class="text-link" href={doc('start')}>{zh ? '完整安装与首次查询' : 'Full setup & your first query'} <span aria-hidden="true">↗</span></a></div>
+        <div class="terminal"><div class="terminal-heading"><span>TERMINAL <span>/ project root</span></span><button type="button" data-copy={start} data-copied={zh ? '已复制' : 'Copied'} data-failed={zh ? '复制失败，请手动选择' : 'Select and copy manually'}>{zh ? '复制命令' : 'Copy commands'}</button></div><pre><code>{start}</code></pre><div class="terminal-footer"><span class="status-dot"></span><code>http://127.0.0.1:8765/mcp</code><span>{zh ? 'Ctrl+C 停止' : 'Ctrl+C to stop'}</span></div></div>
+      </section>
+
+      <section class="manual wrap" aria-labelledby="manual-title"><div><p class="eyebrow">{zh ? '继续探索' : 'GO A LITTLE DEEPER'}</p><h2 id="manual-title">{zh ? '为真实的代码库做好准备。' : 'Make it work for your codebase.'}</h2></div><div class="manual-links"><a href={doc('guides/configuration')}><span>01</span>{zh ? '配置源码与 embedding' : 'Configure source & embeddings'}<span aria-hidden="true">↗</span></a><a href={doc('guides/mcp-api')}><span>02</span>{zh ? '探索七个 MCP 工具' : 'Explore the seven MCP tools'}<span aria-hidden="true">↗</span></a><a href={doc('guides/operations')}><span>03</span>{zh ? '运行、诊断与部署' : 'Run, diagnose & deploy'}<span aria-hidden="true">↗</span></a><a href={doc('guides/evaluation')}><span>04</span>{zh ? '评估检索与引用质量' : 'Evaluate retrieval & citations'}<span aria-hidden="true">↗</span></a></div></section>
+    </main>
+    <footer class="footer wrap"><div class="footer-brand"><img src={`${base}/brand/codalith-mark.png`} alt="" width="38" height="38" /><span>Codalith</span><p>{zh ? '让每个回答，有源码可循。' : 'A source behind every answer.'}</p></div><div class="footer-links"><a href={doc('start')}>{zh ? '快速开始' : 'Get started'}</a><a href={repository}>GitHub ↗</a><a href={`${repository}/blob/master/${zh ? 'README.zh-CN.md' : 'README.md'}#${zh ? '许可证与致谢' : 'licensing-and-attribution'}`}>{zh ? '许可证说明' : 'License status'}</a><a href={`${base}/evidence.json`}>{zh ? '示例证据' : 'Sample evidence'}</a><span>v0.2.0</span></div><p class="footer-note">{zh ? '静态文档网站。页面示例为公开测试语料的本地记录，不连接线上 MCP 服务。' : 'Static documentation. Examples are local recordings from the public fixture, with no live MCP connection.'}</p></footer>
+    <script>
+      const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+      function activate(tab: HTMLButtonElement) {
+        for (const candidate of tabs) {
+          const selected = candidate === tab;
+          candidate.setAttribute('aria-selected', String(selected));
+          candidate.tabIndex = selected ? 0 : -1;
+          const panel = document.getElementById(candidate.getAttribute('aria-controls') ?? '');
+          if (panel) panel.hidden = !selected;
+        }
+      }
+      tabs.forEach((tab, index) => {
+        tab.addEventListener('click', () => activate(tab));
+        tab.addEventListener('keydown', (event) => {
+          if (['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) {
+            event.preventDefault();
+            const next = event.key === 'Home' ? tabs[0] : event.key === 'End' ? tabs[tabs.length - 1] : tabs[(index + (event.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+            if (next) { activate(next); next.focus(); }
+          }
+        });
+      });
+      document.querySelectorAll<HTMLButtonElement>('[data-copy]').forEach((button) => {
+        button.setAttribute('aria-live', 'polite');
+        button.addEventListener('click', async () => {
+          const label = button.textContent;
+          try {
+            await navigator.clipboard.writeText(button.dataset.copy ?? '');
+            button.textContent = button.dataset.copied ?? 'Copied';
+          } catch { button.textContent = button.dataset.failed ?? 'Select and copy manually'; }
+          setTimeout(() => { button.textContent = label; }, 2500);
+        });
+      });
+    </script>
+  </body>
+</html>
