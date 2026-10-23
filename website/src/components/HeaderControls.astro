@@ -32,27 +32,32 @@ const chineseHref = Astro.props.chineseHref ?? `${base}/zh-cn/${suffix}`;
   <a class="github-link" href="https://github.com/cyber-tao/Codalith" aria-label={zh ? 'GitHub 仓库' : 'GitHub repository'} title={zh ? 'GitHub 仓库' : 'GitHub repository'}><Icon name="github" size="21px" /></a>
 </div>
 <style>
-  .header-controls { --control-text: #52665e; --control-hover: #183e35; --control-line: #d4dcd3; --control-track: #e3eae2; --control-thumb: #fff; --control-panel: #fcfdf9; display: flex; align-items: center; gap: 11px; color: var(--control-text); flex-shrink: 0; line-height: 1; }
-  :global([data-theme='dark']) .header-controls { --control-text: #a6b5bd; --control-hover: #edf6ef; --control-line: #29383b; --control-track: #182121; --control-thumb: #0b1210; --control-panel: #14201a; }
+  .header-controls { --control-text: #52665e; --control-hover: #183e35; --control-accent: #1b7354; --control-line: #d4dcd3; --control-track: #e3eae2; --control-thumb: #fff; --control-panel: #fcfdf9; display: flex; align-items: center; gap: 11px; color: var(--control-text); flex-shrink: 0; line-height: 1; }
+  :global([data-theme='dark']) .header-controls { --control-text: #a6b5bd; --control-hover: #edf6ef; --control-accent: #79cfaa; --control-line: #29383b; --control-track: #182121; --control-thumb: #0b1210; --control-panel: #14201a; }
   .language-picker { position: relative; }
-  summary { display: flex; align-items: center; justify-content: center; gap: 6px; list-style: none; cursor: pointer; min-width: 36px; height: 38px; border-radius: 5px; }
+  summary { display: flex; align-items: center; justify-content: center; gap: 6px; list-style: none; cursor: pointer; min-width: 36px; height: 38px; border-radius: 5px; transition: color .25s; }
   summary::-webkit-details-marker { display: none; }
-  summary:hover, .github-link:hover, .theme-toggle:hover { color: var(--control-hover); }
+  summary:hover, .language-picker[open] summary { color: var(--control-accent); }
+  .github-link:hover, .theme-toggle:hover { color: var(--control-hover); }
   ul { position: absolute; right: 0; top: calc(100% + 9px); z-index: 60; min-width: 152px; list-style: none; padding: 5px; margin: 0; border: 1px solid var(--control-line); border-radius: 7px; background: var(--control-panel); box-shadow: 0 12px 28px #0002; font-size: 13px; }
+  ul::before { content: ''; position: absolute; inset-inline: 0; top: -10px; height: 10px; }
+  .language-picker[open] ul { animation: language-menu-in .18s ease-out; }
+  @keyframes language-menu-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
   li { margin: 0; padding: 0; }
   li a { display: flex; align-items: center; justify-content: space-between; min-height: 38px; gap: 20px; border-radius: 4px; padding: 8px 11px; text-decoration: none; color: var(--control-text); white-space: nowrap; }
   li a:hover, li a[aria-current] { background: var(--control-track); color: var(--control-hover); }
   .divider { width: 1px; height: 20px; background: var(--control-line); }
   .theme-toggle { display: grid; place-items: center; width: 42px; height: 38px; border: 0; border-radius: 5px; padding: 0; background: none; color: var(--control-text); cursor: pointer; }
-  .toggle-track { display: block; width: 40px; height: 22px; padding: 2px; border: 1px solid var(--control-line); border-radius: 20px; background: var(--control-track); }
+  .toggle-track { display: block; width: 40px; height: 22px; padding: 2px; border: 1px solid var(--control-line); border-radius: 20px; background: var(--control-track); transition: border-color .25s; }
+  .theme-toggle:is(:hover, :focus-visible) .toggle-track { border-color: var(--control-accent); }
   .toggle-thumb { display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--control-thumb); color: var(--control-hover); box-shadow: 0 1px 3px #0002; transition: transform .18s ease; }
   .toggle-thumb :global(.moon) { display: none; }
   :global([data-theme='dark']) .toggle-thumb { transform: translateX(18px); }
   :global([data-theme='dark']) .toggle-thumb :global(.moon) { display: block; }
   :global([data-theme='dark']) .toggle-thumb :global(.sun) { display: none; }
-  .github-link { display: grid; place-items: center; width: 30px; height: 38px; border-radius: 5px; color: inherit; }
+  .github-link { display: grid; place-items: center; width: 30px; height: 38px; border-radius: 5px; color: inherit; transition: color .25s; }
   summary:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid #58b48c; outline-offset: 3px; }
-  @media (prefers-reduced-motion: reduce) { .toggle-thumb { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { .toggle-thumb, .toggle-track, summary, .github-link { transition: none; } .language-picker[open] ul { animation: none; } }
   @media (max-width: 560px) { .header-controls { gap: 6px; } }
 </style>
 <script>
@@ -77,7 +82,42 @@ const chineseHref = Astro.props.chineseHref ?? `${base}/zh-cn/${suffix}`;
     });
   });
   pickers.forEach((picker) => {
+    const hoverCloseDelayMs = 120;
+    let closeTimer: number | undefined;
+    let pointerIsMouse = false;
+    let keyboardFocus = false;
+    const cancelClose = () => window.clearTimeout(closeTimer);
+    picker.addEventListener('pointerenter', (event) => {
+      if (event.pointerType !== 'mouse') return;
+      pointerIsMouse = true;
+      cancelClose();
+      if (!picker.open) {
+        keyboardFocus = false;
+        picker.open = true;
+      }
+    });
+    picker.addEventListener('pointerleave', (event) => {
+      if (event.pointerType !== 'mouse') return;
+      pointerIsMouse = false;
+      cancelClose();
+      closeTimer = window.setTimeout(() => {
+        if (!picker.matches(':hover') && !(keyboardFocus && picker.contains(document.activeElement))) picker.open = false;
+      }, hoverCloseDelayMs);
+    });
+    picker.addEventListener('pointerdown', (event) => {
+      pointerIsMouse = event.pointerType === 'mouse';
+      keyboardFocus = false;
+    });
+    picker.querySelector('summary')?.addEventListener('click', (event) => {
+      if (event.detail > 0 && pointerIsMouse) {
+        event.preventDefault();
+        cancelClose();
+        picker.open = true;
+      }
+    });
     picker.addEventListener('keydown', (event) => {
+      keyboardFocus = true;
+      cancelClose();
       if (event.key === 'Escape' && picker.open) {
         picker.open = false;
         picker.querySelector('summary')?.focus();
