@@ -145,7 +145,7 @@ def test_agent_comparison_real_mcp_tool_loop_and_lazy_skill(
     assert all(row["citation_audit"][0]["valid"] for row in source_rows)
     formal = [request for request in model.requests if request["tools"]]
     assert all("SECRET" not in json.dumps(request) for request in formal)
-    assert all(len(request["tools"]) == (8 if "Available skill:" in request["messages"][0]["content"] else 7) for request in formal)
+    assert all(len(request["tools"]) == (9 if "Available skill:" in request["messages"][0]["content"] else 8) for request in formal)
     trace = [json.loads(line) for line in (files[2] / "trace.jsonl").read_text(encoding="utf-8").splitlines()]
     assert any(item["event"] == "model_response" and item["response"]["prompt_eval_cached_count"] == 7 for item in trace)
     assert any(item["event"] == "citation_audit" for item in trace)

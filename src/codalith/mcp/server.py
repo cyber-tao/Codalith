@@ -96,7 +96,7 @@ def create_sdk_server(
             recorder.record_call(
                 tool=name,
                 arguments=arguments,
-                target=_call_target(arguments, service.registry.default_target),
+                target=bound_target or _call_target(arguments, service.registry.default_target),
                 started_at=started_at,
                 duration_ms=max(0.0, (time.perf_counter() - started) * 1_000),
                 result=result,

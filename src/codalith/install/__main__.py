@@ -21,7 +21,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--scope", choices=["user", "project"], default="user")
     parser.add_argument("--project", type=Path, help="Project directory (defaults to cwd for project scope)")
     parser.add_argument("--home", type=Path, help="Use an isolated home; ignores host path overrides and executable detection")
-    parser.add_argument("--endpoint", default=DEFAULT_ENDPOINT)
+    parser.add_argument("--endpoint", default=None)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true", help="Plan without writing files or starting services")
     mode.add_argument("--check", action="store_true", help="Verify installed skill/configuration without repairing")
@@ -40,15 +40,27 @@ def run_from_args(args: argparse.Namespace) -> int:
     if args.project and scope != "project":
         raise ValueError("--project requires --scope project.")
     home = args.home.expanduser().resolve() if args.home else None
+    endpoint = args.endpoint or DEFAULT_ENDPOINT
+    if project is not None:
+        from codalith.project import bound_endpoint, detect_project, read_binding
+
+        binding = read_binding(project)
+        if binding is not None:
+            if args.check:
+                detected = detect_project(project)
+                if detected["status"] != "resolved":
+                    raise ValueError("Project binding is stale or ambiguous; run codalith project detect and bind again")
+            if args.endpoint is None:
+                endpoint = bound_endpoint(binding["server"], binding["target"])
     targets = select_targets(args.agent, scope=scope, home=home, project_dir=project)
-    plan = build_plan(targets, endpoint=args.endpoint, replace=args.replace)
+    plan = build_plan(targets, endpoint=endpoint, replace=args.replace)
     result = plan.describe()
     command = service_command(args.start_service) if args.start_service else None
     result["service_command"] = command
     if args.dry_run:
         result.update({"status": "dry-run", "connectivity": {"connected": None, "reason": "Not probed during dry-run"}, "backups": []})
     else:
-        connectivity = start_service(command, args.endpoint) if command else {"connected": None, "reason": "Offline configuration requested"} if args.no_probe else probe_endpoint(args.endpoint)
+        connectivity = start_service(command, endpoint) if command else {"connected": None, "reason": "Offline configuration requested"} if args.no_probe else probe_endpoint(endpoint)
         result["connectivity"] = connectivity
         if args.check:
             result.update({"status": "needs-install" if plan.changes else "verified", "backups": []})

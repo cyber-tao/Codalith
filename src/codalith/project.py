@@ -23,6 +23,10 @@ _TARGET = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _MAX_PROJECT_BYTES = 1024 * 1024
 
 
+class EngineGitError(ValueError):
+    """An engine has Git provenance, but its local revision could not be verified."""
+
+
 def catalog_url(server: str) -> str:
     parsed = urlsplit(validate_endpoint(server))
     return urlunsplit((parsed.scheme, parsed.netloc, "/api/catalog", "", ""))
@@ -64,6 +68,8 @@ def _json_file(path: Path) -> dict[str, Any]:
 
 def read_binding(project: Path) -> dict[str, Any] | None:
     path = project / BINDING_PATH
+    if not path.resolve().is_relative_to(project.resolve()):
+        raise ValueError("Project binding must remain inside the project directory")
     if path.is_symlink():
         raise ValueError("Project binding must not be a symlink")
     if not path.exists():
@@ -120,7 +126,8 @@ def _engine_version(root: Path) -> str:
 
 
 def _engine_commit(root: Path) -> str | None:
-    if not (root / ".git").exists():
+    marker = root / ".git"
+    if not marker.exists() and not marker.is_symlink():
         return None
     try:
         result = subprocess.run(
@@ -128,13 +135,19 @@ def _engine_commit(root: Path) -> str | None:
             capture_output=True, check=False, timeout=10,
             env={**{key: value for key, value in os.environ.items() if not key.startswith("GIT_")}, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull, "GIT_OPTIONAL_LOCKS": "0"},
         )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
+    except subprocess.TimeoutExpired as exc:
+        raise EngineGitError("Local engine Git revision lookup timed out") from exc
+    except OSError as exc:
+        raise EngineGitError(f"Local engine Git could not be executed ({type(exc).__name__})") from exc
     if result.returncode == 0:
-        value = result.stdout.decode("ascii").strip()
+        try:
+            value = result.stdout.decode("ascii").strip()
+        except UnicodeDecodeError as exc:
+            raise EngineGitError("Local engine Git returned an invalid revision") from exc
         if re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", value):
             return value
-    return None
+        raise EngineGitError("Local engine Git returned an invalid revision")
+    raise EngineGitError(f"Local engine Git revision lookup failed (exit code {result.returncode})")
 
 
 def detect_project(
@@ -170,13 +183,17 @@ def detect_project(
     if engine is None:
         engine = next((p for p in (root, *root.parents) if (p / "Engine/Build/Build.version").is_file()), None)
     commit = None
+    git_error = None
     if engine is not None:
         engine = engine.expanduser().resolve(strict=True)
         inferred = _engine_version(engine)
         if _VERSION.fullmatch(association) and not (inferred == association or inferred.startswith(association + ".")):
             base.update(status="conflict", reason="EngineAssociation disagrees with the selected engine")
             return base
-        commit = _engine_commit(engine)
+        try:
+            commit = _engine_commit(engine)
+        except EngineGitError as exc:
+            git_error = str(exc)
     address = server or (binding["server"] if binding else None)
     if address is None:
         raise ValueError("--server is required for an unbound project")
@@ -197,7 +214,14 @@ def detect_project(
         server=address, project_file=selected.relative_to(root).as_posix(),
         engine_association=association, engine_version=inferred, engine_root=str(engine) if engine else None,
         source_commit=commit, candidates=candidates,
+        verification="unverified" if git_error else "pending",
     )
+    if git_error and not target:
+        base.update(
+            status="unavailable",
+            reason=f"{git_error}; restore Git access or explicitly select --target. The local source revision is unverified.",
+        )
+        return base
     if len(candidates) != 1:
         base.update(status="ambiguous" if len(candidates) > 1 else "unavailable", reason="No unique ready target matches the project; select an exact target")
         return base
@@ -213,7 +237,10 @@ def detect_project(
     if binding and not target and revision != binding["source_commit"]:
         base.update(status="conflict", reason="Bound target source revision has changed")
         return base
-    base.update(status="resolved", target=match.get("target_id", match.get("target")), resolved_version=actual_version, resolved_commit=revision)
+    verification = "unverified" if git_error else "source_commit" if commit else "version_only" if inferred else "explicit_target_only"
+    base.update(status="resolved", target=match.get("target_id", match.get("target")), resolved_version=actual_version, resolved_commit=revision, verification=verification)
+    if git_error:
+        base["reason"] = f"Explicit target selected; {git_error}. The local source revision remains unverified."
     return base
 
 
@@ -233,6 +260,8 @@ def bind_project(
         "project_file": detection["project_file"], "engine_root": detection.get("engine_root"),
     }
     path = root / BINDING_PATH
+    if not path.resolve().is_relative_to(root):
+        raise ValueError("Project binding must remain inside the project directory")
     if path.is_symlink():
         raise ValueError("Project binding must not be a symlink")
     original = path.read_bytes() if path.exists() else None
@@ -243,6 +272,9 @@ def bind_project(
     plan = InstallPlan(installation.targets, changes, endpoint)
     result = plan.describe()
     result.update(status="dry-run" if dry_run else "bound", binding=binding)
+    result["verification"] = detection.get("verification", "unverified")
+    if detection.get("reason"):
+        result["reason"] = detection["reason"]
     result["backups"] = [] if dry_run else apply_plan(plan)
     return result
 

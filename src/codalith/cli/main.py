@@ -59,9 +59,9 @@ def _dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     if args.command == "client-config":
         return _client_config(args)
     if args.command == "project":
-        from codalith.project import run
+        from codalith.project import run as run_project
 
-        return run(args)
+        return run_project(args)
     if args.command == "install-agents":
         from codalith.install.__main__ import error_message, run_from_args
 
@@ -76,6 +76,10 @@ def _dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         return _serve(args, registry, policy)
     if args.command == "index":
         return _index(args, registry, policy)
+    if args.command == "management":
+        from codalith.management.cli import run as run_management
+
+        return run_management(args, registry, policy)
     if args.command == "doctor":
         return _doctor(args, registry, policy)
     raise ValueError(f"Unknown command: {args.command}")
@@ -86,7 +90,24 @@ def _serve(
     registry: CorpusRegistry,
     policy: SourcePolicy,
 ) -> int:
-    service = QueryService(registry, policy)
+    from codalith.management.config import ManagementConfig
+
+    management_config = ManagementConfig.from_registry(registry.path)
+    management = None
+    service: QueryService
+    if management_config.enabled:
+        from codalith.corpus.managed_registry import ManagedRegistry
+        from codalith.indexing.shared import SharedPool, SharedQueryService
+        from codalith.management.service import ManagementService
+
+        pool = SharedPool(management_config.storage_root / "shared", policy)
+        managed_registry = ManagedRegistry(registry, pool.published_corpora)
+        service = SharedQueryService(managed_registry, policy, pool)
+        if args.transport == "http":
+            management = ManagementService(registry, policy, management_config)
+            management.on_publish = managed_registry.refresh
+    else:
+        service = QueryService(registry, policy)
     if args.transport == "stdio":
         try:
             anyio.run(serve_stdio, service)
@@ -103,7 +124,7 @@ def _serve(
         access_log=args.access_log,
     )
     uvicorn.run(
-        create_http_app(service, config),
+        create_http_app(service, config, management=management),
         host=config.host,
         port=config.port,
         log_level="info" if config.access_log else "warning",
@@ -342,6 +363,9 @@ def _parser() -> argparse.ArgumentParser:
     from codalith.project import add_arguments as project_arguments
 
     project_arguments(subparsers.add_parser("project", help="Detect and bind a local UE project to a source version"))
+    from codalith.management.cli import add_arguments as management_arguments
+
+    management_arguments(subparsers)
 
     serve = subparsers.add_parser("serve", help="Run the MCP server")
     serve.add_argument("--transport", choices=("stdio", "http"), default="stdio")

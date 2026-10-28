@@ -6,7 +6,7 @@ import hashlib
 import json
 import os
 import sqlite3
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -62,6 +62,8 @@ def write_structure(
     database: Path,
     *,
     progress: Callable[[str], None] | None = None,
+    sources: Iterable[tuple[str, bytes]] | None = None,
+    extract: Callable[[str, str], ExtractionResult] | None = None,
 ) -> StructureSummary:
     """Extract every selected source file of ``corpus`` into a new SQLite file."""
 
@@ -83,9 +85,15 @@ def write_structure(
                 ("schema_version", str(STRUCTURE_SCHEMA_VERSION)),
             )
             processed_files = 0
-            for source_path in _source_files(corpus, policy, adapter.supports):
-                relative = source_path.relative_to(corpus.source_root).as_posix()
-                raw = source_path.read_bytes()
+            inputs = (
+                sources
+                if sources is not None
+                else (
+                    (path.relative_to(corpus.source_root).as_posix(), path.read_bytes())
+                    for path in _source_files(corpus, policy, adapter.supports)
+                )
+            )
+            for relative, raw in inputs:
                 if len(raw) > policy.max_file_bytes:
                     warnings.add(f"{relative}: skipped; file exceeds byte limit")
                     continue
@@ -95,11 +103,12 @@ def write_structure(
                 fingerprint.update(file_hash.encode("ascii"))
                 text = raw.decode("utf-8", errors="replace")
                 try:
-                    extraction = adapter.extract(relative, text)
+                    extraction = (extract or adapter.extract)(relative, text)
                 except Exception as exc:
+                    if extract is not None:
+                        raise
                     warnings.add(
-                        f"{relative}: structural extraction failed with "
-                        f"{type(exc).__name__}: {exc}"
+                        f"{relative}: structural extraction failed with {type(exc).__name__}: {exc}"
                     )
                     extraction = ExtractionResult(language=language_for_path(relative))
                 warnings.extend(extraction.warnings)
@@ -187,8 +196,7 @@ def write_structure(
                     symbol_key_rows,
                 )
                 connection.executemany(
-                    "INSERT INTO pending_parents("
-                    "symbol_id, parent_key, path) VALUES (?, ?, ?)",
+                    "INSERT INTO pending_parents(symbol_id, parent_key, path) VALUES (?, ?, ?)",
                     parent_rows,
                 )
                 processed_files += 1
@@ -265,8 +273,7 @@ def _source_files(
                 continue
             normalized_filename = filename.casefold()
             if corpus.include_extensions and not any(
-                normalized_filename.endswith(extension)
-                for extension in corpus.include_extensions
+                normalized_filename.endswith(extension) for extension in corpus.include_extensions
             ):
                 continue
             if supports(path):

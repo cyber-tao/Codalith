@@ -28,7 +28,7 @@ from codalith.query.models import ReadResponse
 
 _ARMS = ("mcp_only", "skill_mcp")
 _MCP_TOOLS = frozenset(
-    f"codalith_{name}" for name in ("search", "context", "read", "symbol", "graph", "compare", "status")
+    f"codalith_{name}" for name in ("search", "context", "read", "symbol", "graph", "compare", "status", "catalog")
 )
 _KEEP_ALIVE = "30m"
 _BASE_SYSTEM = (
@@ -372,7 +372,7 @@ async def _run_comparison(settings: _Settings, tasks: list[dict[str, Any]], data
                     initialized = await session.initialize()
                     native = (await session.list_tools()).tools
                     if {item.name for item in native} != _MCP_TOOLS:
-                        raise RuntimeError("Endpoint must expose exactly the seven Codalith MCP tools")
+                        raise RuntimeError("Endpoint must expose the registered Codalith MCP tool contract")
                     tools = [{"type": "function", "function": {"name": item.name, "description": item.description or "", "parameters": item.inputSchema}} for item in native]
                     system = _BASE_SYSTEM + "\n\nMCP server instructions:\n" + (initialized.instructions or "")
                     metadata.update({

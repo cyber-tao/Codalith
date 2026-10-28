@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING, Any
 
 from codalith.query.models import CatalogResponse, CatalogVersion
 
 if TYPE_CHECKING:
     from codalith.query.service import QueryService
-
-_UE_VERSION = re.compile(r"(?<!\d)(5\.\d+(?:\.\d+)?)(?!\d)")
-
 
 def version_catalog(service: QueryService, target: str | None = None) -> CatalogResponse:
     refresh = getattr(service.registry, "refresh", None)
@@ -27,8 +23,7 @@ def version_catalog(service: QueryService, target: str | None = None) -> Catalog
         status = service.status(target=corpus.corpus_id)
         state = status.corpora[0] if status.corpora else None
         metadata = managed.get(corpus.corpus_id, {})
-        match = _UE_VERSION.search(corpus.display_name + " " + corpus.corpus_id) if corpus.adapter == "cpp-ue" else None
-        engine_version = metadata.get("engine_version") or (match.group(1) if match else None)
+        engine_version = metadata.get("engine_version")
         capabilities = ["read", "text", "symbol", "graph", "compare"] if state and state.generation_id else []
         if state and state.semantic_available:
             capabilities.append("semantic")

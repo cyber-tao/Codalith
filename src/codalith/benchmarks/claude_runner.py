@@ -375,7 +375,7 @@ async def _run(
                     initialized = await session.initialize()
                     native = (await session.list_tools()).tools
                     if {item.name for item in native} != _MCP_TOOLS:
-                        raise RuntimeError("Claude endpoint must expose exactly the seven Codalith MCP tools")
+                        raise RuntimeError("Claude endpoint must expose the registered Codalith MCP tool contract")
                     baseline = await _snapshot(session)
                     metadata.update({"mcp_initialize": initialized.model_dump(mode="json"), "mcp_start": baseline, "native_tools_sha256": _hash([item.model_dump(mode="json") for item in native])})
                     _write(trace, {"event": "initialized", "metadata": metadata})

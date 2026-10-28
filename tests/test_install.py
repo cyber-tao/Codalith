@@ -185,7 +185,7 @@ def test_installer_probe_uses_real_mcp_and_ready_default_target(semantic_environ
         result = probe_endpoint(endpoint)
     assert result["connected"] is True and result["ready"] is True
     assert result["target"] == "sample"
-    assert len(result["tools"]) == 7 and result["corpora"][0]["generation_id"]
+    assert len(result["tools"]) == 8 and result["corpora"][0]["generation_id"]
 
 
 def test_probe_rejects_degraded_index_without_building_semantics(environment_factory):

@@ -25,11 +25,17 @@ _FETCH_BATCH = 1_000
 
 
 class StructureIndex:
-    def __init__(self, path: Path, profile: RetrievalProfile = NEUTRAL_PROFILE) -> None:
+    def __init__(
+        self,
+        path: Path,
+        profile: RetrievalProfile = NEUTRAL_PROFILE,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> None:
         if not path.is_file():
             raise IndexInvalidError(f"Structure index does not exist: {path}")
         uri = path.resolve().as_uri() + "?mode=ro"
-        self._connection = sqlite3.connect(uri, uri=True, check_same_thread=False)
+        self._connection = connection or sqlite3.connect(uri, uri=True, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
         self._lock = threading.RLock()
         self._declaration_order = _declaration_path_order(profile)

@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import anyio
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
@@ -27,6 +28,9 @@ from codalith.errors import CodalithError
 from codalith.mcp.server import create_sdk_server
 from codalith.query.catalog import version_catalog
 from codalith.query.service import QueryService
+
+if TYPE_CHECKING:
+    from codalith.management.service import ManagementService
 
 DEFAULT_MAX_REQUEST_BYTES = 1_048_576
 
@@ -167,6 +171,7 @@ def create_http_app(
     *,
     telemetry: TelemetryStore | None = None,
     dashboard_dir: Path | None = None,
+    management: ManagementService | None = None,
 ) -> Starlette:
     config.validate()
     telemetry_store = telemetry or TelemetryStore()
@@ -205,8 +210,12 @@ def create_http_app(
     async def lifespan(_: Starlette) -> AsyncIterator[None]:
         async with manager.run():
             try:
+                if management is not None:
+                    await anyio.to_thread.run_sync(management.start)
                 yield
             finally:
+                if management is not None:
+                    await anyio.to_thread.run_sync(management.stop)
                 service.close()
 
     routes: list[BaseRoute] = [
@@ -216,6 +225,7 @@ def create_http_app(
         Route(config.endpoint + "/targets/{target_id}", endpoint=BoundSessionASGI(service, telemetry_store, security), methods=["GET", "POST", "DELETE"]),
         Route("/api/catalog", endpoint=catalog, methods=["GET"]),
         *dashboard_routes(service, telemetry_store, dashboard_dir=dashboard_dir),
+        *(management.routes() if management is not None else []),
     ]
 
     return Starlette(

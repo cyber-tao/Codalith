@@ -40,7 +40,7 @@ from codalith.indexing.structure.models import (
     SymbolRecord,
 )
 from codalith.indexing.structure.store import StructureIndex
-from codalith.indexing.text_search import search_text
+from codalith.indexing.text_search import TextHit, search_text
 from codalith.languages.catalog import RetrievalProfile, language_for_path, retrieval_profile
 from codalith.query.models import (
     CompareChange,
@@ -251,10 +251,7 @@ class _Request:
                 self._service.indices.lease(
                     corpus.corpus_id,
                     generation.manifest.generation_id,
-                    lambda: StructureIndex(
-                        generation.structure_path,
-                        retrieval_profile(corpus.adapter),
-                    ),
+                    lambda: self._service.open_structure(corpus, generation),
                 )
             )
             snapshot = _Snapshot(corpus, generation, index)
@@ -270,6 +267,23 @@ class QueryService:
         self.semantic = SemanticBackend(policy)
         self.indices: GenerationLeases[StructureIndex] = GenerationLeases(StructureIndex.close)
         self.sources = SourceReader(policy)
+
+    def open_structure(self, corpus: Corpus, generation: ActiveGeneration) -> StructureIndex:
+        return StructureIndex(generation.structure_path, retrieval_profile(corpus.adapter))
+
+    def search_text(
+        self,
+        corpus: Corpus,
+        index: StructureIndex,
+        query: str,
+        *,
+        limit: int,
+        max_file_bytes: int,
+    ) -> list[TextHit]:
+        return search_text(corpus, index, query, limit=limit, max_file_bytes=max_file_bytes)
+
+    def verify_semantic(self, generation: ActiveGeneration) -> None:
+        generation_store_provenance(generation)
 
     def close(self) -> None:
         self.semantic.close()
@@ -467,7 +481,7 @@ class QueryService:
                             _EXACT_SYMBOL_WEIGHT,
                         )
                 try:
-                    text_hits = search_text(
+                    text_hits = self.search_text(
                         corpus,
                         index,
                         normalized_query,
@@ -946,7 +960,7 @@ class QueryService:
             try:
                 generation = self.generations.active(corpus)
                 if generation.manifest.semantic_available:
-                    generation_store_provenance(generation)
+                    self.verify_semantic(generation)
             except IndexUnavailableError as exc:
                 message = str(exc)
                 state: Literal["missing", "invalid"] = (

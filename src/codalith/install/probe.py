@@ -12,7 +12,7 @@ DEFAULT_ENDPOINT = "http://127.0.0.1:8765/mcp"
 PROTOCOL_VERSION = "2025-06-18"
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 EXPECTED_TOOLS = frozenset(
-    f"codalith_{name}" for name in ("search", "context", "read", "symbol", "graph", "compare", "status")
+    f"codalith_{name}" for name in ("search", "context", "read", "symbol", "graph", "compare", "status", "catalog")
 )
 
 
@@ -114,7 +114,7 @@ def probe_endpoint(url: str, *, timeout: float = 10) -> dict[str, Any]:
         tools = listed.get("tools")
         names = {tool.get("name") for tool in tools if isinstance(tool, dict)} if isinstance(tools, list) else set()
         if not EXPECTED_TOOLS.issubset(names):
-            raise ValueError("The MCP endpoint does not advertise all seven Codalith tools.")
+            raise ValueError("The MCP endpoint does not advertise the Codalith tool contract.")
         status_result = request("tools/call", 3, {"name": "codalith_status", "arguments": {}})
         status = status_result.get("structuredContent")
         if status_result.get("isError") or not isinstance(status, dict) or status.get("ready") is not True:

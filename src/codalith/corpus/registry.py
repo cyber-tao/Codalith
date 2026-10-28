@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -100,7 +101,8 @@ class CorpusRegistry:
         management = payload.get("management", {})
         if not isinstance(management, dict):
             raise ConfigurationError("management must be a table")
-        allow_empty = management.get("enabled") is True
+        enabled = os.getenv("CODALITH_MANAGEMENT_ENABLED")
+        allow_empty = (enabled.lower() in {"true", "1"}) if enabled is not None else management.get("enabled") is True
         default_target = str(payload.get("default_target", "")) if allow_empty else _required_string(payload, "default_target", config_path)
         raw_corpora = payload.get("corpora", [])
         if not isinstance(raw_corpora, list) or (not raw_corpora and not allow_empty):
