@@ -15,7 +15,7 @@ from codalith.languages.catalog import ADAPTERS
 REGISTRY_SCHEMA_VERSION = 2
 _SAFE_ID = re.compile(r"^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$")
 _PROVIDERS = frozenset({"fake", "fastembed", "openai"})
-_TOP_LEVEL_FIELDS = frozenset({"schema_version", "default_target", "corpora", "workspaces"})
+_TOP_LEVEL_FIELDS = frozenset({"schema_version", "default_target", "corpora", "workspaces", "management"})
 _CORPUS_FIELDS = frozenset(
     {
         "id",
@@ -79,12 +79,14 @@ class CorpusRegistry:
         default_target: str,
         corpora: dict[str, Corpus],
         workspaces: dict[str, Workspace],
+        allow_empty: bool = False,
     ) -> None:
         self.path = path
         self.default_target = default_target
         self.corpora = corpora
         self.workspaces = workspaces
-        self.resolve(default_target)
+        if not allow_empty:
+            self.resolve(default_target)
 
     @classmethod
     def from_file(cls, path: str | Path) -> CorpusRegistry:
@@ -95,9 +97,13 @@ class CorpusRegistry:
                 f"{config_path} schema_version must be {REGISTRY_SCHEMA_VERSION}"
             )
         _reject_unknown(payload, _TOP_LEVEL_FIELDS, "registry", config_path)
-        default_target = _required_string(payload, "default_target", config_path)
-        raw_corpora = payload.get("corpora")
-        if not isinstance(raw_corpora, list) or not raw_corpora:
+        management = payload.get("management", {})
+        if not isinstance(management, dict):
+            raise ConfigurationError("management must be a table")
+        allow_empty = management.get("enabled") is True
+        default_target = str(payload.get("default_target", "")) if allow_empty else _required_string(payload, "default_target", config_path)
+        raw_corpora = payload.get("corpora", [])
+        if not isinstance(raw_corpora, list) or (not raw_corpora and not allow_empty):
             raise ConfigurationError(f"{config_path} must define at least one [[corpora]]")
         corpora: dict[str, Corpus] = {}
         for index, raw in enumerate(raw_corpora):
@@ -137,6 +143,7 @@ class CorpusRegistry:
             default_target=default_target,
             corpora=corpora,
             workspaces=workspaces,
+            allow_empty=allow_empty,
         )
 
     def resolve(self, target: str | None = None) -> Target:

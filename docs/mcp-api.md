@@ -53,6 +53,12 @@ Input: `from_corpus`, `to_corpus`, `include_unchanged`, and `limit` (1–1,000).
 
 Groups are compared in comparison-key order, by signature, path, module, and metadata. A comparison stops after 30 seconds: `truncated` is then true and `warnings` says how many groups were compared. `truncated` is also true when more than `limit` groups differ.
 
+### `codalith_catalog`
+
+Lists version targets, engine versions, exact source revisions, snapshot identities, readiness and retrieval capabilities. This read-only operation does not load embedding models or scan source trees. The same catalog is available at `GET /api/catalog`.
+
+Version-bound clients use `/mcp/targets/<target_id>` (or the configured MCP endpoint followed by `/targets/<target_id>`). Omitted targets are bound automatically; different targets, cross-version source/symbol URIs and comparisons are rejected. Use the ordinary MCP endpoint for explicit cross-version comparisons.
+
 ### `codalith_status`
 
 Input: optional `target`. Returns per-corpus state without loading embedding models or scanning source: `ready` (structural and semantic planes valid), `degraded` (no semantic plane), `missing` (no published generation), or `invalid` (the active generation no longer matches its artifacts, store provenance, or configuration).

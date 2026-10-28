@@ -128,6 +128,7 @@ async def _exercise_http_contract(endpoint: str) -> None:
                 "codalith_graph",
                 "codalith_compare",
                 "codalith_status",
+                "codalith_catalog",
             ]
             status = await session.call_tool("codalith_status", {})
             assert not status.isError

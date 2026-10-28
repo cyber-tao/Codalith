@@ -162,3 +162,17 @@ class StatusResponse(StrictModel):
     target: str
     ready: bool
     corpora: list[CorpusStatus]
+
+
+class CatalogVersion(StrictModel):
+    target_id: str
+    display_name: str
+    engine_version: str | None = None
+    source_commit: str
+    snapshot_id: str | None = None
+    ready: bool
+    capabilities: list[str]
+
+
+class CatalogResponse(StrictModel):
+    versions: list[CatalogVersion]

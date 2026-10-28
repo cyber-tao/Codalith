@@ -20,6 +20,7 @@ from codalith.errors import INTERNAL_ERROR_CODE, CodalithError, describe_error
 from codalith.mcp.schemas import (
     TOOL_BY_NAME,
     TOOLS,
+    CatalogInput,
     CompareInput,
     ContextInput,
     GraphInput,
@@ -28,6 +29,7 @@ from codalith.mcp.schemas import (
     StatusInput,
     SymbolInput,
 )
+from codalith.query.catalog import version_catalog
 from codalith.query.models import StrictModel as ResponseModel
 from codalith.query.service import QueryService
 
@@ -51,11 +53,15 @@ class ToolCallRecorder(Protocol):
 def create_sdk_server(
     service: QueryService,
     recorder: ToolCallRecorder | None = None,
+    *,
+    bound_target: str | None = None,
 ) -> Server[Any]:
+    if bound_target is not None:
+        service.registry.resolve(bound_target)
     server: Server[Any] = Server(
         "codalith",
         version=__version__,
-        instructions=build_instructions(service),
+        instructions=build_instructions(service, bound_target),
     )
 
     @server.list_tools()  # type: ignore[no-untyped-call, untyped-decorator]
@@ -98,7 +104,12 @@ def create_sdk_server(
             )
 
         try:
-            result = await anyio.to_thread.run_sync(_invoke, service, name, arguments)
+            scoped = _scope_arguments(service, name, arguments, bound_target)
+            if name == "codalith_catalog":
+                CatalogInput.model_validate(scoped)
+                result = (await anyio.to_thread.run_sync(version_catalog, service, bound_target)).model_dump(mode="json")
+            else:
+                result = await anyio.to_thread.run_sync(_invoke, service, name, scoped)
         except Exception as exc:
             if describe_error(exc)[0] == INTERNAL_ERROR_CODE:
                 _LOG.exception("Unhandled Codalith tool failure: %s", name)
@@ -116,7 +127,7 @@ def create_sdk_server(
                 description=corpus.description or None,
                 mimeType="application/json",
             )
-            for corpus in service.registry.corpora.values()
+            for corpus in (service.registry.resolve(bound_target).corpora if bound_target else service.registry.corpora.values())
         ]
 
     @server.list_resource_templates()  # type: ignore[no-untyped-call, untyped-decorator]
@@ -139,6 +150,7 @@ def create_sdk_server(
     @server.read_resource()  # type: ignore[no-untyped-call, untyped-decorator]
     async def read_resource(uri: AnyUrl) -> list[ReadResourceContents]:
         try:
+            _scope_uri(service, str(uri), bound_target)
             payload = await anyio.to_thread.run_sync(_read_resource, service, str(uri))
         except (CodalithError, TypeError, ValueError) as exc:
             payload = _error_payload(exc)
@@ -152,18 +164,18 @@ def create_sdk_server(
     return server
 
 
-def build_instructions(service: QueryService) -> str:
+def build_instructions(service: QueryService, bound_target: str | None = None) -> str:
     corpora = ", ".join(
-        f"{item.corpus_id} ({item.revision})" for item in service.registry.corpora.values()
+        f"{item.corpus_id} ({item.revision})" for item in (service.registry.resolve(bound_target).corpora if bound_target else service.registry.corpora.values())
     )
     workspaces = ", ".join(
         f"{item.workspace_id} [{', '.join(item.corpus_ids)}]"
-        for item in service.registry.workspaces.values()
+        for item in service.registry.workspaces.values() if bound_target is None
     )
     return (
         "Codalith provides version-pinned source evidence for AI coding agents. "
         f"Registered corpora: {corpora}. Registered workspaces: {workspaces or 'none'}. "
-        f"Default target: {service.registry.default_target}. Registration is not readiness; "
+        f"Default target: {bound_target or service.registry.default_target}. Registration is not readiness; "
         "use codalith_status when target/version or index state is uncertain, not before "
         "every query. Pass the requested target explicitly. Use codalith_context for "
         "bounded implementation evidence, codalith_symbol for known identifiers, and "
@@ -177,6 +189,32 @@ def build_instructions(service: QueryService) -> str:
         "Keep the answer to supported claims needed for the question; a valid URI alone "
         "does not prove a claim or an exhaustive always/never assertion."
     )
+
+
+def _scope_uri(service: QueryService, uri: str, target: str | None) -> None:
+    if target is None:
+        return
+    allowed = {item.corpus_id for item in service.registry.resolve(target).corpora}
+    if parse_uri(uri).corpus_id not in allowed:
+        raise ValueError("URI is outside this endpoint's bound version")
+
+
+def _scope_arguments(
+    service: QueryService, name: str, arguments: dict[str, Any], target: str | None,
+) -> dict[str, Any]:
+    scoped = dict(arguments)
+    if target is None:
+        return scoped
+    if name == "codalith_compare":
+        raise ValueError("Cross-version comparison requires the unbound MCP endpoint")
+    if name in {"codalith_search", "codalith_context", "codalith_symbol", "codalith_status"}:
+        if scoped.get("target") not in {None, target}:
+            raise ValueError("Requested target differs from this endpoint's bound version")
+        scoped["target"] = target
+    for key in ("uri", "root_uri"):
+        if key in scoped:
+            _scope_uri(service, scoped[key], target)
+    return scoped
 
 
 def _call_target(arguments: dict[str, Any], fallback: str) -> str:
@@ -211,6 +249,8 @@ def _invoke(
         response = service.compare(**parsed.model_dump())
     elif isinstance(parsed, StatusInput):
         response = service.status(**parsed.model_dump())
+    elif isinstance(parsed, CatalogInput):
+        response = version_catalog(service)
     else:  # pragma: no cover - TOOL definitions and union above are exhaustive
         raise TypeError(f"Unsupported tool input: {type(parsed).__name__}")
     return response.model_dump(mode="json")

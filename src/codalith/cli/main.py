@@ -58,6 +58,10 @@ def _dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         return _claude_agent_benchmark(args)
     if args.command == "client-config":
         return _client_config(args)
+    if args.command == "project":
+        from codalith.project import run
+
+        return run(args)
     if args.command == "install-agents":
         from codalith.install.__main__ import error_message, run_from_args
 
@@ -335,6 +339,9 @@ def _parser() -> argparse.ArgumentParser:
     from codalith.install.__main__ import add_arguments
 
     add_arguments(subparsers.add_parser("install-agents", help="Install native skill and configure agent MCP clients"))
+    from codalith.project import add_arguments as project_arguments
+
+    project_arguments(subparsers.add_parser("project", help="Detect and bind a local UE project to a source version"))
 
     serve = subparsers.add_parser("serve", help="Run the MCP server")
     serve.add_argument("--transport", choices=("stdio", "http"), default="stdio")

@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import Field
 
 from codalith.query.models import (
+    CatalogResponse,
     CompareResponse,
     ContextResponse,
     GraphResponse,
@@ -84,6 +85,10 @@ class StatusInput(StrictModel):
     target: str | None = Field(default=None, description=_TARGET_DESCRIPTION)
 
 
+class CatalogInput(StrictModel):
+    pass
+
+
 @dataclass(frozen=True, slots=True)
 class ToolDefinition:
     name: str
@@ -141,6 +146,12 @@ TOOLS = (
         "not readiness. Does not load models or scan source; reuse a still-applicable result.",
         StatusInput,
         StatusResponse,
+    ),
+    ToolDefinition(
+        "codalith_catalog",
+        "List available version targets, exact source revisions, readiness and query capabilities. Does not load embedding models or read source trees.",
+        CatalogInput,
+        CatalogResponse,
     ),
 )
 

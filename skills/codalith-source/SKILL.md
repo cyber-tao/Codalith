@@ -7,6 +7,8 @@ description: Retrieve and cite versioned source through Codalith MCP for impleme
 
 Use the existing Codalith MCP tools and pass the matching project/version `target` explicitly where supported. The server lists registered corpora and workspaces; registration does not establish index readiness. Use `codalith_status` only when readiness, revision, or target selection is uncertain, and reuse its result while applicable. If the requested version is unavailable, state the limitation instead of substituting another version's implementation.
 
+Use `codalith_catalog` when the available version targets are unknown. A project can be detected with `codalith project detect` and explicitly bound with `codalith project bind`; the version-bound HTTP endpoint enforces the selected target even when a tool omits it. Recheck the binding after upgrading the engine. Cross-version comparisons require the ordinary MCP endpoint.
+
 Choose the tool that supplies the missing evidence; these are alternatives, not a mandatory sequence:
 
 - **Implementation:** Prefer `codalith_context` for retrieval plus source text. Start with a bounded pack, for example `max_spans=4, max_chars=8000`; adjust to missing evidence and truncation.

@@ -23,7 +23,9 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from codalith.dashboard.routes import dashboard_routes
 from codalith.dashboard.telemetry import TelemetryStore
+from codalith.errors import CodalithError
 from codalith.mcp.server import create_sdk_server
+from codalith.query.catalog import version_catalog
 from codalith.query.service import QueryService
 
 DEFAULT_MAX_REQUEST_BYTES = 1_048_576
@@ -138,6 +140,27 @@ class SessionManagerASGI:
         await self.manager.handle_request(scope, receive, send)
 
 
+class BoundSessionASGI:
+    def __init__(self, service: QueryService, telemetry: TelemetryStore, security: TransportSecuritySettings) -> None:
+        self.service = service
+        self.telemetry = telemetry
+        self.security = security
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        target = scope["path_params"]["target_id"]
+        try:
+            self.service.registry.resolve(target)
+        except CodalithError as exc:
+            await JSONResponse({"error": {"code": exc.code, "message": str(exc)}}, status_code=404)(scope, receive, send)
+            return
+        manager = StreamableHTTPSessionManager(
+            create_sdk_server(self.service, self.telemetry, bound_target=target),
+            json_response=True, stateless=True, security_settings=self.security,
+        )
+        async with manager.run():
+            await manager.handle_request(scope, receive, send)
+
+
 def create_http_app(
     service: QueryService,
     config: HTTPConfig,
@@ -165,11 +188,18 @@ def create_http_app(
         return JSONResponse({"status": "ok"})
 
     async def ready(_: Request) -> JSONResponse:
-        response = await anyio.to_thread.run_sync(service.status)
+        try:
+            response = await anyio.to_thread.run_sync(service.status)
+        except CodalithError:
+            return JSONResponse({"target": service.registry.default_target, "ready": False, "corpora": []}, status_code=503)
         return JSONResponse(
             response.model_dump(mode="json"),
             status_code=200 if response.ready else 503,
         )
+
+    async def catalog(_: Request) -> JSONResponse:
+        response = await anyio.to_thread.run_sync(version_catalog, service)
+        return JSONResponse(response.model_dump(mode="json"), headers={"Cache-Control": "no-store"})
 
     @asynccontextmanager
     async def lifespan(_: Starlette) -> AsyncIterator[None]:
@@ -183,6 +213,8 @@ def create_http_app(
         Route("/healthz", endpoint=health, methods=["GET"]),
         Route("/readyz", endpoint=ready, methods=["GET"]),
         Route(config.endpoint, endpoint=endpoint, methods=["GET", "POST", "DELETE"]),
+        Route(config.endpoint + "/targets/{target_id}", endpoint=BoundSessionASGI(service, telemetry_store, security), methods=["GET", "POST", "DELETE"]),
+        Route("/api/catalog", endpoint=catalog, methods=["GET"]),
         *dashboard_routes(service, telemetry_store, dashboard_dir=dashboard_dir),
     ]
 

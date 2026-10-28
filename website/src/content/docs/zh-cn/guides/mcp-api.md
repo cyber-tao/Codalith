@@ -58,6 +58,12 @@ description: 七个只读 MCP 工具、规范源码引用、资源契约和固�
 
 按 comparison key 顺序比较分组，比较签名、路径、模块和元数据。比较在 30 秒后停止，此时 `truncated` 为 true，`warnings` 说明已比较的组数。差异组数超过 `limit` 时也会标记 `truncated`。
 
+### `codalith_catalog`
+
+列出版本目标、引擎版本、精确源码 revision、快照标识、就绪状态和检索能力。该只读操作不加载 embedding 模型或扫描源码；同一目录也可通过 `GET /api/catalog` 获取。
+
+版本绑定客户端使用 `/mcp/targets/<target_id>`，自定义 MCP 地址则在其后追加 `/targets/<target_id>`。省略 target 时自动绑定；其他目标、跨版本源码或符号 URI、版本比较会被拒绝。明确进行跨版本比较时使用普通 MCP 地址。
+
 ### `codalith_status`
 
 输入：可选的 `target`。无需加载 embedding 模型或扫描源码，返回每个语料的状态：`ready`（结构和语义平面均有效）、`degraded`（缺少语义平面）、`missing`（没有已发布 generation）或 `invalid`（当前 generation 与产物、store 来源信息或配置不再一致）。
