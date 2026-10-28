@@ -23,7 +23,9 @@ docker compose ps
 
 `index-sample` completes before `mcp-http` starts. The index persists in `codalith-data`; each intentional rebuild publishes a new generation. The image includes the built operations dashboard.
 
-## UE 5.7.4
+<a id="ue-574"></a>
+
+## Directory-based UE 5.7.4
 
 Set these local `.env` values:
 
@@ -82,12 +84,81 @@ The backing endpoint is `GET /api/dashboard/snapshot`. Telemetry is process-loca
 
 ## HTTP exposure
 
-Published Compose ports default to `127.0.0.1`. Add exact Host/Origin values only when a trusted local proxy requires them. Codalith has no network authentication layer; do not expose it directly to an untrusted network.
+Published Compose ports default to `127.0.0.1`. Add exact Host/Origin values only when a trusted local proxy requires them. Administrator bearer authentication protects management endpoints; it is not an authentication layer for the read-only MCP, catalog or monitoring endpoints. Keep those behind an appropriate trusted boundary rather than exposing the complete service directly to an untrusted network.
+
+## Shared database workflow
+
+The current source checkout supports managed Git versions alongside the existing directory-based index workflow. Configure `[management]`, source roots, profiles and the administrator token as described in [Configuration](configuration.md#shared-git-databases-and-management), build the dashboard, then start the HTTP service. A management-enabled empty registry can serve the administration pages before any target is ready; `/readyz` may return 503 until a version is published.
+
+1. Open `/dashboard/#databases` and connect with the administrator token. It remains in page memory, not browser storage.
+2. Browse an allowed **server** source root and register an existing Git directory. Normal and bare repositories are supported. Existing checkout changes are not imported.
+3. Create a named database and select its configured build profile. Select its repository, search the tag list, and select tags across pages.
+4. Optionally select a legacy generation to reuse verified compatible vectors. Run **Preflight selected tags** and inspect the fixed commits and query targets.
+5. Start the build. **Build jobs** shows the durable batch and per-tag state, real phase counts, published-version count, errors and build events. Successful tags become queryable independently; a later tag failure does not remove them.
+
+Tags are resolved to commits in the saved plan. Moving a source tag afterward does not retarget an already submitted build or overwrite a published snapshot. Multiple tags with the same effective snapshot reuse stored content. Source object reads do not checkout branches, run Git filters or fetch missing objects. Selected files must exist locally; LFS pointers that would be indexed as source fail that version. Submodules and symlinks are not traversed. Source-policy exclusions and limits still apply.
+
+The worker runs one build at a time and processes selected tags serially. Closing the page does not cancel a build. Use **Cancel remaining work** to request cancellation at a safe boundary; an in-flight embedding operation may finish first. A short publish commit is allowed to finish. Retrying or continuing processes unsuccessful items while retaining successful versions and reusing committed objects/vectors.
+
+Task states include `queued`, `running`, `succeeded`, `partial`, `failed`, `cancel_requested`, `cancelled` and `interrupted`; the phase distinguishes file import, structure, embedding, index maintenance and publication. An interrupted worker is reconciled against published snapshots, including a publish that completed just before a crash. Unfinished work requires manual continuation after restart. Dashboard history polls every five seconds, active details/events every two seconds, without overlapping requests. Stage percentages use measured units; an index operation with no reliable total displays its stage instead of a fabricated percentage.
+
+The storage panel reports shared physical usage separately from logical source size across versions. Source, catalog/structure, semantic data and historical index storage have different overheads; values describing the common pool must not be summed as independent per-database sizes. No fixed UE 5.0–5.8 space-saving ratio or full-corpus throughput is claimed.
+
+### Local management commands
+
+The CLI uses the same catalog, saved plans and worker locks. All commands below use the configured registry and source policy; global `--registry` and `--policy` options precede `management` when selecting different files.
+
+```bash
+uv run codalith management config
+uv run codalith management repositories --root-id 0 --path UnrealEngine
+uv run codalith management tags REPO_ID --query 5.7 --limit 25
+uv run codalith management databases --name "Unreal Engine" --repo-id REPO_ID --profile-id ue-shared
+uv run codalith management plan --database-id DATABASE_ID --repo-id REPO_ID --tag 5.7.4-release --tag 5.8.0-release
+uv run codalith management build --plan-id PLAN_ID --idempotency-key MY_UNIQUE_REQUEST
+uv run codalith management jobs --job-id JOB_ID
+uv run codalith management cancel JOB_ID
+uv run codalith management resume JOB_ID
+uv run codalith management retry JOB_ID
+uv run codalith management space --database-id DATABASE_ID
+uv run codalith management gc --dry-run
+```
+
+Replace uppercase IDs with values returned by the preceding command and choose tags actually present in the repository. Reuse an idempotency key only when repeating the same plan submission. `build --submit-only` queues work for the HTTP service's worker instead of attempting execution in the CLI. `resume` and `retry` requeue unsuccessful work; the running worker picks it up. Without an HTTP worker, run `management build` again with the same saved plan and idempotency key to execute the requeued job locally.
+
+### Import a legacy generation
+
+Keep the old directories and service intact while creating a new shared database in a separate management storage root. The dashboard offers current generations from configured directory corpora; the CLI accepts one of those generation IDs:
+
+```bash
+uv run codalith management plan --database-id DATABASE_ID --repo-id REPO_ID --tag 5.7.4-release --legacy-generation GENERATION_ID
+uv run codalith management build --plan-id PLAN_ID --idempotency-key LEGACY_IMPORT_REQUEST
+```
+
+The importer verifies the old manifest/artifacts, file hashes, recorded provider/model/dimension and embedding input format. It copies only vectors whose source and complete input agree with the selected Git snapshot; missing or incompatible inputs require new embedding calls. Per-version statistics distinguish imported vectors, missing inputs and incompatible inputs, alongside source and parse reuse. Artifact corruption fails the build. Missing provenance cannot prove identical model weights. Old symbol IDs are rebound for the new snapshot, and the old generation, `current.json` and adopted external store remain unchanged. Compare MCP results and source citations before switching clients to the new target. No legacy data is deleted automatically.
+
+`management gc --dry-run` reports unreachable object candidates and retained releases without deleting files. Destructive shared-pool GC is not enabled. Do not run Lance cleanup or remove internal retention tags manually; published snapshots depend on their retained table versions.
+
+## Project version binding
+
+Run detection on the client machine that contains the UE project. The server cannot read the client's `.uproject` or engine installation:
+
+```bash
+uv run codalith project detect --project "/work/MyGame" --server "http://127.0.0.1:8765/mcp"
+uv run codalith project bind --project "/work/MyGame" --server "http://127.0.0.1:8765/mcp" --agent codex --dry-run
+uv run codalith project bind --project "/work/MyGame" --server "http://127.0.0.1:8765/mcp" --agent codex
+```
+
+Use the existing binding when present; otherwise detection reads the selected `.uproject`'s `EngineAssociation`, locates its registered or explicitly supplied engine, and reads `Engine/Build/Build.version`. Supply `--project-file Game.uproject` when a directory contains multiple projects, `--engine-root /path/to/UnrealEngine` when automatic engine discovery is insufficient, or `--target TARGET_ID` to select an exact matching catalog entry. An unavailable, ambiguous or conflicting match returns a nonzero result instead of choosing the latest version. When local engine Git provenance is available, its commit must also match.
+
+`bind` writes `.codalith/project.json` and updates only selected project-scoped agent configurations through the installer, with exact-byte backups and rollback on failure. It stores the server, selected target, source revision and local metadata references, never the administrator token. Repeat `--agent` to select multiple clients. `--dry-run` previews the changes without writing files. An engine upgrade requires detection and explicit rebinding; third-party HTTP clients do not automatically inspect local project changes.
+
+The generated endpoint is `/mcp/targets/TARGET_ID`. It supplies the bound target when a tool omits it and rejects a conflicting target or another corpus's source/symbol URI. Cross-version `codalith_compare` is rejected there; use ordinary `/mcp` with explicit `from_corpus` and `to_corpus` for comparisons. `GET /api/catalog` and `codalith_catalog` expose the currently registered version directory.
 
 ## Migration notes
 
 These changes altered persisted formats and public contracts. Rebuild or re-adopt every generation after upgrading; old generations report `invalid` until then. `adopt` never re-embeds.
 
+- Semantic engine 2.0.0 introduces shared input-addressed vectors and version membership. The explicit legacy importer accepts verified 1.1.0 and 2.0.0 inputs. Keep the previous service binary serving its old storage during a side-by-side migration: upgrading that binary in place invalidates its 1.1.0 semantic generations until they are rebuilt or re-adopted. Import into a separate management root and switch clients only after comparison; neither the old storage nor service is switched automatically.
 - Manifest schema 4 finishes absorbing CodeRAG into `codalith.semantic`: the provenance fields are now `semantic_engine_version`, `semantic_store`, `semantic_store_fingerprint`, `semantic_covered_files`, and `semantic_extra_files`, the artifact is `semantic-meta.json`, and a built store lives in the generation's `semantic/` directory. The registry key `coderag_store` is now `semantic_store`, and the Compose variables are `CODALITH_UE_SEMANTIC_STORE_DIR` and `CODALITH_UE_SEMANTIC_HOST_DIR`; rename `CODALITH_UE_CODERAG_HOST_DIR` in `.env`, or move the store, since the default host path changed from `.local/coderag/` to `.local/semantic/`. `codalith_search` reports the `semantic` backend instead of `coderag`, and fastembed models are cached under `~/.cache/codalith/fastembed`.
 - Manifest schema 3: `source_selection_hash` (now covering the source policy's deny globs and byte limit) replaces `chunk_policy_hash`, and semantic generations record `coderag_store`, `coderag_covered_files`, and `coderag_extra_files`.
 - Structure schema 4 adds the `name_match` reference resolution, the `symbol_search` trigram index, and per-symbol comparison digests; the `cpp-ue` adapter version 6 no longer stores `#include` directives as module dependencies. Building requires SQLite with FTS5 and the trigram tokenizer (3.34 or newer), which the container image and standard Python builds provide.

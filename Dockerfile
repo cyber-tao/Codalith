@@ -7,9 +7,21 @@ RUN bun install --frozen-lockfile
 COPY dashboard ./
 RUN bun run build
 
+FROM python:3.12-slim-bookworm AS git-build
+ARG GIT_VERSION=2.55.0
+ARG GIT_SHA256=457fdb04dc8728e007d4688695e6912e6f680727920f2a40bf11eacc17505357
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential ca-certificates curl xz-utils zlib1g-dev
+RUN curl --fail --location --silent --show-error "https://www.kernel.org/pub/software/scm/git/git-${GIT_VERSION}.tar.xz" -o /tmp/git.tar.xz \
+    && printf '%s  /tmp/git.tar.xz\n' "$GIT_SHA256" | sha256sum --check - \
+    && mkdir /tmp/git-src \
+    && tar -xJf /tmp/git.tar.xz -C /tmp/git-src --strip-components=1
+RUN make -C /tmp/git-src -j2 prefix=/opt/git NO_RUST=YesPlease NO_GETTEXT=YesPlease NO_TCLTK=YesPlease NO_PERL=YesPlease NO_PYTHON=YesPlease NO_CURL=YesPlease NO_EXPAT=YesPlease NO_OPENSSL=YesPlease install \
+    && /opt/git/bin/git --no-lazy-fetch --version
+
 FROM python:3.12-slim-bookworm AS base
 
-ENV PATH="/opt/codalith/.venv/bin:$PATH" \
+ENV PATH="/opt/codalith/.venv/bin:/opt/git/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=1 \
@@ -17,6 +29,7 @@ ENV PATH="/opt/codalith/.venv/bin:$PATH" \
     UV_PROJECT_ENVIRONMENT=/opt/codalith/.venv
 
 COPY --from=uv /uv /uvx /usr/local/bin/
+COPY --from=git-build /opt/git /opt/git
 WORKDIR /opt/codalith
 
 COPY pyproject.toml uv.lock README.md ./
@@ -39,7 +52,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 FROM python:3.12-slim-bookworm AS runtime
 
-ENV PATH="/opt/codalith/.venv/bin:$PATH" \
+ENV PATH="/opt/codalith/.venv/bin:/opt/git/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     CODALITH_DASHBOARD_DIR=/opt/codalith/dashboard/dist
@@ -51,6 +64,7 @@ RUN apt-get update \
     && mkdir -p /app/data /var/lib/codalith \
     && chown -R codalith:codalith /app /var/lib/codalith
 COPY --from=runtime-build --chown=codalith:codalith /opt/codalith /opt/codalith
+COPY --from=git-build /opt/git /opt/git
 COPY --from=dashboard --chown=codalith:codalith /dashboard/dist /opt/codalith/dashboard/dist
 WORKDIR /app
 RUN ln -s /opt/codalith/configs configs \

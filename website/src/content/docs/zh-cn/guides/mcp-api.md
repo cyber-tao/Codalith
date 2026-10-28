@@ -1,6 +1,6 @@
 ---
 title: MCP API
-description: 七个只读 MCP 工具、规范源码引用、资源契约和固定错误码。
+description: 只读 MCP 工具、版本目录、规范源码引用、资源契约和固定错误码。
 ---
 
 两种传输均使用官方 Python MCP SDK 和相同的严格 Pydantic schema。未知输入字段会报错。工具注解声明只读、非破坏、幂等和 closed-world 行为。

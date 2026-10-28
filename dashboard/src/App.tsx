@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 
 import { AlertsRail, LiveLogs, RecentQueries } from "./components/Activity";
 import { CorpusFootprint, QueryTrafficChart, ResourcePressure, ToolUsage } from "./components/Charts";
@@ -8,21 +8,36 @@ import { MetricStrip, StatusBanner } from "./components/Metrics";
 import { useDashboard } from "./hooks/useDashboard";
 import type { Alert, WindowKey } from "./types";
 
+const ManagementConsole = lazy(() => import("./management/ManagementConsole").then((module) => ({ default: module.ManagementConsole })));
+
 export default function App() {
   const [range, setRange] = useState<WindowKey>("1h");
   const [target, setTarget] = useState("");
   const [live, setLive] = useState(true);
-  const [activeSection, setActiveSection] = useState("overview");
+  const [activeSection, setActiveSection] = useState(() => window.location.hash.slice(1) || "overview");
+  const [adminToken, setAdminToken] = useState("");
   const [logSource, setLogSource] = useState("");
-  const { data, error, loading, refreshing, refresh } = useDashboard(range, target, live);
+  const managementView = activeSection === "databases" || activeSection === "build-jobs" ? activeSection : null;
+  const { data, error, loading, refreshing, refresh } = useDashboard(range, target, live, managementView === null);
 
   useEffect(() => {
     document.title = data ? `${data.service.target} · Codalith Operations` : "Codalith Operations";
   }, [data]);
 
+  useEffect(() => {
+    const updateSection = () => setActiveSection(window.location.hash.slice(1) || "overview");
+    window.addEventListener("hashchange", updateSection);
+    return () => window.removeEventListener("hashchange", updateSection);
+  }, []);
+
+  useEffect(() => {
+    if (!managementView) document.getElementById(activeSection)?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  }, [activeSection, managementView]);
+
   const navigate = (section: string) => {
     setActiveSection(section);
-    document.getElementById(section)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    window.history.replaceState(null, "", `#${section}`);
+    document.getElementById(section)?.scrollIntoView?.({ behavior: "smooth", block: "start" });
   };
 
   const selectTool = (tool: string) => {
@@ -45,9 +60,10 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <Sidebar snapshot={data} activeSection={activeSection} onNavigate={navigate} />
+      <Sidebar snapshot={managementView ? null : data} management={managementView !== null} activeSection={activeSection} onNavigate={navigate} />
       <div className="main-shell">
         <Topbar
+          management={managementView !== null}
           snapshot={data}
           range={range}
           target={target}
@@ -59,7 +75,11 @@ export default function App() {
           onRefresh={() => void refresh()}
           onExport={exportSnapshot}
         />
-        {error && !data ? (
+        {managementView ? (
+          <Suspense fallback={<DashboardSkeleton />}>
+            <ManagementConsole view={managementView} token={adminToken} onTokenChange={setAdminToken} onNavigate={navigate} />
+          </Suspense>
+        ) : error && !data ? (
           <ErrorState message={error} onRetry={() => void refresh()} />
         ) : loading || !data ? (
           <DashboardSkeleton />

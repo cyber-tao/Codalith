@@ -1,0 +1,17 @@
+schema_version = 2
+default_target = ""
+
+[management]
+enabled = true
+storage_root = "${CODALITH_MANAGEMENT_STORAGE_ROOT:-../data/management}"
+source_roots = ["${CODALITH_GIT_SOURCE_ROOT:-/srv/sources}"]
+admin_token_env = "CODALITH_ADMIN_TOKEN"
+
+[[management.profiles]]
+id = "ue"
+label = "Unreal Engine source"
+adapter = "cpp-ue"
+embedding_provider = "${CODALITH_UE_EMBEDDING_PROVIDER:-openai}"
+embedding_model = "${CODALITH_UE_EMBEDDING_MODEL:-text-embedding-3-small}"
+include_extensions = [".h", ".hpp", ".inl", ".c", ".cc", ".cpp", ".m", ".mm", ".cs", ".ispc", ".usf", ".ush"]
+exclude_globs = [".git/**", "**/Binaries/**", "**/DerivedDataCache/**", "**/Intermediate/**", "**/Saved/**", "**/ThirdParty/**", "Engine/Build/**", "Engine/Config/**", "Engine/Content/**", "Engine/Documentation/**", "Engine/Extras/**", "FeaturePacks/**", "Samples/**", "Templates/**"]

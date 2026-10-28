@@ -16,15 +16,18 @@ export const NAVIGATION: NavigationItem[] = [
   { id: "performance", label: "Performance", icon: "performance" },
   { id: "logs", label: "Logs", icon: "logs" },
   { id: "corpora", label: "Corpora", icon: "database" },
+  { id: "databases", label: "Databases", icon: "database" },
+  { id: "build-jobs", label: "Build jobs", icon: "activity" },
 ];
 
 interface SidebarProps {
+  management?: boolean;
   snapshot: DashboardSnapshot | null;
   activeSection: string;
   onNavigate: (section: string) => void;
 }
 
-export function Sidebar({ snapshot, activeSection, onNavigate }: SidebarProps) {
+export function Sidebar({ snapshot, activeSection, onNavigate, management = false }: SidebarProps) {
   return (
     <aside className="sidebar" aria-label="Primary navigation">
       <div className="brand">
@@ -54,12 +57,12 @@ export function Sidebar({ snapshot, activeSection, onNavigate }: SidebarProps) {
       <div className="service-meta">
         <span className="meta-label">Service</span>
         <div className="service-line">
-          <span className={snapshot?.service.ready ? "status-dot live" : "status-dot error"} />
+          <span className={snapshot ? (snapshot.service.ready ? "status-dot live" : "status-dot error") : "status-dot"} />
           MCP Service
           <span>v{snapshot?.service.version ?? "—"}</span>
         </div>
         <span className="meta-label">Target</span>
-        <strong>{snapshot?.service.target ?? "Connecting"}</strong>
+        <strong>{snapshot?.service.target ?? (management ? "Choose a version" : "Connecting")}</strong>
         <span className="meta-label">Uptime</span>
         <strong>{snapshot ? formatUptime(snapshot.service.uptime_seconds) : "—"}</strong>
       </div>
@@ -68,6 +71,7 @@ export function Sidebar({ snapshot, activeSection, onNavigate }: SidebarProps) {
 }
 
 interface TopbarProps {
+  management?: boolean;
   snapshot: DashboardSnapshot | null;
   range: WindowKey;
   target: string;
@@ -83,6 +87,7 @@ interface TopbarProps {
 const RANGES: WindowKey[] = ["15m", "1h", "6h", "24h", "7d"];
 
 export function Topbar({
+  management = false,
   snapshot,
   range,
   target,
@@ -96,12 +101,12 @@ export function Topbar({
 }: TopbarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   return (
-    <header className="topbar">
+    <header className={`topbar${management ? " management-topbar" : ""}`}>
       <div className="mobile-brand">
         <BrandMark size={30} />
         <strong>Codalith Operations</strong>
       </div>
-      <label className="target-select">
+      {management ? <span className="management-topbar-label"><Icon name="database" size={17} /> Database administration</span> : <><label className="target-select">
         <span className="sr-only">Corpus or workspace</span>
         <Icon name="database" size={16} />
         <select value={target || snapshot?.service.target || ""} onChange={(event) => onTargetChange(event.target.value)}>
@@ -124,8 +129,9 @@ export function Topbar({
           </button>
         ))}
       </div>
+      </>}
       <div className="topbar-actions">
-        <button
+        {!management ? <><button
           className={live ? "live-control active" : "live-control"}
           type="button"
           onClick={() => onLiveChange(!live)}
@@ -141,17 +147,19 @@ export function Topbar({
         <button className="icon-button desktop-only" type="button" onClick={onExport} aria-label="Export snapshot">
           <Icon name="download" />
         </button>
+        </> : null}
         <button className="icon-button mobile-menu-button" type="button" onClick={() => setMenuOpen(!menuOpen)} aria-label="Open navigation">
           <Icon name={menuOpen ? "close" : "menu"} />
         </button>
       </div>
-      <div className="freshness">
+      {!management ? <div className="freshness">
         <span>{snapshot ? `Updated ${formatTime(snapshot.generated_at, true)}` : "Connecting"}</span>
         <strong className={snapshot?.service.ready ? "healthy" : "unhealthy"}>
           <span className={snapshot?.service.ready ? "status-dot live" : "status-dot error"} />
           {snapshot?.service.ready ? "Healthy" : "Attention"}
         </strong>
       </div>
+      : null}
       {menuOpen ? (
         <div className="mobile-menu">
           {NAVIGATION.map((item) => (
@@ -172,7 +180,7 @@ export function Topbar({
 export function MobileNavigation({ activeSection, onNavigate }: Omit<SidebarProps, "snapshot">) {
   return (
     <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
-      {NAVIGATION.slice(0, 4).map((item) => (
+      {NAVIGATION.filter((item) => ["overview", "logs", "databases", "build-jobs"].includes(item.id)).map((item) => (
         <button
           key={item.id}
           type="button"

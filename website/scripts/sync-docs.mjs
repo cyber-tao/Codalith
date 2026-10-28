@@ -7,10 +7,10 @@ const output = path.join(repository, 'website/src/content/docs/guides');
 const sourceUrl = 'https://github.com/cyber-tao/Codalith/blob/master/';
 const pages = [
   ['installation', 'Install the skill and MCP', 'Connect supported coding agents, preview configuration changes, and recover from installation errors.'],
-  ['configuration', 'Configuration', 'Configure corpora, workspaces, embedding providers, and the shared source policy.'],
-  ['mcp-api', 'MCP API', 'The seven read-only MCP tools, canonical source citations, resource contracts, and stable error codes.'],
-  ['operations', 'Operations', 'Run local and Docker services, prepare UE indexes, diagnose generations, and use the dashboard.'],
-  ['architecture', 'Architecture and invariants', 'Understand immutable generations, structural and semantic retrieval, adapters, and source confinement.'],
+  ['configuration', 'Configuration', 'Configure directory corpora, shared Git databases, management profiles, embedding providers, and source policy.'],
+  ['mcp-api', 'MCP API', 'Read-only MCP tools, version catalogs, canonical source citations, resource contracts, and stable error codes.'],
+  ['operations', 'Operations', 'Build versioned source databases, manage durable jobs, bind UE projects, and operate local or Docker services.'],
+  ['architecture', 'Architecture and invariants', 'Understand shared immutable snapshots, directory generations, structural and semantic retrieval, and source confinement.'],
   ['evaluation', 'Evaluation', 'Run real MCP benchmarks and understand datasets, quality gates, citation checks, and agent comparisons.'],
 ];
 const slugs = new Set(pages.map(([slug]) => slug));

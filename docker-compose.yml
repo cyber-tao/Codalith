@@ -21,6 +21,29 @@ x-runtime: &runtime
     - codalith-data:/app/data
 
 services:
+  management:
+    <<: *runtime
+    profiles: ["management"]
+    environment:
+      <<: *runtime-environment
+      CODALITH_REGISTRY: /app/configs/registry-management.toml
+      CODALITH_MANAGEMENT_ENABLED: "true"
+      CODALITH_MANAGEMENT_STORAGE_ROOT: /app/data/management
+      CODALITH_ADMIN_TOKEN: ${CODALITH_ADMIN_TOKEN:-}
+      CODALITH_UE_EMBEDDING_PROVIDER: ${CODALITH_UE_EMBEDDING_PROVIDER:-openai}
+      CODALITH_UE_EMBEDDING_MODEL: ${CODALITH_UE_EMBEDDING_MODEL:-text-embedding-3-small}
+    volumes:
+      - codalith-managed-data:/app/data/management
+      - ${CODALITH_GIT_ROOT_HOST_DIR:-./.local/git-sources}:/srv/sources:ro
+    command: ["serve", "--transport", "http"]
+    ports:
+      - "${CODALITH_HTTP_BIND:-127.0.0.1}:${CODALITH_HTTP_PORT:-8765}:${CODALITH_HTTP_PORT:-8765}"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:${CODALITH_HTTP_PORT:-8765}/healthz', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
   index-sample:
     <<: *runtime
     command: ["index", "build", "--corpus", "sample", "--semantic", "build"]
@@ -97,3 +120,4 @@ services:
 
 volumes:
   codalith-data:
+  codalith-managed-data:

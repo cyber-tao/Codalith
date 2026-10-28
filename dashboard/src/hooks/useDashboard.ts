@@ -17,6 +17,7 @@ export function useDashboard(
   range: WindowKey,
   target: string,
   live: boolean,
+  enabled = true,
 ): DashboardState {
   const [data, setData] = useState<DashboardSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -47,15 +48,16 @@ export function useDashboard(
   }, [range, target]);
 
   useEffect(() => {
+    if (!enabled) return undefined;
     void refresh();
     return () => controllerRef.current?.abort();
-  }, [refresh]);
+  }, [refresh, enabled]);
 
   useEffect(() => {
-    if (!live) return undefined;
+    if (!live || !enabled) return undefined;
     const timer = window.setInterval(() => void refresh(), REFRESH_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, [live, refresh]);
+  }, [live, refresh, enabled]);
 
   return {
     data,
