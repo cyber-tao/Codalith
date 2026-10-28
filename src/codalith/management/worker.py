@@ -13,6 +13,7 @@ from typing import Any
 
 from codalith.corpus.registry import CorpusRegistry
 from codalith.corpus.source_policy import SourcePolicy
+from codalith.management.catalog import timestamp
 from codalith.management.config import ManagementConfig
 from codalith.management.service import ManagementService
 
@@ -59,6 +60,9 @@ def run_job(
                     }:
                         return
                     child = value["items"][index]
+                    if child["phase"] != phase or "phase_started_at" not in child:
+                        child["phase_started_at"] = timestamp()
+                        child.pop("ended_at", None)
                     child.update(
                         status="running",
                         phase=event.get("stage", "building"),
@@ -93,7 +97,9 @@ def run_job(
                 def failure(value: dict[str, Any], message: str = service.safe_error(exc)) -> None:
                     if value["attempt"] != attempt:
                         return
-                    value["items"][index].update(status="failed", phase="failed", error=message)
+                    value["items"][index].update(
+                        status="failed", phase="failed", error=message, ended_at=timestamp()
+                    )
 
                 catalog.update_job(job_id, failure, event="tag_failed")
                 return True
@@ -113,6 +119,7 @@ def run_job(
                     reused_vectors=result.reused_vectors,
                     new_vectors=result.new_vectors,
                     statistics=result.statistics,
+                    ended_at=timestamp(),
                 )
                 value["completed_tags"] = sum(
                     child["status"] == "succeeded" for child in value["items"]
@@ -156,6 +163,7 @@ def run_job(
                     child.update(
                         status="interrupted" if status == "interrupted" else "cancelled",
                         phase="interrupted" if status == "interrupted" else "cancelled",
+                        ended_at=timestamp(),
                     )
 
         catalog.update_job(job_id, finish, event="finished")

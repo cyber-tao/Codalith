@@ -35,3 +35,12 @@ export function phasePercent(completed: number, total: number | null, succeeded:
   if (!total || total < 0) return null;
   return Math.min(100, Math.max(0, completed / total * 100));
 }
+
+export function phaseElapsed(start: string | undefined, end: string): string | null {
+  if (!start) return null;
+  const seconds = Math.max(0, Math.floor((Date.parse(end) - Date.parse(start)) / 1000));
+  if (!Number.isFinite(seconds)) return null;
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  return `${Math.floor(seconds / 3600)}h ${Math.floor(seconds / 60) % 60}m`;
+}

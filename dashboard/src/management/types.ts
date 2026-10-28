@@ -109,6 +109,8 @@ export interface JobItem {
   snapshot_id?: string | null;
   status: JobStatus;
   phase: string;
+  phase_started_at?: string;
+  ended_at?: string;
   completed_units: number;
   total_units: number | null;
   unit: string;

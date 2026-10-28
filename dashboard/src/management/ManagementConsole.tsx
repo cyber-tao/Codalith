@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "rea
 
 import { Icon } from "../components/Icons";
 import { adminRequest, errorMessage } from "./api";
-import { ACTIVE_STATUSES, bytes, jobError, phasePercent, readable, RESUMABLE_STATUSES, RETRYABLE_STATUSES } from "./format";
+import { ACTIVE_STATUSES, bytes, jobError, phaseElapsed, phasePercent, readable, RESUMABLE_STATUSES, RETRYABLE_STATUSES } from "./format";
 import type { BuildJob, BuildPlan, Database, DirectoryListing, ItemList, ManagementConfig, Repository, SourceTag, SpaceUsage, TagListing } from "./types";
 import { useJobEvents } from "./useJobEvents";
 import { useResource } from "./useResource";
@@ -420,8 +420,9 @@ function JobDetail({ token, jobId, onChanged }: { token: string; jobId: string; 
     </div>
     <div className="management-version-jobs">{job.items.map((item) => {
       const percent = phasePercent(item.completed_units, item.total_units, item.status === "succeeded");
+      const elapsed = phaseElapsed(item.phase_started_at, item.ended_at || job.updated_at);
       return <article key={`${item.tag}/${item.commit}`} className="management-version-job"><div className="management-version-heading"><div><strong>{item.tag}</strong><code>{item.commit.slice(0, 12)}</code></div><StatusPill status={item.status} /></div><div className="management-phase"><span>{readable(item.phase || item.status)}</span><span>{item.total_units ? `${item.completed_units.toLocaleString()} / ${item.total_units.toLocaleString()} ${item.unit}` : `${item.completed_units.toLocaleString()} ${item.unit || "units"} processed`}</span></div>
-        {percent !== null ? <progress max={100} value={percent} aria-label={`${item.tag} phase progress`} /> : <div className="management-stage-marker"><span />{item.status === "queued" ? "Waiting for worker" : "No measurable total for this stage"}</div>}
+        {percent !== null ? <progress max={100} value={percent} aria-label={`${item.tag} phase progress`} /> : <div className="management-stage-marker"><span />{item.status === "queued" ? "Waiting for worker" : "No measurable total for this stage"}{elapsed ? ` · Elapsed ${elapsed}` : ""}</div>}
         <p className="management-hint">Target: <code>{item.target_id}</code>{item.snapshot_id ? <> · Snapshot: <code>{item.snapshot_id}</code></> : null}</p>
         {item.statistics || item.counts || item.reused_vectors !== undefined ? <Statistics values={{ ...item.counts, ...item.statistics, ...(item.reused_vectors === undefined ? {} : { reused_vectors: item.reused_vectors }), ...(item.new_vectors === undefined ? {} : { new_vectors: item.new_vectors }) }} /> : null}
         {item.error ? <p className="management-inline-error">{jobError(item.error)}</p> : null}

@@ -92,6 +92,7 @@ def test_worker_imports_multiple_tags_and_records_real_progress(
     assert completed["status"] == "succeeded", completed
     assert completed["completed_tags"] == 2
     assert all(item["snapshot_id"] for item in completed["items"])
+    assert all(item["phase_started_at"] <= item["ended_at"] <= completed["updated_at"] for item in completed["items"])
     events = management.catalog.events(job["job_id"])
     assert any(event["type"] == "progress" for event in events)
     assert len({event["seq"] for event in events}) == len(events)

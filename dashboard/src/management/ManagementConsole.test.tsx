@@ -149,6 +149,25 @@ describe("database administration", () => {
     expect(await screen.findByRole("button", { name: "Retry failed versions" })).toBeEnabled();
   });
 
+  it("shows server-measured elapsed time for index maintenance without inventing a percentage", async () => {
+    const job = createJob();
+    job.updated_at = "2026-10-29T00:01:11Z";
+    job.items[0] = { ...job.items[0], phase: "index", total_units: null, completed_units: 0, phase_started_at: "2026-10-29T00:00:01Z" };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname.endsWith("/config")) return response(CONFIG);
+      if (url.pathname.endsWith("/events")) return response({ items: [] });
+      if (url.pathname.endsWith("/jobs/job-1")) return response(job);
+      if (url.pathname.endsWith("/jobs")) return response({ items: [job] });
+      return response({ items: [] });
+    }));
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "Build jobs" }));
+    fireEvent.click(await screen.findByRole("button", { name: /job-1/ }));
+    expect(await screen.findByText(/Elapsed 1m 10s/)).toBeVisible();
+    expect(screen.queryByRole("progressbar", { name: "5.7.4-release phase progress" })).not.toBeInTheDocument();
+  });
+
   it("browses server roots and registers the selected repository without a local file upload", async () => {
     const registered: unknown[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
