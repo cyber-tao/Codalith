@@ -102,7 +102,7 @@ The worker runs one build at a time and processes selected tags serially. Closin
 
 Task states include `queued`, `running`, `succeeded`, `partial`, `failed`, `cancel_requested`, `cancelled` and `interrupted`; the phase distinguishes file import, structure, embedding, index maintenance and publication. An interrupted worker is reconciled against published snapshots, including a publish that completed just before a crash. Unfinished work requires manual continuation after restart. Dashboard history polls every five seconds, active details/events every two seconds, without overlapping requests. Stage percentages use measured units; an index operation with no reliable total displays its stage instead of a fabricated percentage.
 
-The storage panel reports shared physical usage separately from logical source size across versions. Source, catalog/structure, semantic data and historical index storage have different overheads; values describing the common pool must not be summed as independent per-database sizes. No fixed UE 5.0–5.8 space-saving ratio or full-corpus throughput is claimed.
+The storage panel reports shared physical usage separately from logical source size across versions. Source, catalog/structure, semantic data and historical index storage have different overheads; values describing the common pool must not be summed as independent per-database sizes. Measurements include their timestamp and are cached until a version is published or **Refresh storage measurement** is requested. Ordinary polling does not rescan the pool. Event details initially show the latest 500 events, then follow new events by sequence. No fixed UE 5.0–5.8 space-saving ratio or full-corpus throughput is claimed.
 
 ### Local management commands
 
@@ -120,10 +120,23 @@ uv run codalith management cancel JOB_ID
 uv run codalith management resume JOB_ID
 uv run codalith management retry JOB_ID
 uv run codalith management space --database-id DATABASE_ID
+uv run codalith management space --database-id DATABASE_ID --refresh
 uv run codalith management gc --dry-run
 ```
 
 Replace uppercase IDs with values returned by the preceding command and choose tags actually present in the repository. Reuse an idempotency key only when repeating the same plan submission. `build --submit-only` queues work for the HTTP service's worker instead of attempting execution in the CLI. `resume` and `retry` requeue unsuccessful work; the running worker picks it up. Without an HTTP worker, run `management build` again with the same saved plan and idempotency key to execute the requeued job locally.
+
+### Upgrade an existing shared catalog
+
+New pools use catalog schema 2. Schema 1 pools remain queryable; starting a service does not migrate them. Before appending new versions to an existing pool, explicitly run:
+
+```bash
+uv run codalith management upgrade-storage
+```
+
+The command takes the shared build lock, saves a SQLite backup under `shared/backups/`, and adds the source-object mapping and exact-path indexes in one transaction. It reports `previous_version`, `schema_version` and `backup_path`; repeating it on schema 2 makes no changes. Failed upgrades roll back and retain the backup. Published snapshot records, source objects and retained Lance versions stay intact. New imports reuse verified source OIDs without reading their payload again; ordinary tag builds do not repack the whole source pool. Keep the reported backup until validation is complete. Restore it only with the service and worker stopped, and before any later successful imports, to avoid discarding their catalog records.
+
+Administrator clients can request `GET /api/admin/jobs/JOB_ID/events?tail=500` for the initial event window and then use `after_seq`; the parameters are mutually exclusive. Storage responses include `measured_at`; `GET /api/admin/databases/DATABASE_ID/space?refresh=true` explicitly refreshes the cached measurement.
 
 ### Import a legacy generation
 

@@ -149,6 +149,7 @@ export interface JobEvent {
 }
 
 export interface SpaceUsage {
+  measured_at?: string;
   breakdown?: {
     source_bytes?: number | null;
     structure_bytes?: number | null;

@@ -149,6 +149,32 @@ describe("database administration", () => {
     expect(await screen.findByRole("button", { name: "Retry failed versions" })).toBeEnabled();
   });
 
+  it("shows the measurement timestamp and explicitly refreshes storage before returning to cached reads", async () => {
+    let measurement = 1;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname.endsWith("/config")) return response(CONFIG);
+      if (url.pathname.endsWith("/databases")) return response({ items: [{ database_id: "db-1", name: "Source", profile_id: "ue", created_at: "2026-10-29T00:00:00Z" }] });
+      if (url.pathname.endsWith("/space")) {
+        if (url.searchParams.get("refresh") === "true") measurement += 1;
+        return response({ measured_at: `2026-10-29T00:00:0${measurement}Z`, breakdown: { total_bytes: measurement * 1048576 } });
+      }
+      return response({ items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<Harness />);
+    expect(await screen.findByText("Shared pool physical total: 1 MiB")).toBeVisible();
+    expect(screen.getByText(/^Measured /)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh storage measurement" }));
+    expect(await screen.findByText("Shared pool physical total: 2 MiB")).toBeVisible();
+    const storageRequests = fetchMock.mock.calls.map(([url]) => String(url)).filter((url) => url.includes("/space"));
+    expect(storageRequests).toEqual([
+      "/api/admin/databases/db-1/space",
+      "/api/admin/databases/db-1/space?refresh=true",
+      "/api/admin/databases/db-1/space",
+    ]);
+  });
+
   it("shows server-measured elapsed time for index maintenance without inventing a percentage", async () => {
     const job = createJob();
     job.updated_at = "2026-10-29T00:01:11Z";

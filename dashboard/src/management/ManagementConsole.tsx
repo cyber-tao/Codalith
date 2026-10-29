@@ -162,7 +162,6 @@ function DatabaseManager({ token, config, repositories, databases, jobs, onRepos
   const effectiveProfileId = profileId || config.profiles[0]?.profile_id || "";
   const tagParams = new URLSearchParams({ limit: String(TAG_PAGE_SIZE), cursor: cursor || "0", q: query });
   const tags = useResource<TagListing>(effectiveRepoId ? `repositories/${encodeURIComponent(effectiveRepoId)}/tags?${tagParams}` : null, token);
-  const space = useResource<SpaceUsage>(selectedDatabase ? `databases/${encodeURIComponent(selectedDatabase.database_id)}/space` : null, token, HISTORY_POLL_MS);
   const publishedTargets = new Set(jobs.flatMap((job) => job.items.filter((item) => item.status === "succeeded").map((item) => item.target_id)));
 
   useEffect(() => {
@@ -269,7 +268,7 @@ function DatabaseManager({ token, config, repositories, databases, jobs, onRepos
               <button type="submit" className="management-button primary" disabled={!effectiveRepoId || !effectiveProfileId || !name.trim() || Boolean(pending)}>{pending === "database" ? "Creating…" : "Create database"}</button>
             </form> : <>
               <p className="management-hint">Profile: <strong>{config.profiles.find((profile) => profile.profile_id === selectedDatabase?.profile_id)?.label ?? selectedDatabase?.profile_id}</strong></p>
-              {space.data ? <SpaceBreakdown usage={space.data} /> : space.error ? <p className="management-hint">Storage measurement unavailable: {space.error}</p> : null}
+              {selectedDatabase ? <StorageUsage key={selectedDatabase.database_id} databaseId={selectedDatabase.database_id} token={token} /> : null}
             </>}
           </div>
         </section>
@@ -359,6 +358,42 @@ function RepositoryBrowser({ token, config, onRegistered }: { token: string; con
   </div>;
 }
 
+function StorageUsage({ databaseId, token }: { databaseId: string; token: string }) {
+  const path = `databases/${encodeURIComponent(databaseId)}/space`;
+  const resource = useResource<SpaceUsage>(path, token, HISTORY_POLL_MS);
+  const controller = useRef<AbortController | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setRefreshing(false);
+    setError(null);
+    return () => controller.current?.abort();
+  }, [path, token]);
+
+  const refresh = async () => {
+    if (refreshing) return;
+    const request = new AbortController();
+    controller.current = request;
+    setRefreshing(true);
+    setError(null);
+    try {
+      await adminRequest<SpaceUsage>(`${path}?refresh=true`, token, { signal: request.signal });
+      if (!request.signal.aborted) resource.refresh();
+    } catch (reason) {
+      if (!request.signal.aborted) setError(errorMessage(reason));
+    } finally {
+      if (!request.signal.aborted) setRefreshing(false);
+    }
+  };
+
+  return <>
+    {resource.data ? <SpaceBreakdown usage={resource.data} /> : null}
+    {error || resource.error ? <p className="management-hint">Storage measurement unavailable: {error || resource.error}</p> : null}
+    <button className="management-button quiet" type="button" disabled={refreshing || resource.pending} onClick={() => void refresh()}>{refreshing ? "Measuring storage…" : "Refresh storage measurement"}</button>
+  </>;
+}
+
 function SpaceBreakdown({ usage }: { usage: SpaceUsage }) {
   const breakdown = usage.breakdown ?? usage;
   const measurements = [
@@ -372,6 +407,7 @@ function SpaceBreakdown({ usage }: { usage: SpaceUsage }) {
     {typeof breakdown.total_bytes === "number" ? <p>Shared pool physical total: {bytes(breakdown.total_bytes)}</p> : null}
     {typeof usage.vector_count === "number" ? <p>{usage.vector_count.toLocaleString()} unique vectors</p> : null}
     {typeof usage.logical_source_bytes === "number" ? <p>Logical source across versions: {bytes(usage.logical_source_bytes)}</p> : null}
+    {usage.measured_at ? <p className="management-hint">Measured {dateTime(usage.measured_at)}</p> : null}
     {usage.notes?.map((note, index) => <p key={index} className="management-hint">{note}</p>)}
   </div>;
 }

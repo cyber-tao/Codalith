@@ -113,7 +113,7 @@ Worker 同时执行一个构建，按顺序处理 tags。关闭页面不会取�
 
 任务状态包括 `queued`、`running`、`succeeded`、`partial`、`failed`、`cancel_requested`、`cancelled` 和 `interrupted`；phase 区分文件导入、结构、embedding、索引维护与发布。Worker 中断后会先对照已发布快照恢复，包括崩溃前刚刚发布的版本，剩余工作由管理员手动继续。历史列表每五秒刷新，活动详情／事件每两秒刷新，请求不重叠。百分比使用可测工作量；索引操作没有可靠总量时显示阶段，不伪造百分比。
 
-空间面板将共享池实际物理占用与各版本逻辑源码大小分开显示。源码、目录／结构、语义数据和历史索引具有不同开销；共享池统计不能作为各数据库独占大小相加。这里不承诺 UE 5.0～5.8 的固定节省比例或全量构建吞吐。
+空间面板将共享池实际物理占用与各版本逻辑源码大小分开显示。源码、目录／结构、语义数据和历史索引具有不同开销；共享池统计不能作为各数据库独占大小相加。测量结果带时间戳，并缓存至新版本发布或点击 **Refresh storage measurement**；普通轮询不重新扫描共享池。事件详情首次显示最新 500 条，再按序号跟进新增事件。这里不承诺 UE 5.0～5.8 的固定节省比例或全量构建吞吐。
 
 ### 本地管理命令
 
@@ -131,10 +131,23 @@ uv run codalith management cancel JOB_ID
 uv run codalith management resume JOB_ID
 uv run codalith management retry JOB_ID
 uv run codalith management space --database-id DATABASE_ID
+uv run codalith management space --database-id DATABASE_ID --refresh
 uv run codalith management gc --dry-run
 ```
 
 将大写 ID 替换为前序命令返回的值，tag 必须真实存在于所选仓库。同一个幂等键只用于重复提交同一份计划。`build --submit-only` 仅入队，由 HTTP 服务 worker 执行；否则 CLI 会尝试执行。`resume`、`retry` 将未成功工作重新入队，由运行中的 worker 领取。未运行 HTTP worker 时，再次用原计划和同一幂等键执行 `management build`，可在 CLI 执行已重新入队的任务。
+
+### 升级已有共享目录
+
+新共享池使用 catalog schema 2。Schema 1 的共享池仍可查询，服务启动不会自动迁移。在已有共享池继续导入版本前，显式执行：
+
+```bash
+uv run codalith management upgrade-storage
+```
+
+命令获取共享构建锁，将 SQLite 备份保存到 `shared/backups/`，再通过一个事务增加源码对象映射及精确路径索引。返回 `previous_version`、`schema_version` 和 `backup_path`；对 schema 2 重复执行不会产生改动。升级失败会回滚并保留备份，已发布快照记录、源码对象和保留的 Lance 版本保持不变。后续导入复用已验证的源码 OID，不再读取其正文；普通 tag 构建不再重打包整个源码池。验证完成前保留返回的备份。仅在服务和 worker 已停止、且尚未成功导入后续版本时恢复备份，避免丢弃后续版本的目录记录。
+
+管理员客户端可通过 `GET /api/admin/jobs/JOB_ID/events?tail=500` 取得首次事件窗口，再使用 `after_seq` 增量读取；两个参数互斥。空间响应包含 `measured_at`；`GET /api/admin/databases/DATABASE_ID/space?refresh=true` 显式刷新缓存测量。
 
 ### 导入旧 generation
 
