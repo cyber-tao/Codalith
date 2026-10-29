@@ -169,18 +169,18 @@ def write_structure(
                         (
                             (
                                 "qualified",
-                                symbol.qualified_name.casefold(),
+                                symbol.qualified_name,
                                 relative,
                                 symbol_id,
                             ),
-                            ("name", symbol.name.casefold(), relative, symbol_id),
+                            ("name", symbol.name, relative, symbol_id),
                         )
                     )
                     if symbol.parent_qualified_name:
                         parent_rows.append(
                             (
                                 symbol_id,
-                                symbol.parent_qualified_name.casefold(),
+                                symbol.parent_qualified_name,
                                 relative,
                             ),
                         )
@@ -379,11 +379,11 @@ def _reference_row(
     }
     source_id = next(iter(source_candidates)) if len(source_candidates) == 1 else None
     normalized_target = _reference_name(observation.target_name)
-    name_key = normalized_target.split("::")[-1].split(".")[-1].casefold()
+    name_key = normalized_target.split("::")[-1].split(".")[-1]
     return (
         source_id,
         observation.target_name,
-        normalized_target.casefold(),
+        normalized_target,
         name_key,
         observation.kind,
         observation.path,

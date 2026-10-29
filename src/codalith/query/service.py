@@ -22,6 +22,8 @@ from codalith.corpus.source_policy import SourcePolicy
 from codalith.corpus.source_reader import SourceReader
 from codalith.corpus.uris import parse_uri, source_uri, symbol_uri
 from codalith.errors import (
+    IndexBuildError,
+    IndexInvalidError,
     IndexMissingError,
     IndexUnavailableError,
     RetrievalError,
@@ -31,7 +33,11 @@ from codalith.errors import (
     URIResolutionError,
 )
 from codalith.indexing.leases import GenerationLeases
-from codalith.indexing.semantic import SemanticBackend, generation_store_provenance
+from codalith.indexing.semantic import (
+    SemanticBackend,
+    generation_store_provenance,
+    store_fingerprint,
+)
 from codalith.indexing.structure.models import (
     ComparisonGroup,
     FileRecord,
@@ -41,6 +47,7 @@ from codalith.indexing.structure.models import (
 )
 from codalith.indexing.structure.store import StructureIndex
 from codalith.indexing.text_search import TextHit, search_text
+from codalith.indexing.text_search import bounded_snippet as _bounded_snippet
 from codalith.languages.catalog import RetrievalProfile, language_for_path, retrieval_profile
 from codalith.query.models import (
     CompareChange,
@@ -284,6 +291,19 @@ class QueryService:
 
     def verify_semantic(self, generation: ActiveGeneration) -> None:
         generation_store_provenance(generation)
+
+    def verify_generation(self, corpus: Corpus) -> None:
+        generation = self.generations.active(corpus, verify_artifacts=True)
+        if not generation.manifest.semantic_available:
+            return
+        try:
+            fingerprint = store_fingerprint(generation.semantic_path)
+        except (IndexBuildError, OSError) as exc:
+            raise IndexInvalidError(
+                f"Cannot verify semantic store for {corpus.corpus_id}: {exc}"
+            ) from exc
+        if fingerprint != generation.manifest.semantic_store_fingerprint:
+            raise IndexInvalidError(f"Semantic store fingerprint mismatch for {corpus.corpus_id}")
 
     def close(self) -> None:
         self.semantic.close()
@@ -1555,11 +1575,6 @@ def _fit_end_line(text: str, *, start_line: int, character_budget: int) -> int:
         consumed += cost
         end = start_line + offset
     return end
-
-
-def _bounded_snippet(value: str) -> str:
-    normalized = value.strip()
-    return normalized if len(normalized) <= 2000 else normalized[:1999] + "…"
 
 
 def _unique(values: list[str]) -> list[str]:

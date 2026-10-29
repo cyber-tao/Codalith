@@ -10,7 +10,7 @@ import sqlite3
 import subprocess
 import tempfile
 from collections.abc import Callable, Generator, Iterator
-from contextlib import closing, contextmanager
+from contextlib import ExitStack, closing, contextmanager
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -34,13 +34,19 @@ from codalith.corpus.registry import Corpus, CorpusRegistry
 from codalith.corpus.source_policy import SourcePolicy
 from codalith.corpus.source_reader import FileCatalog, SourceReader, SourceSlice
 from codalith.corpus.uris import source_uri
-from codalith.errors import IndexBuildError, IndexInvalidError, RetrievalError, SourceReadError
+from codalith.errors import (
+    IndexBuildError,
+    IndexInvalidError,
+    IndexMissingError,
+    RetrievalError,
+    SourceReadError,
+)
 from codalith.indexing.builder import build_lock
 from codalith.indexing.leases import GenerationLeases
 from codalith.indexing.semantic import SemanticBackend, SemanticHit, engine_config
 from codalith.indexing.structure.store import StructureIndex, _escape_like
 from codalith.indexing.structure.writer import write_structure
-from codalith.indexing.text_search import TextHit
+from codalith.indexing.text_search import TextHit, TextMatchCollector, first_matching_lines
 from codalith.languages import create_adapter
 from codalith.languages.base import (
     ExtractionResult,
@@ -52,6 +58,7 @@ from codalith.languages.catalog import ADAPTERS, retrieval_profile
 from codalith.query.service import QueryService
 from codalith.semantic import ENGINE_VERSION
 from codalith.semantic.chunking import chunk_file
+from codalith.semantic.chunking.languages import detect_language
 from codalith.semantic.config import Config
 from codalith.semantic.embeddings import EmbeddingProvider, get_provider
 from codalith.semantic.indexer import has_indexable_text
@@ -89,6 +96,18 @@ class SharedBuildResult:
 
 def _json(value: object) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+
+def _structure_fingerprint(connection: sqlite3.Connection, snapshot_id: str) -> str:
+    digest = hashlib.sha256()
+    for table in _TABLES:
+        digest.update(table.encode("ascii") + b"\0")
+        for row in connection.execute(
+            f"SELECT fact_id FROM members_{table} WHERE snapshot_id=? ORDER BY fact_id",
+            (snapshot_id,),
+        ):
+            digest.update(row[0].encode("ascii") + b"\n")
+    return digest.hexdigest()
 
 
 def _digest(value: object) -> str:
@@ -130,11 +149,17 @@ def _quoted_git_path(path: str) -> bytes:
 
 
 class SharedPool:
-    def __init__(self, root: Path, policy: SourcePolicy) -> None:
+    def __init__(self, root: Path, policy: SourcePolicy, *, readonly: bool = False) -> None:
         self.root = root.resolve()
         self.policy = policy
+        self.readonly = readonly
         self.catalog = self.root / "catalog.sqlite"
         self.source_git = self.root / "sources.git"
+        if readonly:
+            if not self.catalog.is_file():
+                raise IndexMissingError(f"Shared pool does not exist: {self.root}")
+            _ = self.schema_version
+            return
         self.root.mkdir(parents=True, exist_ok=True)
         if self.catalog.is_file():
             _ = self.schema_version
@@ -188,6 +213,7 @@ class SharedPool:
 
     @contextmanager
     def _connect(self, *, readonly: bool = False) -> Iterator[sqlite3.Connection]:
+        readonly = readonly or self.readonly
         location = self.catalog.as_uri() + "?mode=ro" if readonly else str(self.catalog)
         connection = sqlite3.connect(
             location, uri=readonly, timeout=60, check_same_thread=False
@@ -210,6 +236,8 @@ class SharedPool:
         return int(row[0])
 
     def upgrade(self) -> dict[str, object]:
+        if self.readonly:
+            raise IndexBuildError("Cannot upgrade a read-only shared pool")
         with build_lock(self.root):
             previous = self.schema_version
             if previous == _SCHEMA_VERSION:
@@ -340,9 +368,9 @@ class SharedPool:
     def snapshots(self) -> list[dict[str, Any]]:
         with self._connect() as connection:
             return [
-                json.loads(row[0])
+                self._decode_snapshot(row)
                 for row in connection.execute(
-                    "SELECT metadata FROM snapshots ORDER BY created_at,target_id",
+                    "SELECT snapshot_id,target_id,metadata FROM snapshots ORDER BY created_at,target_id",
                 )
             ]
 
@@ -352,20 +380,73 @@ class SharedPool:
     def snapshot(self, target_id: str) -> dict[str, Any] | None:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT metadata FROM snapshots WHERE target_id=?", (target_id,)
+                "SELECT snapshot_id,target_id,metadata FROM snapshots WHERE target_id=?", (target_id,)
             ).fetchone()
-            return json.loads(row[0]) if row is not None else None
+            return self._decode_snapshot(row) if row is not None else None
+
+    def _decode_snapshot(self, row: sqlite3.Row) -> dict[str, Any]:
+        try:
+            item = json.loads(row["metadata"])
+            if not isinstance(item, dict):
+                raise ValueError("metadata must be an object")
+            for name in (
+                "snapshot_id", "generation_id", "target_id", "commit", "source_commit",
+                "created_at", "semantic_namespace", "membership_column", "lance_tag",
+                "source_fingerprint", "source_selection_hash", "engine_version_id",
+            ):
+                if not isinstance(item[name], str) or not item[name]:
+                    raise ValueError(f"{name} must be a nonempty string")
+            if item["snapshot_id"] != row["snapshot_id"] or item["target_id"] != row["target_id"]:
+                raise ValueError("metadata identity differs from its catalog record")
+            for name in (
+                "dimension", "table_version", "adapter_version", "chunks", "reused_vectors", "new_vectors"
+            ):
+                value = item[name]
+                minimum = 1 if name in {"dimension", "table_version", "adapter_version"} else 0
+                if type(value) is not int or value < minimum:
+                    raise ValueError(f"{name} must be an integer of at least {minimum}")
+            counts = item["counts"]
+            if not isinstance(counts, dict) or any(
+                type(counts.get(table)) is not int or counts[table] < 0 for table in _TABLES
+            ):
+                raise ValueError("counts must contain nonnegative integers for every structure table")
+            self._corpus(item)
+            return cast(dict[str, Any], item)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise IndexInvalidError(
+                f"Invalid shared snapshot metadata for {row['target_id']}: {exc}"
+            ) from exc
 
     def published_corpora(self) -> dict[str, Corpus]:
         return {item["target_id"]: self._corpus(item) for item in self.snapshots()}
 
     def _corpus(self, item: dict[str, Any]) -> Corpus:
-        profile = dict(item["profile"])
-        profile["include_extensions"] = tuple(profile["include_extensions"])
-        profile["exclude_globs"] = tuple(profile["exclude_globs"])
-        for name in ("source_root", "index_root", "semantic_store"):
-            profile[name] = Path(profile[name]) if profile[name] is not None else None
-        return Corpus(**profile)
+        try:
+            if not isinstance(item["profile"], dict):
+                raise ValueError("profile must be an object")
+            profile = dict(item["profile"])
+            for name in (
+                "corpus_id", "display_name", "description", "revision", "adapter",
+                "embedding_provider", "embedding_model", "source_root", "index_root", "semantic_store",
+            ):
+                if not isinstance(profile[name], str):
+                    raise ValueError(f"profile.{name} must be a string")
+            if profile["adapter"] not in ADAPTERS:
+                raise ValueError("profile.adapter is unknown")
+            for name in ("include_extensions", "exclude_globs"):
+                values = profile[name]
+                if not isinstance(values, (list, tuple)) or any(
+                    not isinstance(value, str) for value in values
+                ):
+                    raise ValueError(f"profile.{name} must contain only strings")
+                profile[name] = tuple(values)
+            for name in ("source_root", "index_root", "semantic_store"):
+                if not profile[name]:
+                    raise ValueError(f"profile.{name} cannot be empty")
+                profile[name] = Path(profile[name])
+            return Corpus(**profile)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise IndexInvalidError("Invalid shared snapshot profile: " + str(exc)) from exc
 
     def build_git_snapshot(
         self,
@@ -380,6 +461,8 @@ class SharedPool:
         cancelled: Callable[[], bool] | None = None,
         legacy_generation: Path | None = None,
     ) -> SharedBuildResult:
+        if self.readonly:
+            raise IndexBuildError("Cannot build into a read-only shared pool")
         if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", target_id):
             raise IndexBuildError("Invalid target id")
 
@@ -400,7 +483,7 @@ class SharedPool:
                     }
                 )
 
-        with build_lock(self.root):
+        with build_lock(self.root), ExitStack() as resources:
             if self.schema_version != _SCHEMA_VERSION:
                 raise IndexBuildError(
                     "Shared pool requires an explicit schema upgrade; "
@@ -416,6 +499,7 @@ class SharedPool:
                 legacy_generation,
                 check,
                 emit,
+                resources,
             )
 
     def _build(
@@ -429,6 +513,7 @@ class SharedPool:
         legacy_generation: Path | None,
         check: Callable[[], None],
         emit: Callable[[str, int, int | None, str], None],
+        resources: ExitStack,
     ) -> SharedBuildResult:
         existing = self.snapshot(target_id)
         if existing is not None:
@@ -463,7 +548,7 @@ class SharedPool:
         if not files:
             raise IndexBuildError("Selected revision contains no allowed source files")
         config = engine_config(profile, self.root / "semantic", self.policy)
-        provider = get_provider(config)
+        provider = resources.enter_context(closing(get_provider(config)))
         dimension = provider.dim
         namespace = _digest(
             [
@@ -753,6 +838,7 @@ class SharedPool:
                 "lance_tag": lance_tag,
                 "dimension": dimension,
                 "source_fingerprint": summary.source_fingerprint,
+                "structure_fingerprint": _structure_fingerprint(connection, snapshot_id),
                 "source_selection_hash": source_selection_hash(corpus, self.policy),
                 "adapter_version": adapter.version,
                 "engine_version_id": ENGINE_VERSION,
@@ -1043,9 +1129,7 @@ class SharedPool:
         for number, (path, data) in enumerate(self._source_inputs(sources, check), 1):
             if not has_indexable_text(data):
                 continue
-            from codalith.languages.catalog import language_for_path
-
-            language = language_for_path(path)
+            language = detect_language(path)
             key = _digest(
                 [
                     hashlib.sha256(data).hexdigest(),
@@ -1252,7 +1336,7 @@ class SharedPool:
             manifest.embedding_provider != provider.name
             or manifest.embedding_model != provider.model_id
             or manifest.embedding_dimension != provider.dim
-            or manifest.semantic_engine_version not in {"1.1.0", ENGINE_VERSION}
+            or manifest.semantic_engine_version not in {"1.1.0", "2.0.0", ENGINE_VERSION}
         ):
             statistics["legacy_incompatible_inputs"] = len(expected)
             return
@@ -1341,48 +1425,54 @@ class SharedPool:
         limit: int,
         max_file_bytes: int,
     ) -> list[TextHit]:
-        with self._connect() as connection:
-            incomplete = connection.execute(
-                "SELECT 1 FROM snapshot_sources s LEFT JOIN source_text_indexed i USING(sha256) "
-                "WHERE s.snapshot_id=? AND i.sha256 IS NULL LIMIT 1",
-                (snapshot,),
-            ).fetchone()
-            if len(query) >= 3 and query.isascii() and incomplete is None:
-                phrase = '"' + query.replace('"', '""') + '"'
-                selected = connection.execute(
-                    "SELECT s.path,o.git_oid,o.sha256,o.size_bytes FROM source_text_search t "
-                    "JOIN source_objects o ON o.rowid=t.rowid "
-                    "JOIN snapshot_sources s ON s.sha256=o.sha256 "
-                    "WHERE source_text_search MATCH ? AND s.snapshot_id=? AND o.size_bytes<=? "
-                    "ORDER BY length(s.path),s.path",
-                    (phrase, snapshot, max_file_bytes),
-                ).fetchall()
-            else:
-                selected = connection.execute(
-                    "SELECT s.path,o.git_oid,o.sha256,o.size_bytes FROM snapshot_sources s "
-                    "JOIN source_objects o USING(sha256) WHERE s.snapshot_id=? AND o.size_bytes<=? "
-                    "ORDER BY length(s.path),s.path",
-                    (snapshot, max_file_bytes),
-                ).fetchall()
-        rows = [dict(row) for row in selected if not self.policy.is_denied(row["path"])]
-        hits: list[TextHit] = []
-        inputs = self._source_inputs(rows, lambda: None)
-        try:
-            for path, data in inputs:
-                matched = 0
-                for number, line in enumerate(
-                    data.decode("utf-8", errors="replace").split("\n"), 1
-                ):
-                    if query.casefold() in line.casefold():
-                        hits.append(TextHit(path, number, line.rstrip("\r")))
-                        matched += 1
-                        if len(hits) >= limit:
-                            return hits
-                        if matched == 3:
-                            break
-        finally:
-            inputs.close()
-        return hits
+        if not query or limit <= 0:
+            return []
+
+        def collect(selected: sqlite3.Cursor, collector: TextMatchCollector) -> list[TextHit] | None:
+            while batch := selected.fetchmany(_SQL_BATCH_ROWS):
+                rows = [dict(row) for row in batch if not self.policy.is_denied(row["path"])]
+                with closing(self._source_inputs(rows, lambda: None)) as inputs:
+                    for path, data in inputs:
+                        collector.add(
+                            path,
+                            first_matching_lines(data.decode("utf-8", errors="replace"), query),
+                        )
+                        if collector.complete_in_path_order():
+                            return collector.hits()
+            return None
+
+        with self._connect(readonly=True) as connection:
+            indexed = connection.execute(
+                "SELECT count(*) FROM sqlite_master WHERE name IN "
+                "('source_text_search','source_text_indexed')"
+            ).fetchone()[0] == 2
+            if indexed and len(query) >= 3 and query.isascii() and "\n" not in query and "\r" not in query:
+                incomplete = connection.execute(
+                    "SELECT 1 FROM snapshot_sources s LEFT JOIN source_text_indexed i USING(sha256) "
+                    "WHERE s.snapshot_id=? AND i.sha256 IS NULL LIMIT 1", (snapshot,),
+                ).fetchone()
+                if incomplete is None:
+                    collector = TextMatchCollector(query, limit)
+                    phrase = '"' + query.replace('"', '""') + '"'
+                    with closing(connection.execute(
+                        "SELECT s.path,o.git_oid,o.sha256,o.size_bytes FROM source_text_search t "
+                        "JOIN source_objects o ON o.rowid=t.rowid "
+                        "JOIN snapshot_sources s ON s.sha256=o.sha256 "
+                        "WHERE source_text_search MATCH ? AND s.snapshot_id=? AND o.size_bytes<=? "
+                        "ORDER BY length(s.path),s.path", (phrase, snapshot, max_file_bytes),
+                    )) as selected:
+                        complete = collect(selected, collector)
+                        if complete is not None:
+                            return complete
+            # Exact-case hits are fully recalled by FTS; other casefold matches need source scanning.
+            collector = TextMatchCollector(query, limit)
+            with closing(connection.execute(
+                "SELECT s.path,o.git_oid,o.sha256,o.size_bytes FROM snapshot_sources s "
+                "JOIN source_objects o USING(sha256) WHERE s.snapshot_id=? AND o.size_bytes<=? "
+                "ORDER BY length(s.path),s.path", (snapshot, max_file_bytes),
+            )) as selected:
+                complete = collect(selected, collector)
+                return complete if complete is not None else collector.hits()
 
 
 class SharedStructureIndex(StructureIndex):
@@ -1463,6 +1553,10 @@ class _SharedGenerations(GenerationRepository):
             raise IndexInvalidError("Shared snapshot adapter version is stale")
         if item["engine_version_id"] != ENGINE_VERSION:
             raise IndexInvalidError("Shared snapshot semantic version is stale")
+        if verify_artifacts:
+            from codalith.indexing.shared_validation import verify_shared_snapshot
+
+            verify_shared_snapshot(self.pool, item)
         counts = item["counts"]
         manifest = IndexManifest(
             schema_version=MANIFEST_SCHEMA_VERSION,
@@ -1675,6 +1769,12 @@ class SharedQueryService(QueryService):
         self.generations = _SharedGenerations(pool, policy)
         self.sources = _SharedSources(pool, policy)
         self.semantic = _SharedSemantic(pool, policy)
+
+    def verify_generation(self, corpus: Corpus) -> None:
+        if self.pool.snapshot(corpus.corpus_id) is None:
+            super().verify_generation(corpus)
+        else:
+            self.generations.active(corpus, verify_artifacts=True)
 
     def open_structure(self, corpus: Corpus, generation: ActiveGeneration) -> StructureIndex:
         item = self.pool.snapshot(corpus.corpus_id)

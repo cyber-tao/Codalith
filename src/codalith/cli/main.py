@@ -17,15 +17,13 @@ from codalith.benchmarks.runner import (
     run_mcp_benchmark,
     write_report,
 )
-from codalith.corpus.generations import GenerationRepository
+from codalith.cli.services import create_query_service
 from codalith.corpus.registry import CorpusRegistry
 from codalith.corpus.source_policy import SourcePolicy
 from codalith.errors import CodalithError
 from codalith.indexing.builder import GenerationBuilder
-from codalith.indexing.semantic import store_fingerprint
 from codalith.mcp.http import DEFAULT_MAX_REQUEST_BYTES, HTTPConfig, create_http_app
 from codalith.mcp.stdio import serve_stdio
-from codalith.query.service import QueryService
 
 _DEFAULT_REGISTRY = os.getenv("CODALITH_REGISTRY") or "configs/registry.toml"
 _DEFAULT_POLICY = os.getenv("CODALITH_SOURCE_POLICY") or "configs/source-policy.toml"
@@ -94,20 +92,16 @@ def _serve(
 
     management_config = ManagementConfig.from_registry(registry.path)
     management = None
-    service: QueryService
-    if management_config.enabled:
+    service = create_query_service(
+        registry, policy, management_config=management_config, initialize_shared=True
+    )
+    if management_config.enabled and args.transport == "http":
         from codalith.corpus.managed_registry import ManagedRegistry
-        from codalith.indexing.shared import SharedPool, SharedQueryService
         from codalith.management.service import ManagementService
 
-        pool = SharedPool(management_config.storage_root / "shared", policy)
-        managed_registry = ManagedRegistry(registry, pool.published_corpora)
-        service = SharedQueryService(managed_registry, policy, pool)
-        if args.transport == "http":
-            management = ManagementService(registry, policy, management_config)
-            management.on_publish = managed_registry.refresh
-    else:
-        service = QueryService(registry, policy)
+        assert isinstance(service.registry, ManagedRegistry)
+        management = ManagementService(registry, policy, management_config)
+        management.on_publish = service.registry.refresh
     if args.transport == "stdio":
         try:
             anyio.run(serve_stdio, service)
@@ -148,7 +142,7 @@ def _index(
         _print_json(report.to_dict())
         return 0
     if args.index_command == "status":
-        service = QueryService(registry, policy)
+        service = create_query_service(registry, policy)
         try:
             _print_json(service.status(target=args.target).model_dump(mode="json"))
         finally:
@@ -162,33 +156,22 @@ def _doctor(
     registry: CorpusRegistry,
     policy: SourcePolicy,
 ) -> int:
-    service = QueryService(registry, policy)
+    service = create_query_service(registry, policy)
     failures: list[str] = []
     try:
         status = service.status(target=args.target)
         payload = status.model_dump(mode="json")
         if args.deep:
-            target = registry.resolve(args.target)
+            target = service.registry.resolve(args.target)
             checks: list[dict[str, object]] = []
-            repository = GenerationRepository(policy)
             for corpus in target.corpora:
                 try:
-                    generation = repository.active(corpus, verify_artifacts=True)
-                    semantic_match = True
-                    if generation.manifest.semantic_available:
-                        semantic_match = (
-                            store_fingerprint(generation.semantic_path)
-                            == generation.manifest.semantic_store_fingerprint
-                        )
-                        if not semantic_match:
-                            failures.append(
-                                f"Semantic store fingerprint mismatch for {corpus.corpus_id}"
-                            )
+                    service.verify_generation(corpus)
                     checks.append(
                         {
                             "corpus_id": corpus.corpus_id,
                             "artifacts_valid": True,
-                            "semantic_fingerprint_valid": semantic_match,
+                            "semantic_fingerprint_valid": True,
                         }
                     )
                 except CodalithError as exc:

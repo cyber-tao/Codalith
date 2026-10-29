@@ -44,9 +44,9 @@ class AdapterSpec:
 ADAPTERS = {
     spec.adapter_id: spec
     for spec in (
-        AdapterSpec("python", 2),
-        AdapterSpec("csharp", 1),
-        AdapterSpec("cpp-ue", 6, UNREAL_PROFILE),
+        AdapterSpec("python", 3),
+        AdapterSpec("csharp", 2),
+        AdapterSpec("cpp-ue", 7, UNREAL_PROFILE),
         AdapterSpec("generic", 1),
     )
 }

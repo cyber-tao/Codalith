@@ -21,7 +21,9 @@ class ManagementConfig:
     profiles: tuple[dict[str, Any], ...] = ()
 
     @classmethod
-    def from_registry(cls, path: str | Path) -> ManagementConfig:
+    def from_registry(
+        cls, path: str | Path, *, require_admin_token: bool = True
+    ) -> ManagementConfig:
         config_path, payload = load_toml(path)
         raw = payload.get("management", {})
         if not isinstance(raw, dict):
@@ -64,7 +66,7 @@ class ManagementConfig:
         maximum = raw.get("max_selected_tags", 100)
         if not isinstance(maximum, int) or isinstance(maximum, bool) or not 1 <= maximum <= 1000:
             raise ConfigurationError("management.max_selected_tags must be between 1 and 1000")
-        if enabled and (len(token) < 16 or not roots):
+        if enabled and ((require_admin_token and len(token) < 16) or not roots):
             raise ConfigurationError(
                 "Enabled management requires source_roots and an admin token of at least 16 characters"
             )
