@@ -1,11 +1,13 @@
 ---
+import packageMetadata from '../../package.json';
+
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 const chinese = Astro.url.pathname.includes('/zh-cn/');
 ---
 <a class="site-title" href={`${base}/${chinese ? 'zh-cn/' : ''}`} aria-label="Codalith">
   <img src={`${base}/brand/codalith-mark.png`} width="38" height="38" alt="" />
   <span>Codalith</span>
-  <span class="version">0.2</span>
+  <span class="version">{packageMetadata.version}</span>
 </a>
 <style>
   .site-title { display: flex; align-items: center; gap: .55rem; color: var(--sl-color-white); text-decoration: none; font-size: 1.28rem; font-weight: 700; letter-spacing: -.05em; }
