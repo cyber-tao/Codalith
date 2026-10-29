@@ -153,13 +153,16 @@ function DatabaseManager({ token, config, repositories, databases, jobs, onRepos
   const [cursor, setCursor] = useState("");
   const [cursorHistory, setCursorHistory] = useState<string[]>([]);
   const [legacyGeneration, setLegacyGeneration] = useState("");
-  const [plan, setPlan] = useState<BuildPlan | null>(null);
+  const [preparedPlan, setPreparedPlan] = useState<{ value: BuildPlan; input: string } | null>(null);
   const [pending, setPending] = useState("");
   const [error, setError] = useState("");
   const idempotencyKey = useRef("");
+  const preflightController = useRef<AbortController | null>(null);
   const selectedDatabase = databases.find((item) => item.database_id === (databaseId || databases[0]?.database_id));
   const effectiveRepoId = repositoryId || selectedDatabase?.repo_id || repositories[0]?.repo_id || "";
   const effectiveProfileId = profileId || config.profiles[0]?.profile_id || "";
+  const planInput = JSON.stringify([selectedDatabase?.database_id, effectiveRepoId, [...selectedTags.keys()].sort(), legacyGeneration, token]);
+  const plan = preparedPlan?.input === planInput ? preparedPlan.value : null;
   const tagParams = new URLSearchParams({ limit: String(TAG_PAGE_SIZE), cursor: cursor || "0", q: query });
   const tags = useResource<TagListing>(effectiveRepoId ? `repositories/${encodeURIComponent(effectiveRepoId)}/tags?${tagParams}` : null, token);
   const publishedTargets = new Set(jobs.flatMap((job) => job.items.filter((item) => item.status === "succeeded").map((item) => item.target_id)));
@@ -171,14 +174,26 @@ function DatabaseManager({ token, config, repositories, databases, jobs, onRepos
 
   useEffect(() => {
     setSelectedTags(new Map());
-    setPlan(null);
     setCursor("");
     setCursorHistory([]);
   }, [effectiveRepoId, selectedDatabase?.database_id]);
 
-  const invalidatePlan = () => {
-    setPlan(null);
+  useEffect(() => {
+    setPreparedPlan(null);
     idempotencyKey.current = "";
+    setPending((operation) => operation === "plan" ? "" : operation);
+    return () => {
+      preflightController.current?.abort();
+      preflightController.current = null;
+    };
+  }, [planInput]);
+
+  const invalidatePlan = () => {
+    preflightController.current?.abort();
+    preflightController.current = null;
+    setPreparedPlan(null);
+    idempotencyKey.current = "";
+    setPending((operation) => operation === "plan" ? "" : operation);
   };
 
   const toggleTag = (tag: SourceTag) => {
@@ -210,19 +225,29 @@ function DatabaseManager({ token, config, repositories, databases, jobs, onRepos
 
   const prepare = async () => {
     if (!selectedDatabase || !effectiveRepoId || !selectedTags.size || pending) return;
+    const request = new AbortController();
+    preflightController.current = request;
     setPending("plan");
     setError("");
     try {
       const next = await adminRequest<BuildPlan>("build-plans", token, {
         method: "POST",
+        signal: request.signal,
         body: { database_id: selectedDatabase.database_id, repo_id: effectiveRepoId, tags: [...selectedTags.keys()], ...(legacyGeneration ? { legacy_generation: legacyGeneration } : {}) },
       });
-      setPlan(next);
+      if (request.signal.aborted || preflightController.current !== request) return;
+      setPreparedPlan({ value: next, input: planInput });
       idempotencyKey.current = typeof crypto.randomUUID === "function"
         ? crypto.randomUUID()
         : Array.from(crypto.getRandomValues(new Uint8Array(16)), (value) => value.toString(16).padStart(2, "0")).join("");
-    } catch (reason) { setError(errorMessage(reason)); }
-    finally { setPending(""); }
+    } catch (reason) {
+      if (!request.signal.aborted && preflightController.current === request) setError(errorMessage(reason));
+    } finally {
+      if (preflightController.current === request) {
+        preflightController.current = null;
+        setPending("");
+      }
+    }
   };
 
   const start = async () => {
@@ -245,11 +270,11 @@ function DatabaseManager({ token, config, repositories, databases, jobs, onRepos
         <section className="panel management-section">
           <SectionHeading title="1. Source repository" description="Browse directories on the server. Git objects are read without changing the working tree." />
           <div className="management-form">
-            <label>Registered repository<select value={effectiveRepoId} onChange={(event) => { setRepositoryId(event.target.value); invalidatePlan(); }}>
+            <label>Registered repository<select value={effectiveRepoId} disabled={Boolean(pending)} onChange={(event) => { setRepositoryId(event.target.value); invalidatePlan(); }}>
               <option value="" disabled>Select a repository</option>
               {repositories.map((repo) => <option key={repo.repo_id} value={repo.repo_id}>{repo.name} · {repo.path}</option>)}
             </select></label>
-            <RepositoryBrowser token={token} config={config} onRegistered={(repository) => { onRepositoryCreated(); setRepositoryId(repository.repo_id); }} />
+            <RepositoryBrowser token={token} config={config} disabled={Boolean(pending)} onRegistered={(repository) => { onRepositoryCreated(); setRepositoryId(repository.repo_id); invalidatePlan(); }} />
           </div>
         </section>
         <section className="panel management-section">
@@ -317,7 +342,7 @@ function DatabaseManager({ token, config, repositories, databases, jobs, onRepos
   );
 }
 
-function RepositoryBrowser({ token, config, onRegistered }: { token: string; config: ManagementConfig; onRegistered: (repository: Repository) => void }) {
+function RepositoryBrowser({ token, config, disabled = false, onRegistered }: { token: string; config: ManagementConfig; disabled?: boolean; onRegistered: (repository: Repository) => void }) {
   const [open, setOpen] = useState(false);
   const [rootId, setRootId] = useState("");
   const [path, setPath] = useState("");
@@ -329,7 +354,7 @@ function RepositoryBrowser({ token, config, onRegistered }: { token: string; con
   const listing = useResource<DirectoryListing>(open && effectiveRootId ? `directories?${params}` : null, token);
 
   const register = async (selectedPath: string) => {
-    if (pending) return;
+    if (pending || disabled) return;
     setPending(true);
     setError("");
     try {
@@ -341,17 +366,17 @@ function RepositoryBrowser({ token, config, onRegistered }: { token: string; con
   };
 
   return <div className="management-browser">
-    <button type="button" className="management-button secondary" onClick={() => setOpen(!open)}><Icon name="search" size={15} />{open ? "Close server browser" : "Browse server directories"}</button>
+    <button type="button" className="management-button secondary" disabled={disabled || pending} onClick={() => setOpen(!open)}><Icon name="search" size={15} />{open ? "Close server browser" : "Browse server directories"}</button>
     {open ? <div className="management-browser-content">
       {!config.source_roots.length ? <p className="management-hint">No source roots are configured. Add allowed server directories in the management configuration.</p> : <>
-        <label>Allowed source root<select value={effectiveRootId} onChange={(event) => { setRootId(event.target.value); setPath(""); }}>
+        <label>Allowed source root<select value={effectiveRootId} disabled={disabled || pending} onChange={(event) => { setRootId(event.target.value); setPath(""); }}>
           {config.source_roots.map((root) => <option key={root.root_id} value={root.root_id}>{root.label || root.path}</option>)}
         </select></label>
-        <div className="management-directory-path"><code>{selectedRoot?.path}{path ? `/${path}` : ""}</code><button type="button" className="management-button quiet" disabled={!path} onClick={() => setPath(path.split("/").slice(0, -1).join("/"))}>Up</button></div>
+        <div className="management-directory-path"><code>{selectedRoot?.path}{path ? `/${path}` : ""}</code><button type="button" className="management-button quiet" disabled={!path || disabled || pending} onClick={() => setPath(path.split("/").slice(0, -1).join("/"))}>Up</button></div>
         {listing.error ? <Message kind="error">{listing.error}</Message> : null}
-        <ul className="management-directory-list">{listing.data?.items.map((directory) => <li key={directory.path}><button type="button" onClick={() => setPath(directory.path)} disabled={pending}><Icon name={directory.is_repository ? "database" : "chevron"} size={15} />{directory.name}</button>{directory.is_repository ? <button className="management-button quiet" type="button" disabled={pending} onClick={() => void register(directory.path)}>Use repository</button> : null}</li>)}</ul>
+        <ul className="management-directory-list">{listing.data?.items.map((directory) => <li key={directory.path}><button type="button" onClick={() => setPath(directory.path)} disabled={disabled || pending}><Icon name={directory.is_repository ? "database" : "chevron"} size={15} />{directory.name}</button>{directory.is_repository ? <button className="management-button quiet" type="button" disabled={disabled || pending} onClick={() => void register(directory.path)}>Use repository</button> : null}</li>)}</ul>
         {listing.pending ? <span className="management-hint">Reading directories…</span> : !listing.data?.items.length ? <span className="management-hint">No child directories.</span> : null}
-        <button className="management-button secondary" type="button" disabled={pending} onClick={() => void register(path)}>{pending ? "Registering…" : "Use current directory as repository"}</button>
+        <button className="management-button secondary" type="button" disabled={disabled || pending} onClick={() => void register(path)}>{pending ? "Registering…" : "Use current directory as repository"}</button>
       </>}
       {error ? <Message kind="error">{error}</Message> : null}
     </div> : null}

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -51,6 +51,79 @@ afterEach(() => {
 });
 
 describe("database administration", () => {
+  it("discards an invalidated preflight even when its response arrives after a newer plan", async () => {
+    let completeOldPlan!: (value: Response) => void;
+    let oldSignal: AbortSignal | null | undefined;
+    const submitted: Array<Record<string, unknown>> = [];
+    const plan = (repo: string) => ({ plan_id: `plan-${repo}`, database_id: "db-1", repo_id: repo, items: [{ ...TAGS[0], target_id: `target-${repo}` }] });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(input), "http://localhost").pathname;
+      if (path.endsWith("/config")) return response(CONFIG);
+      if (path.endsWith("/repositories")) return response({ items: ["A", "B"].map((id) => ({ repo_id: id, name: id, path: `/sources/${id}` })) });
+      if (path.endsWith("/databases")) return response({ items: [{ database_id: "db-1", repo_id: "A", name: "Source", profile_id: "ue" }] });
+      if (path.endsWith("/space")) return response({});
+      if (path.endsWith("/tags")) return response({ items: [TAGS[0]], total: 1, next_cursor: null });
+      if (path.endsWith("/build-plans")) {
+        const body = JSON.parse(String(init?.body)) as { repo_id: string };
+        if (body.repo_id === "A") {
+          oldSignal = init?.signal;
+          return await new Promise<Response>((resolve) => { completeOldPlan = resolve; });
+        }
+        return response(plan("B"));
+      }
+      if (path.endsWith("/jobs") && init?.method === "POST") {
+        submitted.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+        return response(createJob());
+      }
+      return response({ items: [] });
+    }));
+    render(<ManagementConsole view="databases" token="admin-test" onTokenChange={() => {}} onNavigate={() => {}} />);
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Select 5.7.4-release" }));
+    fireEvent.click(screen.getByRole("button", { name: "Preflight selected tags" }));
+    expect(screen.getByLabelText("Registered repository")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Browse server directories" })).toBeDisabled();
+    expect(screen.getByLabelText("Reuse a legacy generation")).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("Registered repository"), { target: { value: "B" } });
+    await waitFor(() => expect(oldSignal?.aborted).toBe(true));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Select 5.7.4-release" }));
+    fireEvent.click(screen.getByRole("button", { name: "Preflight selected tags" }));
+    await screen.findByText("target-B");
+    await act(async () => { completeOldPlan(response(plan("A"))); });
+    expect(screen.queryByText("target-A")).not.toBeInTheDocument();
+    expect(screen.getByText("target-B")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Start build · 1 version" }));
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0].plan_id).toBe("plan-B");
+  });
+
+  it("aborts preflight when leaving the database screen", async () => {
+    let completePlan!: (value: Response) => void;
+    let signal: AbortSignal | null | undefined;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(input), "http://localhost").pathname;
+      if (path.endsWith("/config")) return response(CONFIG);
+      if (path.endsWith("/repositories")) return response({ items: [{ repo_id: "A", name: "A", path: "/A" }] });
+      if (path.endsWith("/databases")) return response({ items: [{ database_id: "db-1", repo_id: "A", name: "Source", profile_id: "ue" }] });
+      if (path.endsWith("/space")) return response({});
+      if (path.endsWith("/tags")) return response({ items: [TAGS[0]], total: 1, next_cursor: null });
+      if (path.endsWith("/build-plans")) {
+        signal = init?.signal;
+        return await new Promise<Response>((resolve) => { completePlan = resolve; });
+      }
+      return response({ items: [] });
+    }));
+    render(<Harness />);
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Select 5.7.4-release" }));
+    fireEvent.click(screen.getByRole("button", { name: "Preflight selected tags" }));
+    fireEvent.click(screen.getByRole("button", { name: "Build jobs" }));
+    expect(signal?.aborted).toBe(true);
+    await act(async () => { completePlan(response({ plan_id: "old-plan", items: [] })); });
+    fireEvent.click(screen.getByRole("button", { name: "Databases" }));
+    expect(await screen.findByRole("heading", { name: "1. Source repository" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "4. Review and build" })).not.toBeInTheDocument();
+  });
+
   it("opens a bookmarked management page without requiring a monitoring snapshot", async () => {
     window.history.replaceState(null, "", "/dashboard/#databases");
     const fetchMock = vi.fn();
