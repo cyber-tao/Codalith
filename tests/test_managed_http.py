@@ -33,11 +33,11 @@ def make_repo(root: Path) -> None:
 
     git("init", "-q")
     (root / "stable.py").write_text("def stable():\n    return 'unchanged'\n")
-    (root / "version.py").write_text("def first_only():\n    return 'first-version'\n")
+    (root / "version.py").write_text("from stable import stable\n\ndef first_only():\n    return stable() + 'first-version'\n")
     git("add", "stable.py", "version.py")
     git("commit", "-qm", "first")
     git("tag", "5.0.0")
-    (root / "version.py").write_text("def second_only():\n    return 'second-version'\n")
+    (root / "version.py").write_text("from stable import stable\n\ndef second_only():\n    return stable() + 'second-version'\n")
     git("add", "version.py")
     git("commit", "-qm", "second")
     git("tag", "-a", "5.1.0", "-m", "second version")
