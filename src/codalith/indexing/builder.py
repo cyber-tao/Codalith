@@ -251,7 +251,7 @@ def _fsync_tree(root: Path) -> None:
 
 
 def _indexed_files(database: Path) -> dict[str, str]:
-    connection = sqlite3.connect(f"file:{database.as_posix()}?mode=ro", uri=True)
+    connection = sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)
     try:
         return {
             str(path): str(digest)
@@ -264,7 +264,7 @@ def _indexed_files(database: Path) -> dict[str, str]:
 
 
 def _verify_indexed_sources(corpus: Corpus, database: Path) -> None:
-    connection = sqlite3.connect(f"file:{database.as_posix()}?mode=ro", uri=True)
+    connection = sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)
     try:
         expected = {
             str(path): str(digest)

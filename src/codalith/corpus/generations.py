@@ -328,7 +328,7 @@ class GenerationRepository:
                 raise IndexInvalidError(f"Index artifact hash mismatch: {path}")
         try:
             connection = sqlite3.connect(
-                f"file:{generation.structure_path.as_posix()}?mode=ro",
+                generation.structure_path.resolve().as_uri() + "?mode=ro",
                 uri=True,
             )
             try:
