@@ -32,6 +32,7 @@ from codalith.languages import create_adapter
 from codalith.languages.catalog import ADAPTERS
 from codalith.management.catalog import Catalog, timestamp
 from codalith.management.config import ManagementConfig
+from codalith.semantic import ENGINE_VERSION
 
 _TERMINAL = {"succeeded", "failed", "cancelled", "interrupted", "partial"}
 _ACTIVE = {"queued", "running", "validating", "publishing", "cancel_requested"}
@@ -456,6 +457,7 @@ class ManagementService:
             "profile_id": profile.corpus_id,
             "adapter": profile.adapter,
             "adapter_version": ADAPTERS[profile.adapter].version,
+            "semantic_engine_version": ENGINE_VERSION,
             "embedding_provider": profile.embedding_provider,
             "embedding_model": profile.embedding_model,
             "include_extensions": list(profile.include_extensions),
@@ -799,6 +801,8 @@ class ManagementService:
     def profile(self, plan: dict[str, Any]) -> Corpus:
         profile = self.profiles[plan["profile"]["profile_id"]]
         expected = plan["profile"]
+        if expected.get("semantic_engine_version") != ENGINE_VERSION:
+            raise ValueError("Semantic engine changed after planning; create a new plan")
         if (
             ADAPTERS[profile.adapter].version != expected["adapter_version"]
             or any(
