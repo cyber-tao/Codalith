@@ -30,12 +30,15 @@ from codalith.errors import CodalithError
 from codalith.indexing.builder import build_lock
 from codalith.languages import create_adapter
 from codalith.languages.catalog import ADAPTERS
-from codalith.management.catalog import Catalog, timestamp
+from codalith.management.catalog import (
+    ACTIVE_JOB_STATUSES,
+    TERMINAL_JOB_STATUSES,
+    Catalog,
+    timestamp,
+)
 from codalith.management.config import ManagementConfig
 from codalith.semantic import ENGINE_VERSION
 
-_TERMINAL = {"succeeded", "failed", "cancelled", "interrupted", "partial"}
-_ACTIVE = {"queued", "running", "validating", "publishing", "cancel_requested"}
 logger = logging.getLogger(__name__)
 _HEARTBEAT_SECONDS = 2.0
 _CANCEL_GRACE_SECONDS = 10.0
@@ -556,7 +559,7 @@ class ManagementService:
 
     def cancel(self, job_id: str) -> dict[str, Any]:
         def update(job: dict[str, Any]) -> None:
-            if job["status"] not in _TERMINAL:
+            if job["status"] not in TERMINAL_JOB_STATUSES:
                 job["status"] = "cancelled" if job["status"] == "queued" else "cancel_requested"
                 job["phase"] = job["status"]
                 if job["status"] == "cancelled":
@@ -589,7 +592,7 @@ class ManagementService:
         snapshots = SharedPool(self.config.storage_root / "shared", self.policy).snapshots()
         published = {(item["target_id"], item["commit"]): item for item in snapshots}
         for job in self.catalog.list("job"):
-            if job["status"] in _ACTIVE:
+            if job["status"] in ACTIVE_JOB_STATUSES:
 
                 def update(value: dict[str, Any]) -> None:
                     value.update(status="interrupted", phase="interrupted")
@@ -609,14 +612,20 @@ class ManagementService:
                                 total_units=1,
                                 unit="snapshots",
                             )
-                        elif item["status"] in _ACTIVE:
+                        elif item["status"] in ACTIVE_JOB_STATUSES:
                             item.update(status="interrupted", phase="interrupted")
                     completed = sum(item["status"] == "succeeded" for item in value["items"])
                     value.update(completed_tags=completed, completed_units=completed)
                     if completed == len(value["items"]):
                         value.update(status="succeeded", phase="succeeded")
 
-                self.catalog.update_job(job["job_id"], update, event="interrupted")
+                self.catalog.update_job(
+                    job["job_id"],
+                    update,
+                    event="interrupted",
+                    expected_attempt=job["attempt"],
+                    allowed_statuses=frozenset({job["status"]}),
+                )
 
     def start(self) -> None:
         if self._thread is not None:
@@ -672,6 +681,7 @@ class ManagementService:
                 continue
             if not self.catalog.claim_job(job["job_id"], job["attempt"]):
                 continue
+            attempt = job["attempt"]
             environment = {
                 **os.environ,
                 "CODALITH_JOB_POLICY": json.dumps(
@@ -708,7 +718,13 @@ class ManagementService:
                 def launch_failed(value: dict[str, Any], error: str = message) -> None:
                     value.update(status="failed", phase="failed", error=error)
 
-                self.catalog.update_job(job["job_id"], launch_failed, event="failed")
+                self.catalog.update_job(
+                    job["job_id"],
+                    launch_failed,
+                    event="failed",
+                    expected_attempt=attempt,
+                    allowed_statuses=ACTIVE_JOB_STATUSES,
+                )
                 logger.error("Management build process could not start: %s", message)
                 return True
             diagnostics: deque[bytes] = deque(maxlen=4)
@@ -723,6 +739,8 @@ class ManagementService:
             while process.poll() is None and not self._stop.wait(0.2):
                 now = time.monotonic()
                 current = self.catalog.get("job", job["job_id"])
+                if current["attempt"] != attempt:
+                    continue
                 if current["status"] == "cancel_requested":
                     cancel_at = cancel_at or now
                     if now - cancel_at >= _CANCEL_GRACE_SECONDS:
@@ -733,6 +751,8 @@ class ManagementService:
                         job["job_id"],
                         lambda value: value.update(worker_heartbeat_at=timestamp()),
                         event="heartbeat",
+                        expected_attempt=attempt,
+                        allowed_statuses=ACTIVE_JOB_STATUSES,
                     )
                     heartbeat_at = now
             if self._stop.is_set() and process.stdin is not None:
@@ -748,7 +768,7 @@ class ManagementService:
             reader.join(timeout=2)
             process.stderr.close()
             current = self.catalog.get("job", job["job_id"])
-            if current["status"] not in _TERMINAL:
+            if current["attempt"] == attempt and current["status"] in ACTIVE_JOB_STATUSES:
                 failure_message = f"Build worker exited with code {process.returncode} before recording a terminal result"
                 detail = b"".join(diagnostics).decode("utf-8", errors="replace").strip()
                 if detail:
@@ -792,6 +812,8 @@ class ManagementService:
                     job["job_id"],
                     interrupted,
                     event="interrupted",
+                    expected_attempt=attempt,
+                    allowed_statuses=ACTIVE_JOB_STATUSES,
                 )
             if self.on_publish is not None:
                 self.on_publish()

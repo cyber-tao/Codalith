@@ -13,7 +13,7 @@ from typing import Any
 
 from codalith.corpus.registry import CorpusRegistry
 from codalith.corpus.source_policy import SourcePolicy
-from codalith.management.catalog import timestamp
+from codalith.management.catalog import ACTIVE_JOB_STATUSES, timestamp
 from codalith.management.config import ManagementConfig
 from codalith.management.service import ManagementService
 
@@ -54,11 +54,6 @@ def run_job(
                 last_at, last_phase = now, phase
 
                 def update(value: dict[str, Any]) -> None:
-                    if value["attempt"] != attempt or value["status"] in {
-                        "interrupted",
-                        "cancelled",
-                    }:
-                        return
                     child = value["items"][index]
                     if child["phase"] != phase or "phase_started_at" not in child:
                         child["phase_started_at"] = timestamp()
@@ -73,7 +68,13 @@ def run_job(
                     )
                     value["phase"] = child["phase"]
 
-                catalog.update_job(job_id, update, event="progress")
+                catalog.update_job(
+                    job_id,
+                    update,
+                    event="progress",
+                    expected_attempt=attempt,
+                    allowed_statuses=ACTIVE_JOB_STATUSES,
+                )
 
             progress({"stage": "starting", "completed": 0, "total": None, "unit": "files"})
             try:
@@ -95,18 +96,20 @@ def run_job(
                     return False
 
                 def failure(value: dict[str, Any], message: str = service.safe_error(exc)) -> None:
-                    if value["attempt"] != attempt:
-                        return
                     value["items"][index].update(
                         status="failed", phase="failed", error=message, ended_at=timestamp()
                     )
 
-                catalog.update_job(job_id, failure, event="tag_failed")
+                catalog.update_job(
+                    job_id,
+                    failure,
+                    event="tag_failed",
+                    expected_attempt=attempt,
+                    allowed_statuses=ACTIVE_JOB_STATUSES,
+                )
                 return True
 
             def success(value: dict[str, Any]) -> None:
-                if value["attempt"] != attempt:
-                    return
                 value["items"][index].update(
                     status="succeeded",
                     phase="published",
@@ -126,7 +129,13 @@ def run_job(
                 )
                 value["completed_units"] = value["completed_tags"]
 
-            catalog.update_job(job_id, success, event="published")
+            catalog.update_job(
+                job_id,
+                success,
+                event="published",
+                expected_attempt=attempt,
+                allowed_statuses=ACTIVE_JOB_STATUSES,
+            )
             return True
 
         for index, item in enumerate(job["items"]):
@@ -136,8 +145,6 @@ def run_job(
                 break
 
         def finish(value: dict[str, Any]) -> None:
-            if value["attempt"] != attempt:
-                return
             succeeded = sum(child["status"] == "succeeded" for child in value["items"])
             if succeeded == len(value["items"]):
                 status = "succeeded"
@@ -166,14 +173,25 @@ def run_job(
                         ended_at=timestamp(),
                     )
 
-        catalog.update_job(job_id, finish, event="finished")
+        catalog.update_job(
+            job_id,
+            finish,
+            event="finished",
+            expected_attempt=attempt,
+            allowed_statuses=ACTIVE_JOB_STATUSES,
+        )
     except Exception as exc:
 
         def fail(value: dict[str, Any], message: str = service.safe_error(exc)) -> None:
-            if value["attempt"] == attempt:
-                value.update(status="failed", phase="failed", error=message)
+            value.update(status="failed", phase="failed", error=message)
 
-        catalog.update_job(job_id, fail, event="failed")
+        catalog.update_job(
+            job_id,
+            fail,
+            event="failed",
+            expected_attempt=attempt,
+            allowed_statuses=ACTIVE_JOB_STATUSES,
+        )
 
 
 def main() -> int:

@@ -12,6 +12,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+ACTIVE_JOB_STATUSES = frozenset({"queued", "running", "validating", "publishing", "cancel_requested"})
+TERMINAL_JOB_STATUSES = frozenset({"succeeded", "failed", "cancelled", "interrupted", "partial"})
+
 
 def timestamp() -> str:
     return datetime.now(UTC).isoformat()
@@ -77,7 +80,13 @@ class Catalog:
         return payload
 
     def update_job(
-        self, job_id: str, update: Callable[[dict[str, Any]], None], *, event: str = "updated"
+        self,
+        job_id: str,
+        update: Callable[[dict[str, Any]], None],
+        *,
+        event: str = "updated",
+        expected_attempt: int | None = None,
+        allowed_statuses: frozenset[str] | None = None,
     ) -> dict[str, Any]:
         with self._lock, self.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -87,6 +96,10 @@ class Catalog:
             if row is None:
                 raise KeyError(f"Unknown job: {job_id}")
             payload: dict[str, Any] = json.loads(row[0])
+            if (
+                expected_attempt is not None and payload["attempt"] != expected_attempt
+            ) or (allowed_statuses is not None and payload["status"] not in allowed_statuses):
+                return payload
             previous = json.loads(row[0])
             update(payload)
             payload["updated_at"] = timestamp()
