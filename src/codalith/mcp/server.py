@@ -96,7 +96,7 @@ def create_sdk_server(
             recorder.record_call(
                 tool=name,
                 arguments=arguments,
-                target=bound_target or _call_target(arguments, service.registry.default_target),
+                target=bound_target or _call_target(name, arguments, service.registry.default_target),
                 started_at=started_at,
                 duration_ms=max(0.0, (time.perf_counter() - started) * 1_000),
                 result=result,
@@ -217,11 +217,22 @@ def _scope_arguments(
     return scoped
 
 
-def _call_target(arguments: dict[str, Any], fallback: str) -> str:
-    for key in ("target", "from_corpus"):
-        value = arguments.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
+def _call_target(name: str, arguments: dict[str, Any], fallback: str) -> str:
+    definition = TOOL_BY_NAME.get(name)
+    if definition is None:
+        return fallback
+    try:
+        parsed = definition.input_model.model_validate(arguments)
+        if isinstance(parsed, ReadInput):
+            return parse_uri(parsed.uri).corpus_id
+        if isinstance(parsed, GraphInput):
+            return parse_uri(parsed.root_uri).corpus_id
+        if isinstance(parsed, CompareInput):
+            return parsed.from_corpus
+        if isinstance(parsed, (SearchInput, ContextInput, SymbolInput, StatusInput)):
+            return parsed.target or fallback
+    except (CodalithError, ValueError, TypeError):
+        return fallback
     return fallback
 
 
