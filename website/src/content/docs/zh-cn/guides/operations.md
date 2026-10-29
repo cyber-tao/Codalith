@@ -67,7 +67,9 @@ uv run codalith index status --target sample
 uv run codalith doctor --target sample --deep
 ```
 
-Deep doctor 对本地产物和 semantic store 的每个字节计算哈希，因此大型 UE store 可能较慢。指纹不一致、store 来源漂移、revision/config/source-policy 漂移、adapter 或 semantic engine 版本变化、缺失产物都会使 generation 无效，不会静默回退。未发布 generation 时状态为 `missing`，当前 generation 必须重建时为 `invalid`。
+两个命令均支持目录 target 和已发布的托管 target。将 `sample` 替换为 `codalith_catalog` 或管理构建返回的 target ID；使用全局 `--registry` 和 `--policy` 参数选择与服务相同的配置。诊断以只读方式打开已有存储，不加载 embedding 模型、不创建共享池、不执行迁移。管理池不存在时返回 `index_missing`，不创建目录。
+
+对于目录 generation，deep doctor 对本地产物和 semantic store 的每个字节计算哈希，因此大型 UE store 可能较慢。对于托管 target，它核验指定快照的索引身份、文件成员、结构事实及成员集合指纹、源码哈希、固定的 Lance version/tag，以及语义成员与 occurrence 映射。新快照元数据记录 `structure_fingerprint`；缺少该字段的快照必须重建后才能通过深检查。它不对整个可变共享池计算哈希，追加其他版本不能使旧快照失效。SQLite 的只读连接可能创建 WAL/SHM 协调文件，但诊断不会修改持久数据。指纹不一致、store 来源漂移、revision/config/source-policy 漂移、adapter 或 semantic engine 版本变化、缺失产物都会使 generation 无效，不会静默回退。未发布 generation 时状态为 `missing`，当前 generation 必须重建时为 `invalid`。
 
 旧 generation 目录保留，用于诊断和修复指针时回退。开发阶段没有自动保留策略任务；仅在服务已停止且保全当前 generation 后，才清理旧 generation。
 
@@ -182,9 +184,10 @@ uv run codalith project bind --project "/work/MyGame" --server "http://127.0.0.1
 
 ## 迁移说明
 
-以下变化调整了持久化格式和公开契约。升级后应重建或重新 adopt 每个 generation；此前旧 generation 会报告 `invalid`。`adopt` 不重新 embedding。
+以下变化调整了持久化格式和公开契约。切换客户端前先验证已有 target，并保留旧二进制与旧存储用于回滚；升级不会自动修改默认 target 或重新绑定项目。目录 generation 可以重建，或在来源仍兼容时重新 adopt；托管快照保持不可变，必须通过新构建计划生成新 target，不原地修改记录。`adopt` 不重新 embedding。
 
-- Semantic engine 2.0.0 引入按完整输入寻址的共享向量与版本成员关系；显式 legacy 导入器接受可验证的 1.1.0 和 2.0.0 输入。旁路迁移期间，保留旧服务二进制查询旧存储：原地升级该二进制后，其 1.1.0 语义 generation 会失效，直到重建或重新 adopt。导入到单独的 management 根目录，核对结果后再切换客户端；旧存储与旧服务不会自动切换。
+- Semantic engine 2.1.0 使共享 Git 分块与目录索引使用相同语言检测：JavaScript、TypeScript/TSX、Go、Rust 和 Java 恢复语言感知的符号分块，不再使用通用文本窗口。Adapter 版本 `python=3`、`csharp=2`、`cpp-ue=7` 恢复引用与父子关系解析的大小写敏感性；模糊符号发现仍不区分大小写。使用旧 engine 或 adapter 来源的 generation 在新版服务中变为 invalid/stale，需要重建。托管计划现在固定 `profile.semantic_engine_version`；缺少该字段或固定其他 engine 的旧计划会被拒绝，必须重新预检，新计划使用新 target 身份。替代版本通过诊断与引用核验前，保留旧二进制和旧存储服务旧 target；随后明确切换默认 target 或项目绑定。
+- Semantic engine 2.0.0 引入按完整输入寻址的共享向量与版本成员关系。显式 legacy 导入器接受可验证的 1.1.0、2.0.0 和当前 2.1.0 输入；仅当源码哈希、完整 embedding 输入、模型和维度一致时复用向量，分块输入变化需要新 embedding。旁路迁移时导入到单独的 management 根目录；旧存储与旧服务不会自动切换。
 - Manifest schema 4 完成将 CodeRAG 纳入 `codalith.semantic`：来源字段改为 `semantic_engine_version`、`semantic_store`、`semantic_store_fingerprint`、`semantic_covered_files` 和 `semantic_extra_files`；产物为 `semantic-meta.json`，新建 store 位于 generation 的 `semantic/`。Registry 的 `coderag_store` 改为 `semantic_store`；Compose 变量为 `CODALITH_UE_SEMANTIC_STORE_DIR` 和 `CODALITH_UE_SEMANTIC_HOST_DIR`。需重命名 `.env` 中的 `CODALITH_UE_CODERAG_HOST_DIR`，或移动 store，因为默认宿主机路径从 `.local/coderag/` 改为 `.local/semantic/`。`codalith_search` 的后端由 `coderag` 改报 `semantic`，fastembed 模型缓存位于 `~/.cache/codalith/fastembed`。
 - Manifest schema 3：`source_selection_hash` 取代 `chunk_policy_hash`，当前包含 deny globs 和字节上限；当时语义 generation 记录 `coderag_store`、`coderag_covered_files` 和 `coderag_extra_files`。
 - Structure schema 4 增加 `name_match` 引用解析、`symbol_search` trigram 索引，以及逐符号比较摘要。`cpp-ue` adapter 版本 6 不再把 `#include` 保存为模块依赖。构建要求 SQLite 支持 FTS5 与 trigram tokenizer（3.34+），容器镜像和标准 Python 构建提供这些能力。

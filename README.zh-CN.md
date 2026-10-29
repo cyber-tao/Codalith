@@ -21,7 +21,7 @@ Codalith 是一个本地优先的 MCP 服务，帮助 Agent 查找实现、定�
 - **核对源码证据。** 按规范的 `codalith://` 源码 URI 读取，并通过哈希和 stale 状态识别索引后的源码变化。
 - **探索代码关系。** 定位定义、有界遍历引用图，并比较已注册语料之间的符号结构。
 - **固定源码版本。** 单次调用对每个语料使用同一个不可变 generation；新 generation 验证通过后才原子发布。
-- **接入现有 Agent。** stdio 与 Streamable HTTP 提供相同的 7 个只读工具；内置 `codalith-source` skill 指导检索与引用核验。
+- **接入现有 Agent。** stdio 与 Streamable HTTP 提供相同的 8 个只读工具；内置 `codalith-source` skill 指导检索与引用核验。
 - **查看服务运行情况。** 可选的 HTTP 运维面板展示 readiness、generation 大小、查询延迟、工具使用与进程遥测。
 
 目前提供 **Python**、**C#** 和 **C++ / Unreal Engine** 结构适配器。**generic** 适配器可索引其他文本，不提供结构化符号提取。
@@ -124,6 +124,7 @@ bun run --cwd dashboard build
 | `codalith_symbol` | 精确或模糊解析符号定义 |
 | `codalith_graph` | 有界遍历入边或出边引用证据 |
 | `codalith_compare` | 比较两个语料的结构符号 |
+| `codalith_catalog` | 发现已注册源码版本、精确 revision、readiness 与检索能力 |
 | `codalith_status` | 不加载 embedding 模型、不扫描源码，检查 readiness 与 provenance |
 
 工具输入拒绝未知字段；两种传输均使用官方 MCP Python SDK。源码策略的 deny 规则过滤工具输出，源码读取使用配置的行数与字节预算。完整输入、返回字段、限制与错误说明见 [MCP API](docs/mcp-api.md)。
@@ -147,7 +148,7 @@ sample 的默认索引位于 `data/indexes/sample`；Compose 使用 `codalith-da
 ## 项目状态与边界
 
 - **开发阶段：** 持久化格式和配置可能变化，升级时按 [迁移说明](docs/operations.md#migration-notes) 处理。
-- **部署：** HTTP 默认发布到 loopback，检查 Host/Origin 并限制请求体。没有内置网络认证或多租户访问控制；远程访问需要可信且带认证的边界。
+- **部署：** HTTP 默认发布到 loopback，检查 Host/Origin 并限制请求体。管理员 bearer 认证保护管理路由；MCP、catalog 和监控路由没有内置网络认证或多租户访问控制。远程访问仍需置于可信且带认证的边界之后。
 - **证据：** 引用图描述静态证据，不能证明运行中进程的回调注册情况或执行顺序。
 - **运维：** 面板遥测有容量上限，仅保存在当前进程内，重启后清空，不是持久审计日志。
 
@@ -172,6 +173,7 @@ uv sync --frozen --extra dev
 uv run --frozen pytest -q
 uv run --frozen ruff check src tests
 uv run --frozen mypy src
+uv run --frozen python scripts/check_distribution.py
 ```
 
 修改运维面板时：

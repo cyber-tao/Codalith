@@ -21,7 +21,7 @@ Codalith is a local-first MCP service that helps agents find implementations, re
 - **Check the evidence.** Read canonical `codalith://` source URIs and detect source changes since indexing through hash and stale-state reporting.
 - **Explore relationships.** Resolve definitions, traverse bounded reference graphs, and compare symbol structure between registered corpora.
 - **Pin the source version.** Each call uses one immutable generation per corpus. A new generation is published atomically after validation.
-- **Use your existing agent.** The same seven read-only tools work over stdio and Streamable HTTP. The bundled `codalith-source` skill guides retrieval and citation checks.
+- **Use your existing agent.** The same eight read-only tools work over stdio and Streamable HTTP. The bundled `codalith-source` skill guides retrieval and citation checks.
 - **Inspect service operation.** The optional HTTP dashboard shows readiness, generation sizes, query latency, tool usage, and process telemetry.
 
 Structural adapters are available for **Python**, **C#**, and **C++ / Unreal Engine**. The **generic** adapter indexes other text without claiming structural symbol extraction.
@@ -124,6 +124,7 @@ See [operations](docs/operations.md) for health checks, dashboard behavior, and 
 | `codalith_symbol` | Resolve exact or fuzzy symbol definitions |
 | `codalith_graph` | Traverse bounded incoming or outgoing reference evidence |
 | `codalith_compare` | Compare structural symbols between two corpora |
+| `codalith_catalog` | Discover registered source versions, exact revisions, readiness, and retrieval capabilities |
 | `codalith_status` | Check readiness and provenance without loading embedding models or scanning source |
 
 Tool inputs reject unknown fields. Both transports use the official MCP Python SDK. Source-policy deny rules filter tool outputs; source reads use configured line and byte budgets. Full inputs, response fields, limits, and errors are in the [MCP API reference](docs/mcp-api.md).
@@ -147,7 +148,7 @@ The default sample index is under `data/indexes/sample`. Compose persists it in 
 ## Status and boundaries
 
 - **Development status:** persisted formats and configuration may change; follow the [migration notes](docs/operations.md#migration-notes) when upgrading.
-- **Deployment:** HTTP publishes to loopback by default, checks Host/Origin, and limits request bodies. There is no built-in network authentication or multi-tenant access control; use a trusted, authenticated boundary for remote access.
+- **Deployment:** HTTP publishes to loopback by default, checks Host/Origin, and limits request bodies. Administrator bearer authentication protects management routes; MCP, catalog, and monitoring routes have no built-in network authentication or multi-tenant access control. Keep remote access behind a trusted, authenticated boundary.
 - **Evidence:** reference graphs describe static evidence. They do not establish a running process's callback registrations or execution order.
 - **Operations:** dashboard telemetry is bounded, process-local, and reset on restart. It is not a durable audit log.
 
@@ -172,6 +173,7 @@ uv sync --frozen --extra dev
 uv run --frozen pytest -q
 uv run --frozen ruff check src tests
 uv run --frozen mypy src
+uv run --frozen python scripts/check_distribution.py
 ```
 
 For dashboard changes:

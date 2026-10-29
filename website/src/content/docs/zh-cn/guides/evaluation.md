@@ -75,7 +75,7 @@ Regression 和 holdout 分开运行。检索失败时先诊断 adapter、index �
 
 ## Agent 工作流对比
 
-`agent-benchmark` 对比仅使用 MCP 的 Agent，与可按需发现和读取 `skills/codalith-source/SKILL.md` 的 Agent。两组使用相同本地 Ollama 模型、服务指令、七个 MCP 工具、独立对话历史、输出契约和 MCP 调用预算。技能组额外获得技能名称、描述及 `read_skill` 工具；加载正文消耗模型轮次，并计入 token 与总耗时。
+`agent-benchmark` 对比仅使用 MCP 的 Agent，与可按需发现和读取 `skills/codalith-source/SKILL.md` 的 Agent。两组使用相同本地 Ollama 模型、服务指令、八个 MCP 工具、独立对话历史、输出契约和 MCP 调用预算。技能组额外获得技能名称、描述及 `read_skill` 工具；加载正文消耗模型轮次，并计入 token 与总耗时。
 
 ```bash
 uv run codalith agent-benchmark \
@@ -100,7 +100,7 @@ Runner 记录原始模型/工具轨迹及 API 报告的 prompt/generated token�
 
 ## 原生 Codex 对比
 
-`native-agent-benchmark` 为每次尝试在全新、物理隔离的 Docker 容器内运行官方 Codex CLI。两组使用相同原生模型、effort、developer 指令、最终 JSON schema 和七个 MCP 工具。仅技能组将原样候选挂载到 `.agents/skills`；原生发现最初仅暴露元数据，shell 事件显示是否真正读取正文。
+`native-agent-benchmark` 为每次尝试在全新、物理隔离的 Docker 容器内运行官方 Codex CLI。两组使用相同原生模型、effort、developer 指令、最终 JSON schema 和八个 MCP 工具。仅技能组将原样候选挂载到 `.agents/skills`；原生发现最初仅暴露元数据，shell 事件显示是否真正读取正文。
 
 ```bash
 uv run codalith native-agent-benchmark \
@@ -137,7 +137,7 @@ uv run codalith claude-agent-benchmark \
   --output-dir reports/ue-agent-claude --repeats 2
 ```
 
-同样先替换并验证 image digest。两组具有相同的 Read/Skill built-in 和七个 MCP 工具。共同权限策略禁止读取隔离 workspace 以外的文件，并显式拒绝 runtime 配置与进程文件。A 没有候选技能；B 将原样字节挂载到 `.claude/skills`。保留正常原生发现，因为 bare/safe mode 会抑制元数据干预。
+同样先替换并验证 image digest。两组具有相同的 Read/Skill built-in 和八个 MCP 工具。共同权限策略禁止读取隔离 workspace 以外的文件，并显式拒绝 runtime 配置与进程文件。A 没有候选技能；B 将原样字节挂载到 `.claude/skills`。保留正常原生发现，因为 bare/safe mode 会抑制元数据干预。
 
 禁用 bundled skills、hooks、plugins、memory、delegation 和 tool search；检查 native initialization 事件，验证实际模型、工具和技能。仅冻结的 prompt 输入 stdin，共享指令和最终 JSON schema 保持一致。
 

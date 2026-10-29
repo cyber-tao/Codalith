@@ -92,7 +92,7 @@ anyio.run(main)
 uv run python quickstart.py
 ```
 
-The output should list seven tools and include real source text from the sample cache module, a `codalith://sample/source/...#Lx-Ly` URI, revision `sample-v1`, the active generation ID, and matching `sha256` and `indexed_sha256`. Inspect `truncated` before assuming that a returned range is the whole implementation. Keep the exact URI returned by `codalith_read` as the citation: it identifies the range actually read.
+The output should list eight tools and include real source text from the sample cache module, a `codalith://sample/source/...#Lx-Ly` URI, revision `sample-v1`, the active generation ID, and matching `sha256` and `indexed_sha256`. Inspect `truncated` before assuming that a returned range is the whole implementation. Keep the exact URI returned by `codalith_read` as the citation: it identifies the range actually read.
 
 ## 5. Connect your coding agent
 
@@ -134,4 +134,4 @@ See [installation](../guides/installation/) for other supported clients, project
 
 Press **Ctrl+C** in the server terminal to stop the local service. The sample index stays on disk for the next run; stopping does not delete generations. If this was a disposable checkout, remove only the files and sample data you intentionally created after confirming the service is stopped. Client integrations persist separately; follow the [installation recovery instructions](../guides/installation/#preview-validate-and-recover) if you want to undo them.
 
-Next, [configure your own corpus](../guides/configuration/), review the [seven MCP tools](../guides/mcp-api/), or follow the [operations guide](../guides/operations/) for Compose and existing UE indexes.
+Next, [configure your own corpus](../guides/configuration/), review the [eight MCP tools](../guides/mcp-api/), or follow the [operations guide](../guides/operations/) for Compose and existing UE indexes.

@@ -66,7 +66,7 @@ Retrieval code must never encode evaluation questions, keywords, or expected ans
 
 `agent-benchmark` compares an MCP-only agent with an agent that can discover and read
 `skills/codalith-source/SKILL.md` on demand. Both use the same local Ollama model,
-server instructions, seven advertised MCP tools, independent conversation histories,
+server instructions, eight advertised MCP tools, independent conversation histories,
 output contract, and MCP call budget. The skill arm additionally receives its name,
 description, and a `read_skill` tool; loading the body costs a model turn and contributes
 to the recorded token and wall-clock totals. This controlled API agent measures the
@@ -121,7 +121,7 @@ primary results rather than replacing them with the supplementary run.
 
 `native-agent-benchmark` runs the official Codex CLI in a fresh, physically isolated
 Docker container for each attempt. Both arms receive the same native model, effort,
-developer instructions, final JSON schema, and seven MCP tools. Only the skill arm
+developer instructions, final JSON schema, and eight MCP tools. Only the skill arm
 mounts the unchanged candidate under `.agents/skills`; native discovery initially
 exposes metadata, and shell events show whether the body was actually read.
 
@@ -188,7 +188,7 @@ uv run codalith claude-agent-benchmark \
   --output-dir reports/ue-agent-claude --repeats 2
 ```
 
-Both arms expose the same Read and Skill built-ins and the same seven MCP tools.
+Both arms expose the same Read and Skill built-ins and the same eight MCP tools.
 The common permission policy blocks file reads outside the isolated workspace and
 explicitly denies runtime configuration and process files. A has no candidate;
 B mounts its unchanged bytes under `.claude/skills`. Preserve normal native skill

@@ -92,7 +92,7 @@ anyio.run(main)
 uv run python quickstart.py
 ```
 
-输出应列出七个工具，并包含示例缓存模块的真实源码、`codalith://sample/source/...#Lx-Ly` URI、`sample-v1` revision、当前 generation ID，以及一致的 `sha256` 和 `indexed_sha256`。先检查 `truncated`，再判断返回范围是否覆盖完整实现。引用时原样保留 `codalith_read` 返回的 URI，它标识实际读到的范围。
+输出应列出八个工具，并包含示例缓存模块的真实源码、`codalith://sample/source/...#Lx-Ly` URI、`sample-v1` revision、当前 generation ID，以及一致的 `sha256` 和 `indexed_sha256`。先检查 `truncated`，再判断返回范围是否覆盖完整实现。引用时原样保留 `codalith_read` 返回的 URI，它标识实际读到的范围。
 
 ## 5. 连接编码 Agent
 
@@ -134,4 +134,4 @@ sh ./install.sh --agent codex --agent claude
 
 在服务终端按 **Ctrl+C** 停止本地服务。示例索引保留在磁盘上供下次使用，停止服务不会删除 generation。如果这是一次性检出，确认服务已停止后，只清理你有意创建的文件和 sample 数据。客户端集成单独保留；需要撤销时遵循[安装恢复说明](../guides/installation/#preview-validate-and-recover)。
 
-接下来可以[配置自己的语料](../guides/configuration/)、查看[七个 MCP 工具](../guides/mcp-api/)，或按[运维指南](../guides/operations/)使用 Compose 和现有 UE 索引。
+接下来可以[配置自己的语料](../guides/configuration/)、查看[八个 MCP 工具](../guides/mcp-api/)，或按[运维指南](../guides/operations/)使用 Compose 和现有 UE 索引。
