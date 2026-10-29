@@ -82,6 +82,47 @@ class SharedVectors:
                     row[field.name] = False
         self.table.add(pa.Table.from_pylist(rows, schema=self.table.schema))
 
+    def _retained_release(
+        self,
+        tag: str,
+        column: str,
+        members: set[int],
+        check_cancel: Callable[[], None],
+    ) -> int | None:
+        import lance
+        import pyarrow as pa
+
+        native = lance.dataset(str(self.root / "chunks.lance"))
+        if tag not in native.tags.list():
+            return None
+        version = native.tags.get_version(tag)
+        if version is None:
+            return None
+        retained = lance.dataset(str(self.root / "chunks.lance"), version=version)
+        if column not in retained.schema.names or not pa.types.is_boolean(
+            retained.schema.field(column).type
+        ):
+            raise ValueError("Retained release is missing its snapshot membership column")
+        table = self.db.open_table("chunks")
+        table.checkout(version)
+        indexed_columns = {name for index in table.list_indices() for name in index.columns}
+        required_columns = {column, "text"}
+        if table.count_rows() >= _ANN_MIN_ROWS:
+            required_columns.add("vector")
+        if not required_columns <= indexed_columns:
+            raise ValueError("Retained release is missing required search indexes")
+        remaining = set(members)
+        for batch in retained.scanner(columns=["id"], filter=f"{column} = true").to_batches():
+            check_cancel()
+            for value in batch.column("id").to_pylist():
+                if value not in remaining:
+                    raise ValueError("Retained release has a different snapshot membership")
+                remaining.remove(value)
+        if remaining:
+            raise ValueError("Retained release has a different snapshot membership")
+        check_cancel()
+        return int(version)
+
     def publish(
         self,
         snapshot_id: str,
@@ -94,6 +135,10 @@ class SharedVectors:
 
         check_cancel()
         column = "s_" + hashlib.sha256(snapshot_id.encode()).hexdigest()[:24]
+        tag = "snapshot_" + hashlib.sha256(snapshot_id.encode()).hexdigest()[:24]
+        retained_version = self._retained_release(tag, column, members, check_cancel)
+        if retained_version is not None:
+            return retained_version, column, tag
         native = lance.dataset(str(self.root / "chunks.lance"))
         if column not in native.schema.names:
 
@@ -159,11 +204,16 @@ class SharedVectors:
         self.table = self.db.open_table("chunks")
         self.table.checkout_latest()
         version = int(self.table.version)
-        tag = "snapshot_" + hashlib.sha256(snapshot_id.encode()).hexdigest()[:24]
         native = lance.dataset(str(self.root / "chunks.lance"))
-        if tag not in native.tags.list():
-            native.tags.create(tag, version)
+        native.tags.create(tag, version)
         return version, column, tag
+
+    def open_snapshot(self, version: int, column: str) -> SharedVectorSnapshot:
+        table = self.db.open_table("chunks")
+        table.checkout(version)
+        if column not in table.schema.names:
+            raise ValueError("Shared snapshot membership is missing")
+        return SharedVectorSnapshot(table, column)
 
     def search(
         self,
@@ -175,15 +225,44 @@ class SharedVectors:
         column: str,
         limit: int,
     ) -> list[tuple[int, float, float, str]]:
-        table = self.db.open_table("chunks")
-        table.checkout(version)
+        snapshot = self.open_snapshot(version, column)
+        try:
+            return snapshot.search(
+                query,
+                vector=provider.embed_query(query),
+                config=config,
+                limit=limit,
+            )
+        finally:
+            snapshot.close()
+
+
+class SharedVectorSnapshot:
+    def __init__(self, table: Any, column: str) -> None:
+        self._table = table
+        self._column = column
+
+    def close(self) -> None:
+        self._table = None
+
+    def search(
+        self,
+        query: str,
+        *,
+        vector: np.ndarray,
+        config: Config,
+        limit: int,
+    ) -> list[tuple[int, float, float, str]]:
+        table = self._table
+        if table is None:
+            raise ValueError("Shared vector snapshot is closed")
         fetch = max(limit, config.fetch_k)
-        vector = np.asarray(provider.embed_query(query), dtype="float32").reshape(-1)
+        vector = np.asarray(vector, dtype="float32").reshape(-1)
         dense = (
             table.search(vector.tolist())
             .metric("cosine")
             .where(
-                f"{column} = true",
+                f"{self._column} = true",
                 prefilter=True,
             )
             .select(["id", "text"])
@@ -195,7 +274,7 @@ class SharedVectors:
             (
                 table.search(lexical_query, query_type="fts")
                 .where(
-                    f"{column} = true",
+                    f"{self._column} = true",
                     prefilter=True,
                 )
                 .select(["id", "text"])

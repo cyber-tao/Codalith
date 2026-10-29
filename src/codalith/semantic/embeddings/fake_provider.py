@@ -44,3 +44,9 @@ class FakeEmbeddingProvider:
 
     def embed_query(self, text: str) -> np.ndarray:
         return self._vector(text)
+
+    def close(self) -> None:
+        pass
+
+    def prepare(self) -> None:
+        pass

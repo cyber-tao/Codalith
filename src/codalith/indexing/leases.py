@@ -25,6 +25,7 @@ class GenerationLeases(Generic[T]):
         self._close = close
         self._lock = threading.Lock()
         self._leases: dict[tuple[str, str], _Lease[T]] = {}
+        self._closed = False
 
     @contextmanager
     def lease(
@@ -36,6 +37,8 @@ class GenerationLeases(Generic[T]):
         key = (corpus_id, generation_id)
         idle: list[T] = []
         with self._lock:
+            if self._closed:
+                raise RuntimeError("Generation resources are closed")
             entry = self._leases.get(key)
             if entry is None:
                 entry = _Lease(open_resource())
@@ -66,7 +69,12 @@ class GenerationLeases(Generic[T]):
 
     def close(self) -> None:
         with self._lock:
-            resources = [entry.resource for entry in self._leases.values()]
-            self._leases.clear()
+            self._closed = True
+            resources: list[T] = []
+            for key, entry in list(self._leases.items()):
+                entry.retired = True
+                if entry.users == 0:
+                    del self._leases[key]
+                    resources.append(entry.resource)
         for resource in resources:
             self._close(resource)

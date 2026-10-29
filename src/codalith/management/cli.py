@@ -45,14 +45,28 @@ def add_arguments(subparsers: argparse._SubParsersAction[Any]) -> None:
         action.add_argument("job_id")
     space = commands.add_parser("space")
     space.add_argument("--database-id")
+    space.add_argument("--refresh", action="store_true")
+    commands.add_parser("upgrade-storage", help="Back up and explicitly upgrade the shared catalog")
     gc = commands.add_parser("gc")
     gc.add_argument("--dry-run", action="store_true", required=True)
 
 
 def run(args: argparse.Namespace, registry: CorpusRegistry, policy: SourcePolicy) -> int:
-    service = ManagementService(registry, policy, ManagementConfig.from_registry(registry.path))
-    command = args.management_command
     result: Any
+    command = args.management_command
+    config = ManagementConfig.from_registry(registry.path)
+    if command == "upgrade-storage":
+        from codalith.indexing.shared import SharedPool
+
+        if not config.enabled:
+            raise ValueError("Management is disabled")
+        root = config.storage_root / "shared"
+        if not (root / "catalog.sqlite").is_file():
+            raise IndexBuildError("No shared catalog exists to upgrade")
+        result = SharedPool(root, policy).upgrade()
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return 0
+    service = ManagementService(registry, policy, config)
     if command == "config":
         result = service.public_config()
     elif command == "repositories":
@@ -96,7 +110,7 @@ def run(args: argparse.Namespace, registry: CorpusRegistry, policy: SourcePolicy
     elif command in {"resume", "retry"}:
         result = service.resume(args.job_id)
     elif command == "space":
-        result = service.space(args.database_id)
+        result = service.space(args.database_id, refresh=args.refresh)
     elif command == "gc":
         from codalith.indexing.shared import SharedPool
 

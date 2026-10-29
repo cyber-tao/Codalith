@@ -6,7 +6,8 @@ import builtins
 import json
 import sqlite3
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -39,10 +40,15 @@ class Catalog:
                 ) WITHOUT ROWID;
             """)
 
-    def connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self.path, timeout=30)
-        connection.execute("PRAGMA busy_timeout=30000")
-        return connection
+        try:
+            connection.execute("PRAGMA busy_timeout=30000")
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def get(self, kind: str, identifier: str) -> dict[str, Any]:
         with self.connect() as connection:
@@ -181,14 +187,27 @@ class Catalog:
             )
             return True
 
-    def events(self, job_id: str, after_seq: int = 0) -> builtins.list[dict[str, Any]]:
+    def events(
+        self, job_id: str, after_seq: int | None = None, *, tail: int | None = None
+    ) -> builtins.list[dict[str, Any]]:
+        if tail is not None and (after_seq is not None or not 1 <= tail <= 500):
+            raise ValueError("Event tail must be between 1 and 500 and cannot use after_seq")
+        if after_seq is not None and after_seq < 0:
+            raise ValueError("Event after_seq cannot be negative")
         self.get("job", job_id)
         with self.connect() as connection:
-            rows = connection.execute(
-                "SELECT seq,at,type,payload FROM events WHERE job_id=? AND seq>? "
-                "ORDER BY seq LIMIT 500",
-                (job_id, after_seq),
-            ).fetchall()
+            if tail is not None:
+                rows = connection.execute(
+                    "SELECT seq,at,type,payload FROM events WHERE job_id=? "
+                    "ORDER BY seq DESC LIMIT ?",
+                    (job_id, tail),
+                ).fetchall()[::-1]
+            else:
+                rows = connection.execute(
+                    "SELECT seq,at,type,payload FROM events WHERE job_id=? AND seq>? "
+                    "ORDER BY seq LIMIT 500",
+                    (job_id, after_seq or 0),
+                ).fetchall()
         return [
             {
                 "seq": row[0],

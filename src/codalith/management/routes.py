@@ -122,7 +122,12 @@ def management_routes(service: ManagementService) -> list[BaseRoute]:
                 lambda: service.create_database(data.name, data.profile_id, data.repo_id)
             )
         if "database_id" in parameters:
-            return await call(lambda: service.space(parameters["database_id"]))
+            refresh = request.query_params.get("refresh", "false").lower()
+            if refresh not in {"true", "false"}:
+                raise ValueError("Space refresh must be true or false")
+            return await call(
+                lambda: service.space(parameters["database_id"], refresh=refresh == "true")
+            )
         if path in {"plans", "build-plans"}:
             data = await body(request, PlanInput)
             legacy = data.legacy_generation_id or data.legacy_generation
@@ -136,9 +141,15 @@ def management_routes(service: ManagementService) -> list[BaseRoute]:
             return await call(lambda: service.create_job(data.plan_id, data.idempotency_key))
         job_id = parameters["job_id"]
         if path.endswith("/events"):
+            after = request.query_params.get("after_seq")
+            tail = request.query_params.get("tail")
             return {
-                "items": service.catalog.events(
-                    job_id, int(request.query_params.get("after_seq", "0"))
+                "items": await call(
+                    lambda: service.catalog.events(
+                        job_id,
+                        int(after) if after is not None else None,
+                        tail=int(tail) if tail is not None else None,
+                    )
                 )
             }
         if path.endswith("/cancel"):

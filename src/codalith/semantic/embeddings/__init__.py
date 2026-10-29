@@ -35,6 +35,12 @@ class EmbeddingProvider(Protocol):
     def embed_query(self, text: str) -> np.ndarray:
         """Embed a single query. Returns a ``(dim,)`` float32 array."""
 
+    def prepare(self) -> None:
+        """Initialize lazy resources before sharing the provider between query workers."""
+
+    def close(self) -> None:
+        """Release initialized model or client resources without loading them."""
+
 
 def get_provider(config: Config) -> EmbeddingProvider:
     """Construct the provider named by ``config.provider``; heavy backends import lazily."""

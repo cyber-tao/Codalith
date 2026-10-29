@@ -64,6 +64,7 @@ def write_structure(
     progress: Callable[[str], None] | None = None,
     sources: Iterable[tuple[str, bytes]] | None = None,
     extract: Callable[[str, str], ExtractionResult] | None = None,
+    fact_staging: bool = False,
 ) -> StructureSummary:
     """Extract every selected source file of ``corpus`` into a new SQLite file."""
 
@@ -77,7 +78,8 @@ def write_structure(
         connection.execute("PRAGMA synchronous = OFF")
         connection.execute("PRAGMA temp_store = FILE")
         connection.executescript(SCHEMA_SQL)
-        _create_symbol_search(connection)
+        if not fact_staging:
+            _create_symbol_search(connection)
         _create_resolution_tables(connection)
         with connection:
             connection.execute(
@@ -228,13 +230,15 @@ def write_structure(
                     ),
                 )
             _resolve_pending(connection)
-            connection.executescript(INDEX_SQL)
-            _populate_symbol_search(connection, retrieval_profile(corpus.adapter))
+            if not fact_staging:
+                connection.executescript(INDEX_SQL)
+                _populate_symbol_search(connection, retrieval_profile(corpus.adapter))
         result = connection.execute("PRAGMA integrity_check").fetchone()
         if result is None or result[0] != "ok":
             raise IndexBuildError(f"SQLite integrity check failed: {result}")
         counts = count_structure_rows(connection)
-        connection.execute("VACUUM")
+        if not fact_staging:
+            connection.execute("VACUUM")
     finally:
         connection.close()
     return StructureSummary(counts, fingerprint.hexdigest(), warnings.result())

@@ -115,3 +115,9 @@ class FastEmbedProvider:
     def embed_query(self, text: str) -> np.ndarray:
         vec = next(iter(self._model.query_embed([text])))
         return np.asarray(vec, dtype="float32")
+
+    def close(self) -> None:
+        self.__dict__.pop("_model", None)
+
+    def prepare(self) -> None:
+        _ = self._model

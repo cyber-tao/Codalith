@@ -16,7 +16,8 @@ import time
 import uuid
 from collections import deque
 from collections.abc import Callable
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, closing
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 from typing import IO, Any
@@ -111,6 +112,11 @@ class ManagementService:
         self._process: subprocess.Popen[bytes] | None = None
         self._worker_lease: AbstractContextManager[None] | None = None
         self.worker_error: str | None = None
+        self._space_condition = threading.Condition()
+        self._space_cache: dict[str, Any] | None = None
+        self._space_revision: tuple[int, str | None] | None = None
+        self._space_refreshing = False
+        self._space_error: BaseException | None = None
 
     def public_config(self) -> dict[str, Any]:
         return {
@@ -145,17 +151,55 @@ class ManagementService:
                 message = message.replace(value, "[redacted]")
         return message[:4000]
 
-    def space(self, database_id: str | None = None) -> dict[str, Any]:
-        from codalith.indexing.shared import SharedPool
-
+    def space(
+        self, database_id: str | None = None, *, refresh: bool = False
+    ) -> dict[str, Any]:
         if database_id is not None:
             self.catalog.get("database", database_id)
+        with self._space_condition:
+            while self._space_refreshing:
+                self._space_condition.wait()
+                if self._space_error is not None:
+                    raise self._space_error
+                refresh = False
+            revision = self._space_catalog_revision()
+            if self._space_cache is not None and self._space_revision == revision and not refresh:
+                return deepcopy(self._space_cache)
+            self._space_refreshing = True
+            self._space_error = None
+        try:
+            result = self._measure_space()
+            result["measured_at"] = timestamp()
+            with self._space_condition:
+                self._space_cache = result
+                self._space_revision = revision
+            return deepcopy(result)
+        except BaseException as exc:
+            with self._space_condition:
+                self._space_error = exc
+            raise
+        finally:
+            with self._space_condition:
+                self._space_refreshing = False
+                self._space_condition.notify_all()
+
+    def _space_catalog_revision(self) -> tuple[int, str | None]:
+        path = self.config.storage_root / "shared" / "catalog.sqlite"
+        if not path.exists():
+            return (0, None)
+        with closing(sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)) as connection:
+            row = connection.execute("SELECT count(*),max(created_at) FROM snapshots").fetchone()
+        return int(row[0]), row[1]
+
+    def _measure_space(self) -> dict[str, Any]:
+        from codalith.indexing.shared import SharedPool
+
         pool = SharedPool(self.config.storage_root / "shared", self.policy)
         values = pool.storage_stats()
         structure_bytes = mapping_bytes = None
         sqlite_index_bytes = 0
         try:
-            with sqlite3.connect(f"{pool.catalog.as_uri()}?mode=ro", uri=True) as connection:
+            with closing(sqlite3.connect(f"{pool.catalog.as_uri()}?mode=ro", uri=True)) as connection:
                 sizes = connection.execute(
                     "SELECT d.name,m.type,sum(d.pgsize) FROM dbstat d "
                     "LEFT JOIN sqlite_master m ON m.name=d.name GROUP BY d.name,m.type"

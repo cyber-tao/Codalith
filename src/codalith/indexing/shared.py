@@ -10,10 +10,12 @@ import sqlite3
 import subprocess
 import tempfile
 from collections.abc import Callable, Generator, Iterator
+from contextlib import closing, contextmanager
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, Any, Protocol, cast
+from uuid import uuid4
 
 import numpy as np
 
@@ -24,6 +26,7 @@ from codalith.corpus.generations import (
     Artifact,
     GenerationRepository,
     IndexManifest,
+    fsync_directory,
     sha256_file,
     source_selection_hash,
 )
@@ -33,6 +36,7 @@ from codalith.corpus.source_reader import FileCatalog, SourceReader, SourceSlice
 from codalith.corpus.uris import source_uri
 from codalith.errors import IndexBuildError, IndexInvalidError, RetrievalError, SourceReadError
 from codalith.indexing.builder import build_lock
+from codalith.indexing.leases import GenerationLeases
 from codalith.indexing.semantic import SemanticBackend, SemanticHit, engine_config
 from codalith.indexing.structure.store import StructureIndex, _escape_like
 from codalith.indexing.structure.writer import write_structure
@@ -49,14 +53,16 @@ from codalith.query.service import QueryService
 from codalith.semantic import ENGINE_VERSION
 from codalith.semantic.chunking import chunk_file
 from codalith.semantic.config import Config
-from codalith.semantic.embeddings import get_provider
+from codalith.semantic.embeddings import EmbeddingProvider, get_provider
 from codalith.semantic.indexer import has_indexable_text
-from codalith.semantic.shared import SharedVectors
+from codalith.semantic.shared import SharedVectors, SharedVectorSnapshot
 from codalith.semantic.types import Chunk
 
 _TABLES = ("files", "symbols", "references", "module_dependencies")
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 _VECTOR_FLUSH_ROWS = 1_024
+_SQL_BATCH_ROWS = 400
+_ANALYZE_ROWS = 1_000
 Progress = Callable[[dict[str, object]], None]
 
 
@@ -130,7 +136,21 @@ class SharedPool:
         self.catalog = self.root / "catalog.sqlite"
         self.source_git = self.root / "sources.git"
         self.root.mkdir(parents=True, exist_ok=True)
-        with self._connect() as connection:
+        if self.catalog.is_file():
+            _ = self.schema_version
+            return
+        with build_lock(self.root):
+            if self.catalog.is_file():
+                _ = self.schema_version
+                return
+            with tempfile.TemporaryDirectory(prefix=".catalog-init-", dir=self.root) as temporary:
+                staged_catalog = Path(temporary) / "catalog.sqlite"
+                self._initialize(staged_catalog)
+                os.replace(staged_catalog, self.catalog)
+                fsync_directory(self.root)
+
+    def _initialize(self, catalog: Path) -> None:
+        with closing(sqlite3.connect(catalog)) as connection, connection:
             connection.executescript("""
                 PRAGMA journal_mode=WAL;
                 CREATE TABLE IF NOT EXISTS pool_metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL);
@@ -161,24 +181,89 @@ class SharedPool:
                 CREATE INDEX IF NOT EXISTS occurrences_lookup
                     ON occurrences(snapshot_id,chunk_id);
             """)
+            self._upgrade_schema(connection)
+            connection.execute(
+                "INSERT INTO pool_metadata VALUES('schema',?)", (str(_SCHEMA_VERSION),)
+            )
+
+    @contextmanager
+    def _connect(self, *, readonly: bool = False) -> Iterator[sqlite3.Connection]:
+        location = self.catalog.as_uri() + "?mode=ro" if readonly else str(self.catalog)
+        connection = sqlite3.connect(
+            location, uri=readonly, timeout=60, check_same_thread=False
+        )
+        connection.row_factory = sqlite3.Row
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
+
+    @property
+    def schema_version(self) -> int:
+        with self._connect(readonly=True) as connection:
             row = connection.execute(
                 "SELECT value FROM pool_metadata WHERE key='schema'"
             ).fetchone()
-            if row is not None and row[0] != str(_SCHEMA_VERSION):
-                raise IndexInvalidError("Unsupported shared pool schema")
-            connection.execute(
-                "INSERT OR IGNORE INTO pool_metadata VALUES('schema',?)", (str(_SCHEMA_VERSION),)
-            )
+        if row is None or row[0] not in {"1", str(_SCHEMA_VERSION)}:
+            raise IndexInvalidError("Unsupported shared pool schema")
+        return int(row[0])
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.catalog, timeout=60, check_same_thread=False)
-        connection.row_factory = sqlite3.Row
-        return connection
+    def upgrade(self) -> dict[str, object]:
+        with build_lock(self.root):
+            previous = self.schema_version
+            if previous == _SCHEMA_VERSION:
+                return {
+                    "previous_version": previous,
+                    "schema_version": _SCHEMA_VERSION,
+                    "backup_path": None,
+                }
+            backups = self.root / "backups"
+            backups.mkdir(exist_ok=True)
+            backup = backups / f"catalog-v{previous}-{uuid4().hex}.sqlite"
+            with self._connect() as connection:
+                with closing(sqlite3.connect(backup)) as destination:
+                    connection.backup(destination)
+                connection.execute("BEGIN IMMEDIATE")
+                self._upgrade_schema(connection)
+                connection.execute(
+                    "UPDATE pool_metadata SET value=? WHERE key='schema'",
+                    (str(_SCHEMA_VERSION),),
+                )
+                connection.execute("ANALYZE")
+            return {
+                "previous_version": previous,
+                "schema_version": _SCHEMA_VERSION,
+                "backup_path": str(backup),
+            }
+
+    @staticmethod
+    def _upgrade_schema(connection: sqlite3.Connection) -> None:
+        connection.execute(
+            "CREATE TABLE source_blob_map("
+            "object_format TEXT NOT NULL,source_oid TEXT NOT NULL,"
+            "sha256 TEXT NOT NULL,git_oid TEXT NOT NULL,size_bytes INTEGER NOT NULL,"
+            "PRIMARY KEY(object_format,source_oid))"
+        )
+        connection.execute(
+            "INSERT INTO source_blob_map "
+            "SELECT 'sha1',git_oid,sha256,git_oid,size_bytes FROM source_objects"
+        )
+        for table in ("files", "symbols"):
+            if connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                (f"facts_{table}",),
+            ).fetchone():
+                connection.execute(
+                    f"CREATE INDEX facts_{table}_path_binary ON facts_{table}(path COLLATE BINARY)"
+                )
+
+    @staticmethod
+    def _analyze(connection: sqlite3.Connection) -> None:
+        connection.execute(f"PRAGMA analysis_limit={_ANALYZE_ROWS}")
+        connection.execute("ANALYZE")
 
     def storage_stats(self) -> dict[str, int]:
-        def size(path: Path) -> int:
-            return sum(item.stat().st_size for item in path.rglob("*") if item.is_file())
-
         with self._connect() as connection:
             unique_source = int(
                 connection.execute(
@@ -195,20 +280,29 @@ class SharedPool:
             unique_chunks = int(
                 connection.execute("SELECT count(*) FROM chunks WHERE stored=1").fetchone()[0]
             )
-        semantic_root = self.root / "semantic"
-        index_bytes = sum(
-            item.stat().st_size
-            for item in semantic_root.rglob("*")
-            if item.is_file() and "_indices" in item.parts
-        )
+        physical = source_bytes = semantic_bytes = index_bytes = catalog_bytes = 0
+        for directory, _, names in os.walk(self.root):
+            relative = Path(directory).relative_to(self.root)
+            for name in names:
+                try:
+                    size = (Path(directory) / name).stat().st_size
+                except FileNotFoundError:
+                    continue
+                physical += size
+                if relative.parts and relative.parts[0] == "sources.git":
+                    source_bytes += size
+                if relative.parts and relative.parts[0] == "semantic":
+                    semantic_bytes += size
+                    if "_indices" in relative.parts:
+                        index_bytes += size
+                if not relative.parts and name.startswith("catalog.sqlite"):
+                    catalog_bytes += size
         return {
-            "physical_bytes": size(self.root),
-            "source_physical_bytes": size(self.source_git),
-            "semantic_physical_bytes": size(semantic_root),
+            "physical_bytes": physical,
+            "source_physical_bytes": source_bytes,
+            "semantic_physical_bytes": semantic_bytes,
             "index_physical_bytes": index_bytes,
-            "catalog_physical_bytes": sum(
-                p.stat().st_size for p in self.root.glob("catalog.sqlite*") if p.is_file()
-            ),
+            "catalog_physical_bytes": catalog_bytes,
             "source_unique_logical_bytes": unique_source,
             "source_all_versions_logical_bytes": logical_source,
             "unique_vectors": unique_chunks,
@@ -307,6 +401,11 @@ class SharedPool:
                 )
 
         with build_lock(self.root):
+            if self.schema_version != _SCHEMA_VERSION:
+                raise IndexBuildError(
+                    "Shared pool requires an explicit schema upgrade; "
+                    "run codalith management upgrade-storage"
+                )
             return self._build(
                 repository,
                 commit,
@@ -494,14 +593,15 @@ class SharedPool:
                     }
                     for name in ("symbols", "references", "module_dependencies"):
                         object_keys = []
+                        object_rows = []
                         for observation in getattr(extraction, name):
                             body = _json(asdict(observation))
                             object_key = hashlib.sha256(body.encode()).hexdigest()
-                            connection.execute(
-                                "INSERT OR IGNORE INTO extraction_objects VALUES(?,?)",
-                                (object_key, body),
-                            )
+                            object_rows.append((object_key, body))
                             object_keys.append(object_key)
+                        connection.executemany(
+                            "INSERT OR IGNORE INTO extraction_objects VALUES(?,?)", object_rows
+                        )
                         payload[name] = object_keys
                     connection.execute(
                         "INSERT INTO extraction_cache VALUES(?,?)", (key, _json(payload))
@@ -510,19 +610,31 @@ class SharedPool:
                     statistics["reused_parses"] += 1
                     value = json.loads(cached[0])
                     observations: dict[str, list[dict[str, Any]]] = {}
+                    object_keys = list(dict.fromkeys(
+                        object_key
+                        for name in ("symbols", "references", "module_dependencies")
+                        for object_key in value[name]
+                        if isinstance(object_key, str)
+                    ))
+                    objects: dict[str, dict[str, Any]] = {}
+                    for start in range(0, len(object_keys), _SQL_BATCH_ROWS):
+                        batch = object_keys[start : start + _SQL_BATCH_ROWS]
+                        placeholders = ",".join("?" for _ in batch)
+                        objects.update(
+                            (row[0], json.loads(row[1]))
+                            for row in connection.execute(
+                                "SELECT key,payload FROM extraction_objects "
+                                f"WHERE key IN ({placeholders})", batch
+                            )
+                        )
                     for name in ("symbols", "references", "module_dependencies"):
                         if value[name] and isinstance(value[name][0], dict):
                             observations[name] = value[name]
                             continue
-                        observations[name] = [
-                            json.loads(
-                                connection.execute(
-                                    "SELECT payload FROM extraction_objects WHERE key=?",
-                                    (object_key,),
-                                ).fetchone()[0]
-                            )
-                            for object_key in value[name]
-                        ]
+                        try:
+                            observations[name] = [objects[key] for key in value[name]]
+                        except KeyError as exc:
+                            raise IndexInvalidError("Cached extraction object is missing") from exc
                     extraction = ExtractionResult(
                         language=value["language"],
                         symbols=tuple(SymbolObservation(**v) for v in observations["symbols"]),
@@ -546,6 +658,7 @@ class SharedPool:
                 staging,
                 sources=self._source_inputs(source_rows, check),
                 extract=extract,
+                fact_staging=True,
             )
             connection.commit()
             counts = self._import_facts(connection, staging, snapshot_id)
@@ -654,6 +767,8 @@ class SharedPool:
                 "INSERT INTO snapshots VALUES(?,?,?,?)",
                 (snapshot_id, target_id, _json(metadata), metadata["created_at"]),
             )
+            self._analyze(connection)
+            check()
             connection.commit()
             try:
                 emit("publish", 1, 1, "Snapshot published")
@@ -681,60 +796,94 @@ class SharedPool:
         check: Callable[[], None],
         emit: Callable[[str, int, int | None, str], None],
     ) -> list[dict[str, Any]]:
-        stream = tempfile.TemporaryFile()
-        rows: list[dict[str, Any]] = []
-        blobs = (
-            cast(Any, repository).read_blobs([item.blob_oid for item in files])
-            if hasattr(repository, "read_blobs")
-            else ((item.blob_oid, repository.read_blob(item.blob_oid)) for item in files)
-        )
-        for number, (item, (_, data)) in enumerate(zip(files, blobs, strict=True), 1):
-            check()
-            path = self.policy.normalize_path(item.path)
-            if len(data) != item.size or len(data) > self.policy.max_file_bytes:
-                raise IndexBuildError(f"Source blob size changed: {path}")
-            if data.startswith(b"version https://git-lfs.github.com/spec/v1"):
-                raise IndexBuildError(f"Unresolved Git LFS source: {path}")
-            oid = hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
-            rows.append(
-                {
-                    "path": path,
-                    "sha256": hashlib.sha256(data).hexdigest(),
-                    "git_oid": oid,
+        unique: dict[str, Any] = {}
+        for item in files:
+            if not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", item.blob_oid):
+                raise IndexBuildError("Expected a complete source Git object ID")
+            if item.blob_oid in unique and unique[item.blob_oid].size != item.size:
+                raise IndexBuildError("Conflicting sizes for one source Git object")
+            unique[item.blob_oid] = item
+        objects: dict[str, dict[str, Any]] = {}
+        with self._connect() as connection:
+            for object_format, oid_length in (("sha1", 40), ("sha256", 64)):
+                oids = [oid for oid in unique if len(oid) == oid_length]
+                for start in range(0, len(oids), _SQL_BATCH_ROWS):
+                    batch = oids[start : start + _SQL_BATCH_ROWS]
+                    placeholders = ",".join("?" for _ in batch)
+                    for row in connection.execute(
+                        "SELECT source_oid,sha256,git_oid,size_bytes FROM source_blob_map "
+                        f"WHERE object_format=? AND source_oid IN ({placeholders})",
+                        (object_format, *batch),
+                    ):
+                        objects[row["source_oid"]] = dict(row)
+        missing = [oid for oid in unique if oid not in objects]
+        new_mappings: list[tuple[str, str, str, str, int]] = []
+        marks: dict[str, int] = {}
+        with tempfile.TemporaryFile() as stream:
+            blobs = (
+                cast(Any, repository).read_blobs(missing)
+                if hasattr(repository, "read_blobs")
+                else ((oid, repository.read_blob(oid)) for oid in missing)
+            )
+            emit("source", 0, len(missing) + 1, "Importing missing source objects")
+            for number, (source_oid, (returned_oid, data)) in enumerate(
+                zip(missing, blobs, strict=True), 1
+            ):
+                check()
+                item = unique[source_oid]
+                path = self.policy.normalize_path(item.path)
+                if returned_oid != source_oid or len(data) != item.size:
+                    raise IndexBuildError(f"Source blob identity or size changed: {path}")
+                if len(data) > self.policy.max_file_bytes:
+                    raise IndexBuildError(f"Source blob exceeds byte limit: {path}")
+                if data.startswith(b"version https://git-lfs.github.com/spec/v1"):
+                    raise IndexBuildError(f"Unresolved Git LFS source: {path}")
+                raw_object = b"blob " + str(len(data)).encode() + b"\0" + data
+                managed_oid = hashlib.sha1(raw_object).hexdigest()
+                object_format = "sha1" if len(source_oid) == 40 else "sha256"
+                actual_oid = (
+                    managed_oid if object_format == "sha1" else hashlib.sha256(raw_object).hexdigest()
+                )
+                if actual_oid != source_oid:
+                    raise IndexBuildError(f"Source blob integrity mismatch: {path}")
+                digest = hashlib.sha256(data).hexdigest()
+                objects[source_oid] = {
+                    "sha256": digest,
+                    "git_oid": managed_oid,
                     "size_bytes": len(data),
-                    "mark": number,
                 }
-            )
-            stream.write(f"blob\nmark :{number}\ndata {len(data)}\n".encode())
-            stream.write(data)
-            stream.write(b"\n")
-            emit("source", number, len(files) + 1, path)
-        stream.write(f"commit refs/codalith/snapshots/{snapshot_id}\n".encode())
-        stream.write(b"committer Codalith <codalith@localhost> 0 +0000\ndata 8\nsnapshot\n")
-        stream.write(b"deleteall\n")
-        for row in rows:
-            stream.write(
-                f"M 100644 :{row['mark']} ".encode() + _quoted_git_path(row["path"]) + b"\n"
-            )
-        stream.write(b"\ndone\n")
-        stream.seek(0)
-        try:
+                new_mappings.append((object_format, source_oid, digest, managed_oid, len(data)))
+                marks[source_oid] = number
+                stream.write(f"blob\nmark :{number}\ndata {len(data)}\n".encode())
+                stream.write(data)
+                stream.write(b"\n")
+                emit("source", number, len(missing) + 1, path)
+            rows: list[dict[str, Any]] = []
+            stream.write(f"commit refs/codalith/snapshots/{snapshot_id}\n".encode())
+            stream.write(b"committer Codalith <codalith@localhost> 0 +0000\ndata 8\nsnapshot\n")
+            stream.write(b"deleteall\n")
+            for item in files:
+                check()
+                record = objects[item.blob_oid]
+                if record["size_bytes"] != item.size:
+                    raise IndexBuildError(f"Cached source blob size mismatch: {item.path}")
+                path = self.policy.normalize_path(item.path)
+                rows.append({"path": path, **record})
+                object_ref = (
+                    f":{marks[item.blob_oid]}"
+                    if item.blob_oid in marks else record["git_oid"]
+                )
+                stream.write(
+                    f"M 100644 {object_ref} ".encode() + _quoted_git_path(path) + b"\n"
+                )
+            stream.write(b"\ndone\n")
+            stream.seek(0)
             _git(self.source_git, "fast-import", "--quiet", stdin=stream)
-        finally:
-            stream.close()
-        check()
-        _git(
-            self.source_git,
-            "-c",
-            "pack.threads=1",
-            "-c",
-            "pack.windowMemory=64m",
-            "-c",
-            "pack.deltaCacheSize=32m",
-            "repack",
-            "-ad",
-        )
-        emit("source", len(files) + 1, len(files) + 1, "Managed source objects packed")
+        with self._connect() as connection:
+            connection.executemany(
+                "INSERT INTO source_blob_map VALUES(?,?,?,?,?)", new_mappings
+            )
+        emit("source", len(missing) + 1, len(missing) + 1, "Managed source objects imported")
         return rows
 
     def _source_inputs(
@@ -802,6 +951,11 @@ class SharedPool:
                         f"CREATE INDEX IF NOT EXISTS facts_{table}_{name} "
                         f'ON facts_{table}("{name}"{collation})'
                     )
+                if table in {"files", "symbols"}:
+                    connection.execute(
+                        f"CREATE INDEX IF NOT EXISTS facts_{table}_path_binary "
+                        f"ON facts_{table}(path COLLATE BINARY)"
+                    )
                 if table == "symbols":
                     existed = (
                         connection.execute(
@@ -818,27 +972,42 @@ class SharedPool:
                         connection.execute(
                             "INSERT INTO facts_symbols_search(facts_symbols_search) VALUES('rebuild')"
                         )
-                for row in source.execute(f'SELECT * FROM "{table}"'):
-                    values = list(row)
-                    if table in {"references", "module_dependencies"}:
-                        values[0] = 0
-                    fact_id = _digest([v.hex() if isinstance(v, bytes) else v for v in values])
-                    if table in {"references", "module_dependencies"}:
-                        values[0] = int(fact_id[:15], 16)
-                    placeholders = ",".join("?" for _ in values)
-                    inserted = connection.execute(
-                        f"INSERT OR IGNORE INTO facts_{table}(fact_id,{names}) "
-                        f"VALUES(?,{placeholders})",
-                        (fact_id, *values),
-                    )
-                    if table == "symbols" and inserted.rowcount:
-                        record = dict(zip([name for name, _ in columns], values, strict=True))
+                placeholders = ",".join("?" for _ in columns)
+                insert_sql = (
+                    f"INSERT OR IGNORE INTO facts_{table}(fact_id,{names}) "
+                    f"VALUES(?,{placeholders})"
+                )
+                members_sql = f"INSERT OR IGNORE INTO members_{table} VALUES(?,?)"
+                cursor = source.execute(f'SELECT * FROM "{table}"')
+                while batch := cursor.fetchmany(_SQL_BATCH_ROWS):
+                    records: dict[str, tuple[Any, ...]] = {}
+                    for row in batch:
+                        values = list(row)
+                        if table in {"references", "module_dependencies"}:
+                            values[0] = 0
+                        fact_id = _digest([v.hex() if isinstance(v, bytes) else v for v in values])
+                        if table in {"references", "module_dependencies"}:
+                            values[0] = int(fact_id[:15], 16)
+                        records[fact_id] = (fact_id, *values)
+                    new_symbols: set[str] = set()
+                    if table == "symbols":
+                        fact_ids = tuple(records)
+                        known = {
+                            row[0] for row in connection.execute(
+                                "SELECT fact_id FROM facts_symbols WHERE fact_id IN ("
+                                + ",".join("?" for _ in fact_ids) + ")", fact_ids
+                            )
+                        }
+                        new_symbols = set(fact_ids) - known
+                    connection.executemany(insert_sql, records.values())
+                    if new_symbols:
                         connection.execute(
-                            "INSERT INTO facts_symbols_search(rowid,name,qualified_name) VALUES(?,?,?)",
-                            (inserted.lastrowid, record["name"], record["qualified_name"]),
+                            "INSERT INTO facts_symbols_search(rowid,name,qualified_name) "
+                            "SELECT rowid,name,qualified_name FROM facts_symbols WHERE fact_id IN ("
+                            + ",".join("?" for _ in new_symbols) + ")", tuple(new_symbols)
                         )
-                    connection.execute(
-                        f"INSERT OR IGNORE INTO members_{table} VALUES(?,?)", (snapshot, fact_id)
+                    connection.executemany(
+                        members_sql, ((snapshot, fact_id) for fact_id in records)
                     )
                 counts[table] = int(
                     connection.execute(
@@ -1219,24 +1388,33 @@ class SharedPool:
 class SharedStructureIndex(StructureIndex):
     def __init__(self, pool: SharedPool, snapshot: dict[str, Any], corpus: Corpus) -> None:
         connection = sqlite3.connect(
-            pool.catalog.as_uri() + "?mode=ro", uri=True, check_same_thread=False
+            pool.catalog.as_uri() + "?mode=ro",
+            uri=True,
+            check_same_thread=False,
+            isolation_level=None,
         )
-        snapshot_id = snapshot["snapshot_id"]
-        connection.execute("CREATE TEMP TABLE selected_snapshot(id TEXT PRIMARY KEY)")
-        connection.execute("INSERT INTO selected_snapshot VALUES(?)", (snapshot_id,))
-        for table in _TABLES:
-            columns = [
-                row[1]
-                for row in connection.execute(f"PRAGMA table_info(facts_{table})")
-                if row[1] != "fact_id"
-            ]
-            selection = ",".join(f'f."{name}"' for name in columns)
-            connection.execute(
-                f'CREATE TEMP VIEW "{table}" AS SELECT {selection} '
-                f"FROM facts_{table} f JOIN members_{table} m USING(fact_id) "
-                "WHERE m.snapshot_id=(SELECT id FROM selected_snapshot)"
+        try:
+            snapshot_id = snapshot["snapshot_id"]
+            connection.execute("CREATE TEMP TABLE selected_snapshot(id TEXT PRIMARY KEY)")
+            connection.execute("INSERT INTO selected_snapshot VALUES(?)", (snapshot_id,))
+            for table in _TABLES:
+                columns = [
+                    row[1]
+                    for row in connection.execute(f"PRAGMA table_info(facts_{table})")
+                    if row[1] != "fact_id"
+                ]
+                selection = ",".join(f'f."{name}"' for name in columns)
+                connection.execute(
+                    f'CREATE TEMP VIEW "{table}" AS SELECT {selection} '
+                    f"FROM facts_{table} f JOIN members_{table} m USING(fact_id) "
+                    "WHERE m.snapshot_id=(SELECT id FROM selected_snapshot)"
+                )
+            super().__init__(
+                pool.catalog, retrieval_profile(corpus.adapter), connection=connection
             )
-        super().__init__(pool.catalog, retrieval_profile(corpus.adapter), connection=connection)
+        except BaseException:
+            connection.close()
+            raise
 
     def _search_ranked(self, query: str, needed: int, exclude: set[str]) -> list[str]:
         phrase = '"' + query.replace('"', '""') + '"'
@@ -1381,10 +1559,65 @@ class _SharedSources(SourceReader):
         )
 
 
+class _SharedSemanticResource:
+    def __init__(
+        self,
+        config: Config,
+        provider: EmbeddingProvider,
+        snapshot: SharedVectorSnapshot,
+    ) -> None:
+        self.config = config
+        self.provider = provider
+        self.snapshot = snapshot
+
+    def search(self, query: str, limit: int) -> list[tuple[int, float, float, str]]:
+        vector = self.provider.embed_query(query)
+        return self.snapshot.search(query, vector=vector, config=self.config, limit=limit)
+
+    def close(self) -> None:
+        try:
+            self.snapshot.close()
+        finally:
+            self.provider.close()
+
+
 class _SharedSemantic(SemanticBackend):
     def __init__(self, pool: SharedPool, policy: SourcePolicy) -> None:
         super().__init__(policy)
         self.pool = pool
+        self._shared: GenerationLeases[_SharedSemanticResource] = GenerationLeases(
+            _SharedSemanticResource.close
+        )
+
+    def close(self) -> None:
+        try:
+            self._shared.close()
+        finally:
+            super().close()
+
+    def _open_shared(
+        self, corpus: Corpus, generation: ActiveGeneration, item: dict[str, Any]
+    ) -> _SharedSemanticResource:
+        config = engine_config(
+            corpus,
+            generation.semantic_path,
+            self.policy,
+            provider=generation.manifest.embedding_provider,
+            model=generation.manifest.embedding_model,
+        )
+        provider = get_provider(config)
+        try:
+            if str(provider.model_id) != generation.manifest.embedding_model:
+                raise IndexInvalidError("Shared query embedding provenance mismatch")
+            provider.prepare()
+            if provider.dim != item["dimension"]:
+                raise IndexInvalidError("Shared query embedding provenance mismatch")
+            vectors = SharedVectors(config.store_dir, item["dimension"], writable=False)
+            snapshot = vectors.open_snapshot(item["table_version"], item["membership_column"])
+            return _SharedSemanticResource(config, provider, snapshot)
+        except BaseException:
+            provider.close()
+            raise
 
     def search(
         self,
@@ -1397,23 +1630,15 @@ class _SharedSemantic(SemanticBackend):
         item = self.pool.snapshot(corpus.corpus_id)
         if item is None:
             return super().search(corpus, generation, query, limit=limit)
-        config = engine_config(corpus, cast(Path, corpus.semantic_store), self.policy)
+        if item["snapshot_id"] != generation.manifest.generation_id:
+            raise RetrievalError("Shared semantic snapshot does not match the request generation")
         try:
-            provider = get_provider(config)
-            if (
-                str(provider.model_id) != corpus.embedding_model
-                or provider.dim != item["dimension"]
-            ):
-                raise IndexInvalidError("Shared query embedding provenance mismatch")
-            pool = SharedVectors(config.store_dir, item["dimension"], writable=False)
-            ranked = pool.search(
-                query,
-                provider=provider,
-                config=config,
-                version=item["table_version"],
-                column=item["membership_column"],
-                limit=limit,
-            )
+            with self._shared.lease(
+                corpus.corpus_id,
+                generation.manifest.generation_id,
+                lambda: self._open_shared(corpus, generation, item),
+            ) as resource:
+                ranked = resource.search(query, limit)
         except Exception as exc:
             raise RetrievalError(
                 f"Shared semantic search failed: {type(exc).__name__}: {exc}"

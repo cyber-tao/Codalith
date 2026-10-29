@@ -124,3 +124,11 @@ class OpenAIEmbeddingProvider:
         if "qwen3-embedding" in self._model.lower():
             text = f"Instruct: {_QWEN_QUERY_INSTRUCTION}\nQuery: {text}"
         return self._embed_batch([text])[0]
+
+    def close(self) -> None:
+        client = self.__dict__.pop("_client", None)
+        if client is not None:
+            client.close()
+
+    def prepare(self) -> None:
+        _ = self._client
